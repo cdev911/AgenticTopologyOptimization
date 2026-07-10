@@ -64,8 +64,10 @@ def topopt(fem, opt):
     rho_field.x.petsc_vec.array[:] = rho_ini
     rho_min, rho_max = np.zeros(num_elems), np.ones(num_elems)
     rho_min[solid], rho_max[void] = 0.99, 0.01
+    rho_phys_field.name = "density"
+    u_field.name = "displacement"
 
-    xdmf_saver.save(rho_phys_field, 0.0)  # Save initial state
+    xdmf_saver.save([rho_phys_field, u_field], 0.0)  # Save initial state
     if comm.rank == 0:
         print("[info] Saved initial design to XDMF time series.", flush=True)
     save_interval = max(1, opt["max_iter"] // opt["output_interval"])  # Save ~20 time steps during optimization
@@ -116,7 +118,7 @@ def topopt(fem, opt):
         # Save to time series at regular intervals
         saved_this_iter = False
         if opt_iter % save_interval == 0:
-            xdmf_saver.save(rho_phys_field, float(opt_iter))
+            xdmf_saver.save([rho_phys_field, u_field], float(opt_iter))
             saved_this_iter = True
             if comm.rank == 0:
                 print(f"[info] Saved iteration {opt_iter} to XDMF time series.", flush=True)
@@ -133,7 +135,7 @@ def topopt(fem, opt):
 
     # Save final result to time series only if we didn't already save it
     if not final_saved:
-        xdmf_saver.save(rho_phys_field, float(opt_iter))
+        xdmf_saver.save([rho_phys_field, u_field], float(opt_iter))
         if comm.rank == 0:
             print(f"[info] Saved final design (iteration {opt_iter}) to XDMF time series.", flush=True)
     else:
