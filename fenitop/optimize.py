@@ -18,16 +18,6 @@ Reference:
   https://doi.org/10.1007/s00158-024-03818-7
 """
 
-## Parallel programming imports
-import sys
-import ipyparallel as ipp
-from mpi4py import MPI
-
-comm = MPI.COMM_WORLD # MPI communicator
-
-def mpi_print(s):
-    print(f"Rank {comm.rank}: {s}")
-
 import numpy as np
 from mpi4py import MPI
 from scipy import sparse as sparse
@@ -40,12 +30,7 @@ def optimality_criteria(rho, rho_min, rho_max, V, dCdrho, dVdrho, move=0.05):
     comm = MPI.COMM_WORLD
     while ub-lb > 1e-4:
         mid = (lb+ub) / 2.0
-        # print(rho.size, dCdrho.size, dVdrho.size)
-        # mpi_print(f"rho={rho.shape}, rho_max={rho_max.shape}, rho_min={rho_min.shape}, dCdrho={dCdrho.shape}, dVdrho={dVdrho.shape}")
-        # print(np.minimum.reduce([rho*(-dCdrho/(dVdrho+1e-12)/mid)**0.5, rho+move, rho_max]))
-        # sys.exit()
         case1 = np.minimum.reduce([rho*(-dCdrho/(dVdrho+1e-12)/mid)**0.5, rho+move, rho_max])
-        # print(f"case1 = {case1}")
         rho_new = np.maximum.reduce([case1, rho-move, rho_min])
         dV = comm.allreduce(dVdrho@(rho_new-rho), op=MPI.SUM)
         if V + dV > 0:
@@ -59,7 +44,7 @@ def optimality_criteria(rho, rho_min, rho_max, V, dCdrho, dVdrho, move=0.05):
 def mma_optimizer(m, n, opt_iter, xval, xmin, xmax, xold1, xold2, df0dx, fval,
                   dfdx, low, upp, a0=1, a=None, c=None, d=None, move=0.05,
                   asyinit=0.5, asydecr=0.7, asyincr=1.2,
-                  low_bnd=0.002, up_bnd=1.0, albefa=0.1, feps=1e-6):
+                  low_bnd=0.002, up_bnd=1.0, albefa=0.1, feps=1e-6, logger=None):
     """Solution update scheme with the method of moving asymptotes (MMA).
     The algorithm is available in https://doi.org/10.1002/nme.1620240207.
 
@@ -154,13 +139,14 @@ def mma_optimizer(m, n, opt_iter, xval, xmin, xmax, xold1, xold2, df0dx, fval,
 
     # Solve the subproblem with a primal-dual interior-point approach
     x_new = solve_subproblem(m, epsimin, low, upp, alpha, beta, p0, q0,
-                             P_mat, Q_mat, a0, a, b, c, d)
+                             P_mat, Q_mat, a0, a, b, c, d,
+                             logger=logger, opt_iter=opt_iter)
     change = comm.allreduce(np.max(np.abs(x_new-xval), initial=0), op=MPI.MAX)
     return x_new, change, low, upp
 
 
 def solve_subproblem(m, epsimin, low, upp, alpha, beta, p0, q0, P_mat, Q_mat,
-                     a0, a, b, c, d):
+                     a0, a, b, c, d, logger=None, opt_iter=None):
     """Solve the MMA subproblem with a primal-dual interior-point approach.
 
     Minimize:
@@ -215,7 +201,8 @@ def solve_subproblem(m, epsimin, low, upp, alpha, beta, p0, q0, P_mat, Q_mat,
         while res_max > 0.9*eps and newton_iter < 100:  # Newton's method for the search direction
             newton_iter += 1
             if newton_iter == 100 and comm.rank == 0:
-                print("Maximum inner iterations reached in the MMA optimizer", flush=True)
+                msg = f"mma_inner_iteration_cap_reached iteration={opt_iter} newton_iter={newton_iter}"
+                logger.warning(msg) if logger is not None else print(msg, flush=True)
 
             # Evaluate the left-hand side
             p_lambda = p0 + _lambda@P_mat

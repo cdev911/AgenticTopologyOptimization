@@ -17,8 +17,6 @@ Reference:
   Struct Multidisc Optim 67, 140 (2024).
   https://doi.org/10.1007/s00158-024-03818-7
 """
-from pathlib import Path
-
 import numpy as np
 import dolfinx.fem
 import dolfinx.io
@@ -221,12 +219,3 @@ class XDMFTimeSeries:
                     print(f"[info] Created XDMF time series file: {self.filename}")
             rho.name = self.field_name
             xdmf.write_function(rho, t)
-
-
-def export_field(mesh, field, output_path, name):
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with dolfinx.io.XDMFFile(mesh.comm, str(output_path), "w") as xdmf:
-        xdmf.write_mesh(mesh)
-        field.name = name
-        xdmf.write_function(field)

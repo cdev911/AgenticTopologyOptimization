@@ -1,0 +1,10 @@
+{
+  "iterations": 3,
+  "final_compliance": 0.16408072985239497,
+  "final_volume": 0.4000385591370668,
+  "final_objective": 0.0,
+  "grayness": 0.1233776452443211,
+  "output_folder": "/workspace/tmp_fixture_gen",
+  "output_prefix": "convergent_smoke",
+  "initial_density": 0.4
+}

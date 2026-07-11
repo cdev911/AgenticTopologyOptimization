@@ -1,0 +1,11 @@
+2026-07-24 18:58:15,281 INFO Starting topology optimization with output directory /workspace/tmp_fixture_gen
+2026-07-24 18:58:17,068 INFO history {"beta": 1.0, "change": null, "compliance": null, "grayness": null, "initial_density": 0.4, "iteration": 0, "objective": null, "state": "initial", "volume": null}
+2026-07-24 18:58:17,074 INFO Saved initial design to XDMF time series.
+2026-07-24 18:58:17,078 INFO history {"beta": 1.0, "change": 0.09999999999999998, "compliance": 0.22616223700814916, "grayness": 0.0926822701629246, "iteration": 1, "objective": 0.0, "state": "iterate", "time_seconds": 0.0040587919999666155, "volume": 0.39216155139542014}
+2026-07-24 18:58:17,078 INFO iter=1 time=0.004 beta=1.000 compliance=2.261622e-01 volume=0.392162 objective=0.000000e+00 change=1.000000e-01 grayness=0.092682
+2026-07-24 18:58:17,081 INFO history {"beta": 1.0, "change": 0.08089474873166447, "compliance": 0.16742268690974202, "grayness": 0.11514915025779222, "iteration": 2, "objective": 0.0, "state": "iterate", "time_seconds": 0.0026077079999708985, "volume": 0.40048803178151593}
+2026-07-24 18:58:17,081 INFO iter=2 time=0.003 beta=1.000 compliance=1.674227e-01 volume=0.400488 objective=0.000000e+00 change=8.089475e-02 grayness=0.115149
+2026-07-24 18:58:17,084 INFO history {"beta": 1.0, "change": 0.04423493332868389, "compliance": 0.16408072985239497, "grayness": 0.1233776452443211, "iteration": 3, "objective": 0.0, "state": "iterate", "time_seconds": 0.002538541000035366, "volume": 0.4000385591370668}
+2026-07-24 18:58:17,084 INFO iter=3 time=0.003 beta=1.000 compliance=1.640807e-01 volume=0.400039 objective=0.000000e+00 change=4.423493e-02 grayness=0.123378
+2026-07-24 18:58:17,087 INFO Saved final design (iteration 3) to XDMF time series.
+2026-07-24 18:58:17,088 INFO Wrote summary to /workspace/tmp_fixture_gen/convergent_smoke_summary.json
