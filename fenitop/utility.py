@@ -198,9 +198,10 @@ def compare_matrices(array1, array2, precision=12, k=1):
 
 
 class XDMFTimeSeries:
-    def __init__(self, mesh_obj, filename="optimization_history.xdmf"):
+    def __init__(self, mesh_obj, filename="optimization_history.xdmf", field_name="density"):
         self.mesh_obj = mesh_obj
         self.filename = filename
+        self.field_name = field_name
         self.initialized = False
         self.comm = mesh_obj.comm
         self._seen = set()
@@ -218,7 +219,7 @@ class XDMFTimeSeries:
                 self.initialized = True
                 if self.comm.rank == 0:
                     print(f"[info] Created XDMF time series file: {self.filename}")
-            rho.name = "density"
+            rho.name = self.field_name
             xdmf.write_function(rho, t)
 
 
