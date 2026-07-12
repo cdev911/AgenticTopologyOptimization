@@ -5,22 +5,31 @@ decision or hit a checkpoint, we add to it. When a past decision changes, we go 
 and edit the relevant section rather than leaving stale info in place — the Decision
 Log is the only place history is preserved on purpose.
 
-Last updated: 2026-07-25
+Last updated: 2026-07-26
 
 ## 0. Current Status (read this first; update it last, every session)
 
-- **Stage**: Nothing implemented yet — all work so far is spec/design-only.
-- **As of**: 2026-07-25.
-- **Just finished**: all agentic-layer design decisions closed out (§6a) — 3
-  specialist agents (Config Specialist / Solver Operator / Analyst), sequential
-  process, no human-in-the-loop gate, Streamlit UI with free-text chat input only
-  (no form, no JSON-paste escape hatch).
-- **Next action**: Stage 0 bootstrap (§11) — create the OpenAI account/API key,
-  add `crewai` to `pyproject.toml`/`Dockerfile`, wire secrets via `.env` +
-  `docker-compose.yml`. Deliberately deferred by the user for now — not blocked on
-  any open design question.
-- **Nothing else in progress.** No code written for `agentic/` yet; no repo files
-  besides `docs/spec.md` have been touched.
+- **Stage**: Tool Hardening planning complete; implementation has not started.
+  Agentic work is deliberately gated on the tool layer passing Stage TH (§11).
+- **As of**: 2026-07-26.
+- **Just finished**: a full tool/solver audit and the detailed hardening plan in
+  `docs/tool-hardening-plan.md`. The intended Docker suite passed all 59 explicitly
+  invoked tests and real validate→run→analyze smoke paths work, but the audit found
+  contract, filesystem/code-execution, numerical-state, subprocess, transport, and
+  analysis-composition gaps that must be fixed before an LLM can safely operate the
+  tools.
+- **Architecture decisions updated** (§3, §6, §6a): deterministic orchestration
+  replaces the three-agent tool-calling pipeline; solver execution stays in the
+  same image/container but moves to a child process without the API key;
+  clarification is allowed for incomplete/ambiguous requests without adding a
+  pre-run confirmation gate; and `gpt-5.6-terra` replaces the old
+  `gpt-4.1-mini` default.
+- **Next action**: Stage TH-0 (§11 and `docs/tool-hardening-plan.md` §4) —
+  characterize/freeze current numerical behavior, pin the runtime/dependencies,
+  make test discovery unambiguous, and establish fast compliance + mechanism
+  baselines. Do not start `agentic/` yet.
+- **No tool fixes are in progress.** This checkpoint changed planning/docs only;
+  no solver/tool implementation was modified.
 - **If you're an AI assistant picking this up cold**: read this whole file before
   doing anything, then summarize your understanding of current state + proposed
   next step back to the user before acting. See `CLAUDE.md`/`AGENTS.md` at the
@@ -30,9 +39,10 @@ Last updated: 2026-07-25
 
 This is a learning project. The goal is to build an **agentic workflow** where an LLM
 acts as the "brain" that operates a topology-optimization solver as its "hands." The
-topology optimization code (`fenitop`) is not the product — it is one tool the agent
-calls. The product is the agent workflow itself: taking a plain-English structural
-design request, turning it into a valid solver config, running the solve, and
+topology optimization code (`fenitop`) is not the product — it is the trusted tool
+layer the deterministic workflow operates after LLM interpretation. The product is
+the whole workflow: taking a plain-English structural design request, clarifying
+missing physics, turning it into a valid solver config, running the solve, and
 explaining the result back to the user.
 
 Primary use: personal learning + demoing to others. Not a production service, not
@@ -49,7 +59,10 @@ multi-tenant, not optimized for scale.
 - Not optimizing for large-scale or high-throughput solving.
 - Not committing to a single agent framework long-term — CrewAI is the v1 choice for
   learning purposes; the architecture (see §3) keeps the door open to swapping it.
-- Not spending real money beyond an explicit, small, capped budget (see §6).
+- Not choosing the cheapest model at the expense of interpretation/tool-use
+  reliability. This is still a personal demo, so retries and execution remain
+  bounded and usage remains observable, but the original fixed $5/model-cost
+  optimization is no longer an architectural constraint (see §6).
 
 ## 2a. Documentation Philosophy: spec.md vs README.md
 
@@ -71,29 +84,38 @@ describes the whole picture rather than being edited twice.
 
 ## 3. Architecture Overview: Brain vs Hands
 
-- **Hands** — `fenitop/` (existing, unchanged). The domain library: FEM/topology
-  optimization solver, plus `fenitop/tools/` — three plain `dict -> dict` functions
-  (`validate_config_tool`, `run_topopt_tool`, `analyze_results_tool`) that are already
-  framework-agnostic (no CrewAI/LangChain/MCP imports inside the tool functions
-  themselves — only the separate `mcp_server.py` wrapper imports MCP). This layer is
-  the stable contract other layers build on.
+- **Hands** — `fenitop/` (existing; now entering hardening). The domain library:
+  FEM/topology optimization solver, plus `fenitop/tools/` — three framework-agnostic
+  operations (`validate_config`, `run_topopt`, `analyze_results`). The 2026-07-26
+  audit proved the happy path but also proved this is not yet a stable agent-facing
+  contract. Stage TH makes it typed, failure-contained, numerically explicit, and
+  safe before any CrewAI adapter exists.
 - **Brain** — `agentic/` (new, not yet created — see Decision Log 2026-07-25). The
-  CrewAI orchestration layer: agent definitions, task definitions, crew assembly,
-  prompt templates, and the LLM provider config. This is the only place CrewAI is
-  imported, so the domain library stays reusable if the framework ever changes.
+  natural-language interpretation and optional result-explanation layer. It does
+  not decide whether validation/run/analysis happen or hand those deterministic
+  transitions from one LLM agent to another.
+- **Orchestrator** — planned deterministic state machine in `agentic/` (CrewAI Flow
+  where useful, plain typed Python for domain state). It owns:
+  `interpret → clarify-or-compile → validate → launch worker → analyze → explain`.
+  Exact Pydantic objects/manifests move between stages; no LLM retypes a normalized
+  config, output path, or run envelope.
 
 Design principle: `fenitop` should never need to know an agent framework exists.
 `agentic/` depends on `fenitop.tools`, never the other way around.
 
-**Runtime placement (decided 2026-07-25): CrewAI runs inside the same Docker
-container as the dolfinx solver**, not as a separate local process. Reasoning:
-`run_topopt_tool` (and the geometry-check half of `validate_config_tool`) import
-dolfinx, which only exists in the Docker image. Running everything in one container
-means the agent calls the tool functions in-process, directly — no MCP/network
-boundary needed for v1. This was chosen over a split (CrewAI local + dolfinx tools
-reached via the existing MCP server) specifically for demo reliability: fewer moving
-parts that can fail while presenting. The split remains a valid later upgrade if
-agent-code iteration speed becomes a real friction point (see §10).
+**Runtime placement (updated 2026-07-26): one Docker image/container, separate
+processes.** Streamlit/CrewAI and Dolfinx share the pinned image for simple demo
+deployment, but every expensive/native solve runs in a child worker process. The
+parent assigns trusted paths/limits, strips `OPENAI_API_KEY` from the worker
+environment, captures progress, enforces timeout/cancellation, and translates
+exit/signal/crash state into a run manifest. This supersedes the earlier
+same-container/**same-process** decision: Python exception handling cannot contain
+PETSc/MPI native aborts or OOM, and the current solver's stdout would corrupt a
+stdio protocol.
+
+Agent workflow v1 is serial. Existing legacy scripts may still demonstrate MPI,
+but `run_topopt` does not advertise MPI until run IDs, output ownership, and
+rank-zero response behavior have an MPI-specific implementation and test.
 
 Practical implications, not yet done:
 - Add `crewai` to `pyproject.toml` and the `Dockerfile`; one image rebuild needed
@@ -102,158 +124,171 @@ Practical implications, not yet done:
 - Verify the container has outbound internet access to reach api.openai.com.
 - `OPENAI_API_KEY` is supplied to the container via `docker-compose.yml`'s
   `env_file:` pointing at an untracked `.env` file — never baked into the image or
-  committed. `.env` needs adding to `.gitignore` (not yet checked).
+  committed. `.env` needs adding to `.gitignore` (not yet checked). The solver
+  worker receives a sanitized environment without this key.
 
 ## 4. Repository Layout
 
-### Current (as of 2026-07-25)
+### Current (as of 2026-07-26)
 ```
 fenitop/                  # domain library: solver + tools/
-  tools/                  # agent-callable tool layer (validate_config, run_topopt, analyze_results)
+  tools/                  # tool layer under Stage TH (validate_config, run_topopt, analyze_results)
 config/                   # example configs (beam_2d, mechanism_2d)
 scripts/                  # example CLI entry points (config-driven + legacy hardcoded)
 tests/                    # unittest-based, split dolfinx-free vs Docker-only
 results/                  # gitignored solver outputs
 docs/spec.md              # this file
+docs/tool-hardening-plan.md # detailed Stage TH workstreams, risks, and exit gates
 ```
 
 ### Planned addition (not yet created)
 ```
 agentic/
-  agents.py               # Agent definitions
-  tasks.py                # Task definitions
-  crew.py                 # Crew assembly (process type: sequential, see Decision Log)
-  tools_adapter.py         # thin CrewAI Tool wrappers around fenitop.tools.*_tool
-  llm.py                   # LLM provider selection (env-driven)
-  prompts/                 # versioned prompt templates
-tests/agentic/              # contract tests + mocked-LLM integration tests
+  intent.py                # typed ProblemIntent and ready/clarify/unsupported result
+  interpreter.py           # LLM-backed natural-language interpretation only
+  orchestrator.py          # deterministic state machine / CrewAI Flow
+  explainer.py             # optional LLM explanation over deterministic analysis
+  llm.py                   # env-driven, pinned model/provider selection
+  prompts/                 # versioned interpretation/explanation prompts
+tests/agentic/             # mocked-LLM + deterministic-flow integration tests
 ```
 
 Nothing under "Planned addition" exists yet. We create it deliberately, in a later
-checkpoint, once the agent/task design itself is spec'd — not just the folder shell.
+checkpoint, after the Stage TH tool gate passes — not just the folder shell.
 
 ## 5. Tool Contract (the "hands" API)
 
 Source of truth: `fenitop/tools/{validate_config,run_topopt,analyze_results}.py`
 (added in commit `f04f2e4`, 2026-07-25).
 
-- All three tools take and return plain JSON-serializable dicts. Errors never raise —
-  they come back as a structured error envelope (`schema.py`: `ok_envelope` /
-  `error_envelope`, always `status: "ok"|"error"`).
+- All three tools currently take/return plain dicts and normally use a shared
+  `status: "ok"|"error"` envelope.
 - `validate_config_tool`: structural (Pydantic `ConfigModel`) + optional geometry
   checks (real mesh build, facet-matching, rigid-body rank). Returns normalized
   config, warnings, estimated cost.
 - `run_topopt_tool`: always re-validates internally (never trusts the caller already
   did). Enforces a safety cost ceiling (`safety.py`, `num_elements * max_iter`
-  threshold) before running. Never lets a solver exception escape uncaught.
+  threshold) before running and catches exceptions raised inside the main solver
+  call.
 - `analyze_results_tool`: dolfinx/MPI-free. Reads run log + summary + a pre-exported
   `.npz` density grid (written by Tool 2 so Tool 3 never needs mesh reconstruction).
   Produces convergence diagnostics, design-quality flags, plots, and a deterministic
   narrative.
 
-Changes planned before wrapping these for CrewAI (not yet done):
-1. Add a CrewAI `args_schema` per tool, reusing `config_models.py` rather than a raw
-   untyped dict.
-2. Rewrite tool descriptions for an LLM audience ("when should I call this / what do
-   I get back"), current docstrings are dev-oriented.
-3. ~~Add an explicit confirm/estimate-cost step before `run_topopt`~~ — superseded
-   2026-07-25: the crew runs fully autonomously, no human-in-the-loop gate (see
-   §6a). The estimated cost should still be surfaced in the agent's narrative
-   output for transparency, but it does not block execution — the sole guardrail
-   is the existing `safety.py` cost ceiling.
-4. Verify `output_folder`/`output_prefix` handling in `run_topopt_tool` is safe now
-   that an LLM (not just a developer) can populate those strings — check for path
-   traversal.
+**Audit correction (2026-07-26): the “errors never raise” and “stable contract”
+claims were too strong.** Targeted checks found uncaught request/I/O/geometry
+errors; a real CLI solve mixed logs with its JSON stdout; agent-controlled lambda
+strings and paths remain possible; several invalid physical configurations pass;
+PETSc convergence and final-state consistency are not guaranteed; and Tool 3 loses
+config-derived context on its preferred Tool 2 handoff.
+
+The detailed remediation source is `docs/tool-hardening-plan.md`. Its binding
+contract decisions are:
+
+1. **Two capability levels**: a strict `AgentSafeConfig` (physics only, region DSL
+   only) and trusted application-owned run policy (paths, solver profile, limits,
+   timeout, rendering, idempotency). Lambda strings are removed from JSON config
+   loading; hardcoded Python examples may still use internal callables.
+2. **Typed/versioned boundaries**: strict Pydantic requests, structured
+   warnings/errors, response models, and a self-contained `RunManifest`. Every
+   JSON-shaped public request returns a schema-valid envelope; no exception crosses.
+3. **Complete validation**: pure arithmetic rejects unsafe mesh/work sizes before
+   Dolfinx; mesh-backed checks cover supports, loads, springs, passive zones,
+   overlaps, rigid motion, and supported physics.
+4. **Numerical truthfulness**: elasticity/adjoint/filter convergence and finite
+   values are checked; initial/final artifacts and metrics describe one explicit
+   evaluated state; optimizer failure/continuation status is surfaced.
+5. **Contained execution**: fresh path-contained run directories, no agent safety
+   override, idempotent kickoff, serial v1 worker subprocess, timeout/cancellation,
+   sanitized environment without the API key, and atomic lifecycle manifests.
+6. **Clean composition/transports**: Tool 2 emits everything Tool 3 needs; Tool 3
+   never asks an LLM to retype a config/path; stdout is one JSON response; real CLI
+   and MCP integration tests verify framing.
+
+This Stage TH gate blocks any CrewAI wrapper. We do not wrap the current unsafe/raw
+surface and plan to fix it later.
 
 ## 6. Brain: LLM Provider Strategy
 
-**Decision (2026-07-25): OpenAI API, model `gpt-4.1-mini`, $5 prepaid credit,
-auto-recharge OFF.**
+**Decision updated 2026-07-26: OpenAI API, default model `gpt-5.6-terra`,
+environment-configurable and pinned/recorded for reproducible demo runs.**
 
-Why this and not alternatives:
+Why:
+
 - CrewAI (the open-source pip package) has no usage limits or cost of its own — it's
   local orchestration code. All spend risk comes from the LLM API it calls, not from
   CrewAI. (CrewAI's separate hosted "AMP" cloud product, with its own free/paid
   execution tiers, is not something we opted into.)
 - A ChatGPT Plus subscription does **not** include API credits — API billing is
   entirely separate from the consumer subscription.
-- OpenAI's dashboard "spend limit" no longer hard-stops requests (as of early 2026)
-  — it only alerts by email while continuing to bill. The only real hard cap is
-  **prepaid credit with auto-recharge turned off**, which is what we're using.
-- `gpt-4.1-mini` chosen over `gpt-4o-mini` for stronger reasoning/self-correction
-  during the multi-step validate→run→analyze tool-calling loop, at ~3x the token
-  cost ($0.40/$1.60 vs $0.15/$0.60 per 1M tokens). At an estimated ~30k in / 5k out
-  tokens per full demo run, that's roughly $0.02-0.03/run — the $5 cap comfortably
-  covers well over 100 full runs. If cost ever becomes a real constraint, dropping
-  to `gpt-4o-mini` is a one-line config change (see `agentic/llm.py`, planned).
+- The user explicitly prefers a stronger current-generation model over minimizing
+  token cost for this personal project. `gpt-5.6-terra` is the current balanced
+  intelligence/cost candidate rather than the flagship/highest-cost choice. The
+  model will be set through `OPENAI_MODEL`, recorded in each workflow trace, and
+  changed only through config — never hard-wired throughout prompts/tasks.
+- Before the first real agent stage, run the same golden intent/config scenarios
+  against the selected model and one cheaper current alternative. If the exact
+  provider snapshot/alias needed for reproducibility differs from
+  `gpt-5.6-terra`, update this section and §9 rather than silently changing it.
 - Local LLM (Ollama) was considered and deliberately deferred, not rejected — small
   local models are meaningfully less reliable at strict JSON-schema tool-calling and
   multi-step self-correction, which would shift effort into prompt-engineering
   workarounds rather than saving effort. May be added later as a $0/offline fallback
   profile; CrewAI's LiteLLM backend makes this a config change, not a redesign.
 
-Guardrails still to design (not yet implemented):
-- Max tool-call/retry count per crew run, to bound spend if the agent loops.
-- Low temperature for the config-authoring step (favor determinism over creativity).
-- Pin exact CrewAI version and model ID in `pyproject.toml` once `agentic/` exists —
-  CrewAI has a history of breaking changes between versions.
+Budget is no longer the architecture driver, but operational bounds still matter:
+pin exact CrewAI/model configuration once implemented; cap interpretation retries;
+use structured outputs and low/non-creative settings for intent extraction; log
+token usage; and never let an LLM retry an expensive solver side effect directly.
+Solver idempotency/resource limits are tool policy, not LLM-cost policy.
 
 ## 6a. Agentic Layer Design: Agents, Tasks, Process
 
-**Decided 2026-07-25:**
+**Decisions updated 2026-07-26:**
 
-- **Agent shape**: three specialist agents, one per tool, not one generalist agent
-  holding all three.
-  - Config Specialist — owns `validate_config`
-  - Solver Operator — owns `run_topopt`
-  - Analyst — owns `analyze_results`
-  Reasoning: matches the existing tool boundaries 1:1, keeps each agent's role/goal
-  narrow (easier to prompt reliably than one agent juggling three concerns), and
-  actually exercises CrewAI's multi-agent coordination — a single generalist agent
-  with three tools is functionally closer to a plain function-calling loop and
-  wouldn't need CrewAI's multi-agent features at all.
-- **Process type**: `Process.sequential`. Fixed validate → run → analyze pipeline,
-  each task's output feeds the next as context. A hierarchical manager-agent setup
-  was considered and rejected for v1: not worth the extra LLM call, cost, and
-  unpredictability when the realistic "analysis found a problem" case can simply be
-  reported to the user rather than auto-retried.
-- **Human-in-the-loop**: **none**. The crew runs fully autonomously,
-  validate → run → analyze without pausing for confirmation. The only guardrail
-  against a runaway/expensive run is the existing cost ceiling in
-  `fenitop/tools/safety.py` (`num_elements * max_iter` threshold) — a conscious
-  tradeoff, not an oversight. This supersedes the "add an explicit confirm step"
-  item originally listed in §5 (see that section's strikethrough note).
-  **Correction (2026-07-25)**: this section originally cited CrewAI's built-in
-  `human_input=True` as "the mechanism we'd use if we ever wanted a gate." That's
-  a blocking terminal `input()` prompt, which doesn't map cleanly onto a Streamlit
-  app (the crew runs inside a web request/button-click, not an interactive
-  terminal). If a gate is ever added later, the real implementation would be a
-  Streamlit-level two-step flow (show the interpreted config, wait for a button
-  click, then proceed) — a UI state machine, not this CrewAI feature.
+- **Orchestration shape**: deterministic state machine, not three agents mapped 1:1
+  to three tools. The fixed path is:
+  `interpret → clarify/unsupported/ready → compile → validate → run worker →
+  analyze → explain`. CrewAI Flow may host the state transitions, but typed Python
+  domain state is authoritative and remains testable without an LLM.
+- **LLM roles**:
+  - Intent Interpreter — the essential LLM step. Produces a typed `ProblemIntent`
+    or a clarification/unsupported result from free text.
+  - Result Explainer — optional LLM step over Tool 3's deterministic evidence.
+    It may improve presentation but cannot change metrics or quality flags.
+  There is no Solver Operator agent. Launching an expensive deterministic function
+  does not need judgment, and an extra agent would add mutation/retry risk.
+- **Exact handoffs**: tools/manifests are passed as Pydantic/Python objects. No task
+  output is reparsed from prose and no LLM is asked to copy a normalized config,
+  filesystem path, safety setting, or prior tool envelope.
+- **Clarification without confirmation**: there is still no approval gate for a
+  ready, supported request, but the interpreter must not invent missing
+  problem-defining physics. It returns one of:
+  - `ready` — enough explicit/safely-derived information to compile the supported
+    problem;
+  - `needs_clarification` — asks focused chat questions and does not solve;
+  - `unsupported` — explains the tool capability mismatch and does not solve.
+  This supersedes the earlier “fully autonomous with accepted
+  semantically-wrong-but-valid risk” posture. Clarification is required-input
+  collection, not a confirm-every-run human gate.
+- **Execution authority**: application code owns run IDs, filesystem roots, solver
+  profiles, timeout/cancellation, idempotency, and resource ceilings. These are not
+  LLM tools/arguments. The worker process never receives the API key (§3, §5).
 - **Interface**: a minimal **Streamlit** web UI, not a CLI. (Gradio was the other
   candidate; Streamlit picked for broader familiarity in data/ML-style demos — this
-  is a low-stakes, easily-reversible pick, same category as the `agentic/` folder
-  name.) Build order matters here: get `agentic/crew.py` working and verified via a
-  plain script/test harness first, then wrap it in Streamlit — the UI is a thin
-  presentation layer on top of the crew, the crew's logic should never depend on it.
+  is a low-stakes, reversible pick.) Build order remains: verify the deterministic
+  orchestrator with a plain harness and mocked LLM before the UI. The UI shows an
+  inspectable event trace (intent, clarification, normalized config, validation,
+  resource estimate, progress, analysis evidence), not hidden chain-of-thought.
+  Long solver work is represented as job state so a Streamlit rerun/refresh does
+  not duplicate it.
 - **Input shape (decided 2026-07-25)**: **free-text chat only**, not a structured
   form and not a hybrid with a JSON-paste escape hatch. The user describes the
-  design problem in plain English; the Config Specialist agent does the full
-  interpretation into a config from scratch — no pre-structured fields. Reasoning:
-  matches §1's stated vision ("plain-English structural design request") and the
-  tool layer's own existing design intent (`regions.py`'s docstring explicitly
-  frames the region DSL as being for "an agent authoring a config from natural
-  language"; `config_models.py` field descriptions are written to double as
-  LLM-facing documentation). A form would leave that design investment unused and
-  shrink the agent's role to orchestration + narration only, undermining the
-  project's actual point.
-  **Named risk, not a defect**: this compounds with the "no human-in-the-loop"
-  decision above. `validate_config` catches structurally invalid configs and the
-  agent self-corrects on those, but it cannot catch a config that is validly
-  formed yet models the *wrong* problem because the agent misread intent — with no
-  confirmation gate, such a run proceeds and the mismatch only surfaces in the
-  final narrative. Accepted for this project's scope; would need revisiting if the
-  demo starts producing confidently-wrong results.
+  problem in plain English; clarification remains chat, not a fallback form.
+  Interpretation targets the smaller `ProblemIntent`, while a deterministic
+  compiler supplies trusted numerical/execution defaults and creates
+  `AgentSafeConfig`. This preserves the natural-language learning goal without
+  asking the model to author PETSc options, paths, or other non-semantic details.
 
 ## 7. Testing Strategy
 
@@ -264,22 +299,28 @@ Existing (unittest-based, already in place):
   smoke runs.
 
 Planned additions for agent-workflow compatibility (not yet implemented):
-- **Contract tests**: feed each tool plausible-but-malformed LLM-shaped input
-  (missing keys, wrong types, hallucinated extra fields) and assert a structured
-  error envelope comes back, never an exception.
-- **Schema introspection tests**: assert each tool's `args_schema` /
-  `model_json_schema()` renders valid JSON Schema consumable by CrewAI/MCP.
-- **Mocked-LLM full-crew integration test**: run the whole crew with a
-  deterministic canned fake LLM (no real API call), so CI can verify pipeline
-  wiring for free on every run.
+- **Tool-hardening suite (blocks agent work)**: contract/schema, generated
+  adversarial JSON, path/security, real geometry, compliance+mechanism numerics,
+  PETSc/optimizer failure injection, subprocess timeout/cancel/crash/idempotency,
+  CLI stdout, actual MCP stdio, artifact integrity, and direct Tool 2→Tool 3
+  composition. Full matrix: `docs/tool-hardening-plan.md` §5–§6.
+- **Test collection guard**: the documented/default command must fail if zero tests
+  are collected (the 2026-07-26 audit found plain `unittest discover` ran zero).
+- **Pinned numerical baselines**: tiny compliance and mechanism results with
+  tolerances, plus measured resource calibration in the pinned container.
+- **Mocked-LLM deterministic-flow integration test**: canned
+  ready/clarification/unsupported interpreter outputs exercise the whole state
+  machine without a real API call or solver duplication.
 - **Golden-scenario smoke test** (manual/occasional, real API call, not in CI): one
-  real `gpt-4.1-mini` run against `beam_2d`, to catch prompt drift over time.
+  real selected-model run across a small set of supported, ambiguous, and
+  unsupported requests, to catch prompt/model drift over time.
 
 ## 8. Reviewer Notes / Backlog (things to come back to)
 
 Flagged during initial planning (2026-07-25), not yet actioned:
-- Observability: enable CrewAI verbose/step logging for demo storytelling (show the
-  agent's reasoning trail, not just the final answer).
+- Observability: show a structured event/evidence trace for demo storytelling
+  (intent, clarification, validation, resource estimate, progress, analysis), not
+  private chain-of-thought or raw verbose reasoning.
 - Confirm `docker-compose.yml` allows outbound internet access from the container
   for the LLM API call.
 - Demo-day reliability: consider caching/recording a known-good run so a live
@@ -291,21 +332,45 @@ Flagged during initial planning (2026-07-25), not yet actioned:
 
 Reverse-chronological. Each entry: date, decision, why, status.
 
+- **2026-07-26** — Tool hardening is a blocking stage before any `agentic/`
+  implementation. The tools have a real tested happy path (59 intended-runtime
+  tests passed) but the audit found executable-string/path capabilities, incomplete
+  validation/exception containment, unverified numerical convergence,
+  inconsistent state/artifacts, stdout transport pollution, and lossy
+  Tool 2→Tool 3 composition. Detailed workstreams and exit gates are in
+  `docs/tool-hardening-plan.md`. Status: decided/planned, not implemented.
+- **2026-07-26** — Replace the 3-agent sequential tool pipeline with deterministic
+  orchestration. The LLM interprets `ProblemIntent` and may explain deterministic
+  analysis; typed application code owns compile→validate→run→analyze and exact
+  handoffs. Reason: tool boundaries are fixed dependencies, not independent
+  judgment tasks; LLM handoffs add mutation/retry risk. Status: decided, not
+  implemented.
+- **2026-07-26** — Keep one Docker image/container for demo simplicity but run each
+  solver invocation in a separate child process, with timeout/cancellation,
+  trusted paths/limits, captured transports, and no API key in the worker.
+  Status: decided, tracked in Stage TH-4.
+- **2026-07-26** — Free-text remains the only UI input, with
+  `ready | needs_clarification | unsupported` interpretation. Clarification for
+  missing/ambiguous physics is allowed and required; there is still no confirmation
+  gate for a ready request. Status: decided, not implemented.
+- **2026-07-26** — Replace the fixed `gpt-4.1-mini` default with current-generation
+  `gpt-5.6-terra`, environment-configurable and recorded/pinned for demo
+  reproducibility. Reliability is prioritized over minimizing token price for this
+  personal project. Status: decided, not implemented; verify with golden scenarios
+  before prompt freeze.
 - **2026-07-25** — Streamlit input is free-text chat only (no structured form, no
   JSON-paste hybrid) — matches §1's vision and the tool layer's existing
-  natural-language design intent. Named, accepted risk: combined with "no
-  human-in-the-loop," a semantically-wrong-but-valid config can run without
-  anyone catching the misinterpretation before the fact. Full reasoning in §6a.
-  Status: decided, not yet implemented.
+  natural-language design intent. Status: input-shape decision retained; its
+  accepted ambiguity risk was superseded 2026-07-26 by required clarification.
 - **2026-07-25** — Agentic layer design: 3 specialist agents (1:1 with the 3
   tools), `Process.sequential`, no human-in-the-loop gate (relies on the existing
   `safety.py` cost ceiling), interface will be a minimal Streamlit UI rather than a
-  CLI. Full reasoning in §6a. Status: decided, not yet implemented (tracked in
-  §11 Stage 1).
+  CLI. Status: three-agent/process/safety portion superseded 2026-07-26;
+  Streamlit/no-confirmation portion retained with clarification.
 - **2026-07-25** — CrewAI runs inside the existing Docker container (same image as
   the dolfinx solver), not as a split local-process setup. See §3 for full
-  reasoning (mainly: fewer moving parts to fail during a live demo). Status:
-  decided, not yet wired into `pyproject.toml`/`Dockerfile`.
+  reasoning. Status: same image/container retained; same-process implication
+  superseded 2026-07-26 by child-process execution.
 - **2026-07-25** — Made explicit that this repo is a demonstration/learning project,
   not a production workflow (§2), and that `README.md` (not `docs/spec.md`) is the
   document responsible for narrating understanding/architecture/reasoning to
@@ -314,56 +379,110 @@ Reverse-chronological. Each entry: date, decision, why, status.
 - **2026-07-25** — Create `docs/spec.md` as the living planning doc for this project.
   Status: done.
 - **2026-07-25** — LLM brain: OpenAI `gpt-4.1-mini`, $5 prepaid cap, auto-recharge
-  off. See §6 for full reasoning. Status: decided, not yet wired into code
-  (`agentic/llm.py` doesn't exist yet).
+  off. Status: model/budget-as-driver decision superseded 2026-07-26; OpenAI
+  provider decision retained.
 - **2026-07-25** — New top-level package `agentic/` will hold all CrewAI
   orchestration code, kept separate from `fenitop/` so the domain library stays
   framework-agnostic. Status: decided; agent/task design now spec'd in §6a, folder
   creation tracked in §11 Stage 1.
 - **2026-07-25** — Confirmed the existing `fenitop/tools/` layer (from commit
   `f04f2e4`) is suitable as-is for wrapping with CrewAI, with the four changes
-  listed in §5. Status: assessed, changes not yet made.
+  listed in §5. Status: superseded by the deeper 2026-07-26 audit; do not wrap
+  before Stage TH passes.
 
 ## 10. Open Questions / Next Checkpoint
 
-Agent shape, process type, human-in-the-loop, interface framework, and input shape
-are all resolved (§6a) — no longer listed here. Remaining opens:
+The hardening architecture and order are decided. The next checkpoint is Stage TH-0
+characterization. Items intentionally resolved by measurement/implementation rather
+than guessed now:
 
-- Exact task descriptions/prompt wording for the three agents — deferred to
-  implementation time (Stage 1, §11 below), not a spec-level decision.
+- Exact independent mesh/DOF/memory/work/time ceilings after measuring the pinned
+  compliance and mechanism baselines. The agent never controls them.
+- Exact trusted PETSc solver profile(s) after numerical convergence tests.
+- Whether component-wise/roller supports and nonzero prescribed displacement are
+  implemented correctly in Stage TH or explicitly rejected for v1. Until then the
+  agent-safe contract advertises only full-vector zero clamps.
+- The exact immutable OpenAI model snapshot/alias after golden intent tests; the
+  current default decision is `gpt-5.6-terra` (§6).
 
-## 11. Implementation Checklist (bootstrap work — decided, not yet done)
+Prompt wording is deliberately deferred until the tool schemas/capabilities pass
+Stage TH; prompts must document the final contract, not today's unsafe surface.
 
-Everything here is already *decided* (see §3, §6, §2a, §6a) — it's pure
-setup/execution work, not a design decision, so it's tracked as a checklist rather
-than mixed into the Decision Log or Open Questions. Check items off in place as
-they're completed.
+## 11. Implementation Checklist
 
-**Stage 0 — environment & secrets** (can happen anytime, blocks nothing else):
-- [ ] Create OpenAI platform account, prepay $5, disable auto-recharge, generate an
-      API key (§6)
-- [ ] Add `.env` to `.gitignore`; create an untracked `.env` (and a committed
-      `.env.example` template) holding `OPENAI_API_KEY=`
-- [ ] Add `crewai` to `pyproject.toml` and the `Dockerfile`; rebuild the image once
-- [ ] Verify the container has outbound internet access to `api.openai.com`
-- [ ] Wire `OPENAI_API_KEY` into the container via `docker-compose.yml`'s
-      `env_file:`
-- [ ] Smoke-test: one throwaway single-agent CrewAI script to confirm the key and
-      billing actually work end to end
+The detailed Stage TH actions, failure matrix, and per-workstream exit criteria are
+in `docs/tool-hardening-plan.md`. This checklist is the high-level handover/status
+index; check items here only when the corresponding plan exit gate passes.
 
-**Stage 1 — agentic/ package build** (blocked on Stage 0; design decided in §6a):
-- [ ] `agentic/tools_adapter.py` — wrap the 3 `fenitop.tools` functions as CrewAI
-      tools
-- [ ] `agentic/agents.py`, `tasks.py`, `crew.py` (3 specialist agents, sequential
-      process, no human-in-the-loop gate)
-- [ ] `tests/agentic/` — contract tests + mocked-LLM integration test (§7)
-- [ ] Verify the crew runs correctly via a plain script/test harness before
-      touching the UI
+**Stage TH — tool hardening** (blocks every agentic stage):
 
-**Stage 2 — Streamlit UI** (blocked on Stage 1 being verified working):
-- [ ] Single free-text chat input (no structured form, no JSON-paste escape hatch —
-      see §6a)
-- [ ] Thin presentation layer only — no crew logic lives in the UI code
+- [ ] **TH-0 Characterization/reproducibility** — pin Dolfinx/dependencies; make
+      zero-test discovery impossible; add fast compliance+mechanism numerical
+      baselines; record runtime/config/contract versions; declare agent v1 serial.
+- [ ] **TH-1 Typed agent-safe contracts** — versioned Pydantic requests/responses;
+      strict discriminated 2D region DSL and named spring model; exact vectors;
+      separate AgentSafeConfig from trusted run policy; migrate reference configs;
+      remove source/path/PETSc/safety capabilities from LLM schema.
+- [ ] **TH-2 Complete validation/resource policy** — finite/physical/cross-field
+      rules; load/support/spring/passive-zone entity checks and overlap/conflict
+      handling; independent pre-mesh memory/DOF ceiling; calibrated trusted work,
+      output, and timeout estimates.
+- [ ] **TH-3 Numerical/state correctness** — PETSc/filter/adjoint convergence and
+      finite checks; explicit MMA/OC failure status; honor initial density; correct
+      iteration-0 and final evaluated state; consistent artifacts/metrics;
+      grayness+binarization naming; cleanup warnings eliminated.
+- [ ] **TH-4 Contained execution** — fixed contained run root/slug IDs; no
+      untrusted deletion/overwrite; idempotent job lifecycle; child solver process
+      without API key; timeout/cancel/crash/orphan handling; atomic manifests;
+      serial-only agent surface.
+- [ ] **TH-5 Total boundaries/transports** — no public exceptions for JSON-shaped
+      input; structured error codes/retryability; tracebacks local only; stderr
+      progress and exactly-one-JSON stdout; real CLI and MCP framing tests.
+- [ ] **TH-6 Manifest-driven analysis** — self-contained verified RunManifest;
+      Tool 3 direct handoff without duplicate config/path; reject incomplete/corrupt
+      runs; constraint/convergence/continuation diagnostics; calibrated,
+      mesh-aware quality heuristics and deterministic narrative.
+- [ ] **TH-7 Documentation/final gate** — capability/physics semantics, lifecycle,
+      artifacts, commands, event trace, README truthfulness, full failure matrix,
+      both end-to-end baselines, and final hardening review documented.
 
-**Stage 3 — documentation**:
-- [ ] Rewrite `README.md` narrative once `agentic/` exists (§2a)
+**Stage 0 — model environment & secrets** (may proceed alongside late Stage TH, but
+does not unblock agent work by itself):
+
+- [ ] Create/configure the OpenAI API account and generate an API key; cost alerts
+      or prepaid limits are optional personal-account policy, not architecture.
+- [ ] Add `.env` to `.gitignore`; create an untracked `.env` and committed
+      `.env.example` containing `OPENAI_API_KEY=` and `OPENAI_MODEL=gpt-5.6-terra`.
+- [ ] Add/pin CrewAI only after its exact deterministic Flow/tool API is verified
+      against the pinned Pydantic/runtime stack; rebuild the image once.
+- [ ] Wire `.env` into the parent application process and prove the Stage TH worker
+      environment does not inherit `OPENAI_API_KEY`.
+- [ ] Verify outbound API access and run a throwaway structured-output smoke test.
+- [ ] Run golden intent scenarios and record/pin the final model ID/config (§6).
+
+**Stage 1 — deterministic `agentic/` build** (blocked on Stage TH + Stage 0):
+
+- [ ] `intent.py` — typed `ProblemIntent` and
+      `ready | needs_clarification | unsupported`.
+- [ ] `interpreter.py` and prompts — LLM interpretation only; structured output,
+      bounded retries, capability-aware clarification.
+- [ ] `orchestrator.py` — deterministic typed state machine/CrewAI Flow; exact
+      compile→validate→worker→analyze handoffs and idempotent resume.
+- [ ] Optional `explainer.py` — explains Tool 3 evidence without changing facts.
+- [ ] `tests/agentic/` — canned interpreter outputs, clarification/resume,
+      unsupported case, no duplicate solve, and full mocked-LLM flow.
+- [ ] Verify via a plain harness before touching Streamlit.
+
+**Stage 2 — Streamlit UI** (blocked on Stage 1):
+
+- [ ] Single free-text chat input; clarification stays in chat; no form/JSON escape
+      hatch and no confirmation gate for `ready`.
+- [ ] Thin UI over orchestrator/job state; refresh/rerun cannot duplicate a solve.
+- [ ] Show structured event/evidence trace and progress/cancel state, not hidden
+      chain-of-thought.
+
+**Stage 3 — documentation/showcase**:
+
+- [ ] Rewrite README narrative once the hardened tools and `agentic/` flow exist.
+- [ ] Add demo scenarios, known capability limits, architecture rationale, and
+      reproducible run/test instructions.
