@@ -1,0 +1,49 @@
+{
+  "baseline_schema_version": "1",
+  "tool_contract_version": "0.1.0",
+  "execution_scope": "serial",
+  "characterized_from_commit": "de06b50b99334f9631be3ca0cf11d5260c004dca",
+  "runtime": {
+    "base_image": "dolfinx/dolfinx@sha256:2ae4bfbc0d9077268880faf04c72750528bee986c94ab223a2c159969bd56fa8",
+    "python": "3.12.3",
+    "dolfinx": "0.11.0.post0",
+    "petsc": "3.25.1",
+    "mpi": "MPICH 5.0.1",
+    "numpy": "2.4.6",
+    "scipy": "1.17.1"
+  },
+  "cases": {
+    "compliance": {
+      "fixture": "smoke_beam_2d.json",
+      "config_sha256": "381040e08cd5856a14e0e4024510c52381fb48cb7c1fde9d0e9e85aa2b8c888b",
+      "problem_type": "minimize_compliance",
+      "iterations": 5,
+      "stop_reason": "max_iterations_reached",
+      "metrics": {
+        "final_compliance": 0.15857966408607072,
+        "final_volume": 0.4000020814522742,
+        "final_objective": 0.0,
+        "grayness": 0.1507128839819919,
+        "final_change": 0.03903293673166053
+      },
+      "relative_tolerance": 0.00005,
+      "absolute_tolerance": 1e-8
+    },
+    "mechanism": {
+      "fixture": "smoke_mechanism_2d.json",
+      "config_sha256": "1352803c19ce7b89bf4b4f772ab929a1506322b958cc81b2d182459fbb93da58",
+      "problem_type": "compliant_mechanism",
+      "iterations": 5,
+      "stop_reason": "max_iterations_reached",
+      "metrics": {
+        "final_compliance": 0.3869788964994092,
+        "final_volume": 0.29610996024381214,
+        "final_objective": -0.011438731917522607,
+        "grayness": 0.2296876995208994,
+        "final_change": 0.04999938428808718
+      },
+      "relative_tolerance": 0.00005,
+      "absolute_tolerance": 1e-8
+    }
+  }
+}

@@ -1,7 +1,7 @@
 # Tool Hardening Plan
 
-Status: planned, not yet implemented  
-Created: 2026-07-26  
+Status: TH-0 complete; TH-1 is next
+Created: 2026-07-26
 Owner/source of truth for status: `docs/spec.md` §0 and §11
 
 ## 1. Purpose and readiness rule
@@ -170,6 +170,20 @@ Exit criteria:
 - One pinned container build runs the complete named suite reproducibly.
 - Zero-test collection is an error.
 - Both problem modes have a fast numerical baseline and expected artifact manifest.
+
+Completion (2026-07-26):
+
+- Pinned the Dolfinx base by digest, the Ubuntu packages installed on top, Python
+  3.12 compatibility, all direct dependencies, and their PyPI dependency closure.
+- Froze the existing envelope as tool contract `0.1.0`; the typed redesign in TH-1
+  will version any incompatible replacement.
+- Added reliable root discovery, serial compliance/mechanism fixtures and
+  tolerance-based references with runtime/config hashes, a uniform-filter
+  characterization, stop-condition characterization, and an expected-failure test
+  for the known ignored-`initial_density` defect.
+- Verified the rebuilt image and all 64 root-discovered tests (one intentional
+  expected failure for the TH-3 `initial_density` fix). Agent workflow execution
+  scope remains serial as declared in `docs/spec.md` §3.
 
 ### TH-1 — Typed, agent-safe contracts
 

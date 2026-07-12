@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools==82.0.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,14 +7,14 @@ name = "fenitop"
 version = "0.1.0"
 description = "FEniCSx-based topology optimization"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.13"
 dependencies = [
-  "numpy",
-  "scipy",
-  "pyvista",
-  "matplotlib",
-  "pydantic>=2",
-  "mcp",
+  "numpy==2.4.6",
+  "scipy==1.17.1",
+  "pyvista==0.48.4",
+  "matplotlib==3.10.9",
+  "pydantic==2.13.4",
+  "mcp==1.28.1",
 ]
 
 [project.scripts]
