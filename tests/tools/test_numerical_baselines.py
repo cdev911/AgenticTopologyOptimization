@@ -115,7 +115,7 @@ class SerialNumericalBaselineTests(unittest.TestCase):
         self.assertLess(result["metrics"]["final_compliance"], 10.0)
         self.assertLess(abs(result["metrics"]["final_volume"] - 0.3), 0.01)
 
-    def test_zero_move_limit_stops_after_one_evaluated_iteration(self):
+    def test_zero_move_limit_is_rejected_before_solver_execution(self):
         from fenitop.tools.run_topopt import run_topopt_tool
 
         config = _load_json("smoke_beam_2d.json")
@@ -123,11 +123,14 @@ class SerialNumericalBaselineTests(unittest.TestCase):
         result = run_topopt_tool(
             {"config": config}, policy=self._policy("smoke_beam_2d")
         )
-        self.assertEqual(result["status"], "ok", result.get("error"))
-        self.assertTrue(result["converged"])
-        self.assertEqual(result["stop_reason"], "tolerance_met")
-        self.assertEqual(result["iterations"], 1)
-        self.assertEqual(result["metrics"]["final_change"], 0.0)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["stage"], "request")
+        self.assertTrue(
+            any(
+                error["path"].endswith("opt.minimize_compliance.move")
+                for error in result["errors"]
+            )
+        )
 
     def test_helmholtz_filter_preserves_a_uniform_density_field(self):
         import numpy as np

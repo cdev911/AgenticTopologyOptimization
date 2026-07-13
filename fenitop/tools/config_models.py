@@ -18,7 +18,7 @@ from pydantic import (
 from fenitop.regions import NoneRegion, RegionSpec, parse_region
 from fenitop.tools.schema import FieldError
 
-CONFIG_SCHEMA_VERSION = "1.0"
+CONFIG_SCHEMA_VERSION = "1.1"
 
 
 def _finite(value):
@@ -32,8 +32,8 @@ FiniteNumber = Annotated[
     AfterValidator(_finite),
 ]
 PositiveFiniteNumber = Annotated[FiniteNumber, Field(gt=0)]
-NonNegativeFiniteNumber = Annotated[FiniteNumber, Field(ge=0)]
-Fraction = Annotated[FiniteNumber, Field(ge=0, le=1)]
+OpenFraction = Annotated[FiniteNumber, Field(gt=0, lt=1)]
+PositiveFraction = Annotated[FiniteNumber, Field(gt=0, le=1)]
 PositiveInt = Annotated[StrictInt, Field(gt=0)]
 Vector2D = tuple[FiniteNumber, FiniteNumber]
 Point2D = tuple[FiniteNumber, FiniteNumber]
@@ -100,7 +100,6 @@ class TractionBC(StrictModel):
     def _bounded_region(cls, value):
         return parse_region(value)
 
-
 class FemModel(StrictModel):
     analysis_type: Literal["plane_strain"] = Field(
         default="plane_strain",
@@ -142,14 +141,14 @@ class MechanismSpring(StrictModel):
 class OptimizationBase(StrictModel):
     max_iter: PositiveInt
     opt_tol: PositiveFiniteNumber = 1e-5
-    vol_frac: Fraction
-    initial_density: Fraction | None = None
+    vol_frac: OpenFraction
+    initial_density: OpenFraction | None = None
     penalty: Annotated[FiniteNumber, Field(ge=1)] = 3.0
-    epsilon: Fraction = 1e-6
+    epsilon: PositiveFraction = 1e-6
     filter_radius: PositiveFiniteNumber
     beta_interval: PositiveInt = 50
     beta_max: PositiveFiniteNumber = 128.0
-    move: Fraction = 0.02
+    move: PositiveFraction = 0.02
     solid_zone: RegionSpec = Field(default_factory=lambda: NoneRegion(op="none"))
     void_zone: RegionSpec = Field(default_factory=lambda: NoneRegion(op="none"))
 
@@ -157,6 +156,14 @@ class OptimizationBase(StrictModel):
     @classmethod
     def _bounded_regions(cls, value):
         return parse_region(value)
+
+    @field_validator("beta_max")
+    @classmethod
+    def _valid_beta_schedule(cls, value):
+        exponent = math.log2(float(value))
+        if value < 1 or not math.isclose(exponent, round(exponent), abs_tol=1e-12):
+            raise ValueError("must be a power of two greater than or equal to 1.")
+        return value
 
 
 class ComplianceOptimization(OptimizationBase):
@@ -194,7 +201,6 @@ class AgentSafeConfig(StrictModel):
                 f"than the domain's minimum extent ({extent:g})."
             )
         return self
-
 
 # Transitional import name used by existing internal callers. It now denotes the
 # strict agent-safe schema; it is not the former lambda/path-capable model.
@@ -318,22 +324,38 @@ def compute_warnings(model: AgentSafeConfig) -> list[str]:
             f"mesh.divisions={model.mesh.divisions} has an axis with fewer than "
             "4 elements; this is unlikely to produce a meaningful topology."
         )
-    element_size = min((x1 - x0) / nx, (y1 - y0) / ny)
-    if model.opt.filter_radius < element_size:
+    hx, hy = (x1 - x0) / nx, (y1 - y0) / ny
+    if model.opt.filter_radius < max(hx, hy):
         warnings.append(
             f"opt.filter_radius={model.opt.filter_radius:g} is smaller than the "
-            f"smallest element size (~{element_size:.3g}); filtering may be ineffective."
+            f"larger element axis ({max(hx, hy):.3g}); filtering may be ineffective "
+            "or directionally inconsistent."
         )
     if model.fem.poisson_ratio < 0:
         warnings.append(
             f"fem.poisson_ratio={model.fem.poisson_ratio} is auxetic; confirm this is intentional."
         )
-    if (
-        model.opt.problem_type == "minimize_compliance"
-        and not model.fem.traction_bcs
-        and all(abs(component) < 1e-12 for component in model.fem.body_force)
-    ):
+    aspect_ratio = max(hx / hy, hy / hx)
+    if aspect_ratio > 5:
         warnings.append(
-            "No traction or body force is present; the compliance optimizer has no external load."
+            f"mesh element aspect ratio is {aspect_ratio:.3g}:1; values above 5:1 "
+            "can reduce accuracy and make filtering anisotropic."
+        )
+    for name, spring in (
+        ("in_spring", getattr(model.opt, "in_spring", None)),
+        ("out_spring", getattr(model.opt, "out_spring", None)),
+    ):
+        if spring is None:
+            continue
+        ratio = float(spring.stiffness) / float(model.fem.young_modulus)
+        if ratio < 1e-5 or ratio > 1:
+            warnings.append(
+                f"opt.{name}.stiffness / fem.young_modulus = {ratio:.3g}; "
+                "confirm the mechanism spring/material scale is intentional."
+            )
+    if model.opt.beta_max > 1 and model.opt.beta_interval > model.opt.max_iter:
+        warnings.append(
+            "opt.beta_interval exceeds opt.max_iter, so Heaviside continuation "
+            "cannot advance beyond beta=1 in this run."
         )
     return warnings

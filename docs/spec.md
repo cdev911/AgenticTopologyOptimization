@@ -9,32 +9,32 @@ Last updated: 2026-07-26
 
 ## 0. Current Status (read this first; update it last, every session)
 
-- **Stage**: Tool Hardening implementation; TH-0 and TH-1 are complete and TH-2 is next.
+- **Stage**: Tool Hardening implementation; TH-0 through TH-2 are complete and TH-3 is next.
   Agentic work remains deliberately gated on the full Stage TH gate (§11).
 - **As of**: 2026-07-26.
-- **Just finished**: TH-1 typed agent-safe contracts. Contract `1.0.0` and config
-  schema `1.0` now use strict Pydantic request/response models, including nested
-  analysis/error/artifact records. `AgentSafeConfig` contains only supported
-  physics; application-owned trusted policies contain paths, solver profiles,
-  rendering, timeouts, and safety authority. The bounded discriminated 2D region
-  DSL is the only serialized geometry language; source-string evaluation is gone.
-  Reference and smoke configs use the new schema and named positive springs. The
-  actual generated MCP input/output schemas are snapshot-tested, including an
-  explicit workaround for MCP 1.28.1's otherwise permissive outer argument model.
-  Tool 3 also resolves every supplied artifact beneath application-owned analysis
-  roots before reading it. Both real smoke solves retain their exact TH-0 metrics.
-  The pinned suite passes all 50 tests (one intentional expected failure for the TH-3
-  `initial_density` defect).
+- **Just finished**: TH-2 semantic/geometry/resource validation. Contract `1.1.0`
+  and config schema `1.1` enforce open volume/initial-density fractions, positive
+  move/epsilon, a meaningful beta schedule, nonzero loads in both modes, and a
+  supported mechanism spring/material scale. Full validation now reports entity
+  counts/bounds and checks every support/load facet, spring node, passive cell,
+  relevant overlap/conflict, required-material neighborhood, and forced-solid
+  volume budget. Pure pre-mesh admission independently caps elements, nodes,
+  displacement DOFs, iterations, solver-weighted work, estimated peak memory,
+  output, and wall time. Two pinned medium serial measurements conservatively
+  validate the estimator and defaults (`tests/fixtures/resource_calibration.json`).
+  Both reference configurations pass full validation and both real smoke solves
+  retain the exact TH-0 metrics. The pinned suite passes all 66 tests (one
+  intentional expected failure for the TH-3 `initial_density` defect).
 - **Architecture decisions updated** (§3, §6, §6a): deterministic orchestration
   replaces the three-agent tool-calling pipeline; solver execution stays in the
   same image/container but moves to a child process without the API key;
   clarification is allowed for incomplete/ambiguous requests without adding a
   pre-run confirmation gate; and `gpt-5.6-terra` replaces the old
   `gpt-4.1-mini` default.
-- **Next action**: Stage TH-2 (§11 and `docs/tool-hardening-plan.md` §4) — complete
-  cross-field and mesh-backed semantic validation for loads, supports, springs,
-  passive zones, and overlaps; add independent pre-mesh memory/DOF/output/work
-  limits; calibrate trusted policy from the pinned cases. Do not start `agentic/`
+- **Next action**: Stage TH-3 (§11 and `docs/tool-hardening-plan.md` §4) —
+  instrument PETSc/filter/adjoint convergence and finite checks, make optimizer
+  failure explicit, honor initial density, and align iteration-zero/final
+  artifacts and metrics to one evaluated-state contract. Do not start `agentic/`
   yet.
 - **If you're an AI assistant picking this up cold**: read this whole file before
   doing anything, then summarize your understanding of current state + proposed
@@ -167,7 +167,7 @@ checkpoint, after the Stage TH tool gate passes — not just the folder shell.
 Source of truth: `fenitop/tools/contracts.py`,
 `fenitop/tools/config_models.py`, and the three tool implementations.
 
-- Public contract version is `1.0.0`; agent-safe config schema is `1.0`. Every
+- Public contract version is `1.1.0`; agent-safe config schema is `1.1`. Every
   request and response is a strict Pydantic model with unknown fields forbidden
   and structured issue records.
 - The LLM-visible inputs are exactly `validate_config(config)`,
@@ -182,8 +182,16 @@ Source of truth: `fenitop/tools/contracts.py`,
   distributed boundary traction, consistent user units, and full-vector zero
   clamps. Nonzero prescribed displacements and component-wise supports are
   rejected for v1.
-- `validate_config_tool` currently performs structural checks plus trusted
-  mesh-backed boundary-facet and rigid-body-rank checks.
+- `validate_config_tool` performs structural/cross-field physics checks,
+  independent pure-arithmetic resource admission, then trusted mesh-backed checks
+  for all support/load/spring/passive entities and their relevant conflicts. Its
+  typed geometry report includes entity counts and 2D bounds.
+- `ResourceLimits` independently bounds elements (250,000), nodes (300,000),
+  displacement DOFs (600,000), iterations (2,000), solver-weighted work
+  (500 million units), estimated peak memory (2,048 MiB), output (1,024 MiB), and
+  wall time (900 s). These defaults are application-owned. Estimates incorporate
+  the selected iterative/direct profile and compliance/mechanism solve count and
+  are calibrated in `tests/fixtures/resource_calibration.json`.
 - `run_topopt_tool` always re-validates and internally compiles safe physics with
   trusted PETSc/output settings. Run paths, identifiers, rendering, timeout, and
   safety overrides cannot be supplied in its public request.
@@ -200,9 +208,10 @@ Source of truth: `fenitop/tools/contracts.py`,
 “stable contract” claims were too strong.** Targeted checks found uncaught
 request/I/O/geometry errors, mixed CLI stdout, executable strings, path authority,
 incomplete physical validation, unverified PETSc convergence/final-state
-consistency, and lossy Tool 2→Tool 3 composition. TH-1 has removed executable
-strings and public execution controls, added typed direct composition, and
-contained Tool 3 reads; the remaining findings are assigned to TH-2 through TH-6.
+consistency, and lossy Tool 2→Tool 3 composition. TH-1 removed executable strings
+and public execution controls, added typed direct composition, and contained Tool
+3 reads; TH-2 completed semantic/resource validation. The remaining findings are
+assigned to TH-3 through TH-6.
 
 The detailed remediation source is `docs/tool-hardening-plan.md`. TH-1 implements
 the first two boundary decisions below; the remaining Stage TH gates still apply:
@@ -317,15 +326,17 @@ Solver idempotency/resource limits are tool policy, not LLM-cost policy.
 Existing (unittest-based, already in place):
 - Dolfinx-free unit tests: bounded region DSL and adversarial source/shape/numeric
   cases, strict agent-safe/config/response contracts, real generated MCP schema
-  snapshots, safety cost estimation, Tool 1 structural checks, narrative
-  generation, and typed Tool 2→Tool 3 handoff against committed fixture logs.
+  snapshots, independently calibrated resource estimates/limits, Tool 1
+  structural/cross-field checks, narrative generation, and typed Tool 2→Tool 3
+  handoff against committed fixture logs.
 - Docker-only tests (need dolfinx/PETSc/MPI): geometry checks, Tool 2 end-to-end
   smoke runs, root-discovered serial compliance/mechanism numerical baselines,
-  filter/stop semantics, config-hash guards, and artifact consistency. One expected
-  failure tracks the known ignored-`initial_density` defect until TH-3.
+  complete support/load/spring/passive-zone entity/conflict checks, filter/stop
+  semantics, config-hash guards, and artifact consistency. One expected failure
+  tracks the known ignored-`initial_density` defect until TH-3.
 - Test entry point: `docker compose run --rm -T fenitop python -m unittest discover -v`.
   `tests/__init__.py` makes nested discovery reliable; zero collection exits 5.
-  Current result: 50 passed with one expected failure. The test count is lower
+  Current result: 66 passed with one expected failure. The test count is lower
   than TH-0 because obsolete legacy permissive-contract tests were replaced rather
   than carried forward.
 
@@ -335,8 +346,9 @@ Planned additions for agent-workflow compatibility (not yet implemented):
   PETSc/optimizer failure injection, subprocess timeout/cancel/crash/idempotency,
   CLI stdout, actual MCP stdio, artifact integrity, and direct Tool 2→Tool 3
   composition. Full matrix: `docs/tool-hardening-plan.md` §5–§6.
-- **Measured resource calibration**: use the pinned numerical cases to choose
-  independent mesh/memory/work/output/timeout ceilings in TH-2.
+- **Measured resource calibration**: completed in TH-2 and frozen in
+  `tests/fixtures/resource_calibration.json`; refresh deliberately if the runtime,
+  estimator, solver profiles, or output state model changes.
 - **Mocked-LLM deterministic-flow integration test**: canned
   ready/clarification/unsupported interpreter outputs exercise the whole state
   machine without a real API call or solver duplication.
@@ -361,6 +373,17 @@ Flagged during initial planning (2026-07-25), not yet actioned:
 
 Reverse-chronological. Each entry: date, decision, why, status.
 
+- **2026-07-26** — TH-2 advances the public contract/config versions to
+  `1.1.0`/`1.1`. Tool 1 now treats absent/zero loads, overlapping tractions,
+  tractions on full clamps, unmatched/overlapping/constrained springs,
+  unmatched/overlapping passive zones, voided required neighborhoods,
+  forced-solid volume infeasibility, and extreme spring/material scaling as hard
+  errors. Overlapping tractions are rejected rather than implicitly summed because
+  the current solver silently keeps the first facet tag. Resource admission uses
+  eight independent application-owned limits and a solver-aware estimate calibrated
+  against fresh medium serial compliance/mechanism runs. Reason: syntactically
+  valid input must still be physically meaningful and bounded before Dolfinx or an
+  expensive solve is reached. Status: implemented and verified.
 - **2026-07-26** — TH-1 replaces contract `0.1.0` with strict contract `1.0.0`
   and config schema `1.0`. Agent requests contain only `AgentSafeConfig` physics;
   trusted Python policies own execution authority. Serialized geometry is the
@@ -439,13 +462,12 @@ Reverse-chronological. Each entry: date, decision, why, status.
 
 ## 10. Open Questions / Next Checkpoint
 
-The hardening architecture and order are decided. The next checkpoint is Stage TH-2
-semantic validation and resource policy. Items intentionally resolved by measurement/
-implementation rather than guessed now:
+The hardening architecture and order are decided. The next checkpoint is Stage
+TH-3 numerical correctness and explicit solver state. Items intentionally resolved
+by measurement/implementation rather than guessed now:
 
-- Exact independent mesh/DOF/memory/work/time ceilings after measuring the pinned
-  compliance and mechanism baselines. The agent never controls them.
-- Exact trusted PETSc solver profile(s) after numerical convergence tests.
+- Whether the current trusted PETSc profiles remain acceptable after TH-3 adds
+  convergence-reason/residual checks and finite-difference sensitivity tests.
 - Component-wise/roller supports and nonzero prescribed displacement are explicitly
   rejected in agent-safe v1. A future implementation must add correct
   lifting/subspace behavior and tests before changing that capability.
@@ -470,7 +492,7 @@ index; check items here only when the corresponding plan exit gate passes.
       strict discriminated 2D region DSL and named spring model; exact vectors;
       separate AgentSafeConfig from trusted run policy; migrate reference configs;
       remove source/path/PETSc/safety capabilities from LLM schema.
-- [ ] **TH-2 Complete validation/resource policy** — finite/physical/cross-field
+- [x] **TH-2 Complete validation/resource policy** — finite/physical/cross-field
       rules; load/support/spring/passive-zone entity checks and overlap/conflict
       handling; independent pre-mesh memory/DOF ceiling; calibrated trusted work,
       output, and timeout estimates.

@@ -1,6 +1,6 @@
 # Tool Hardening Plan
 
-Status: TH-0 and TH-1 complete; TH-2 is next
+Status: TH-0 through TH-2 complete; TH-3 is next
 Created: 2026-07-26
 Owner/source of truth for status: `docs/spec.md` §0 and §11
 
@@ -297,6 +297,31 @@ Exit criteria:
 - Every known bad case in §2 has a stable field-level error.
 - Huge-mesh/one-iteration input is rejected by pure arithmetic.
 - Both supported reference problems pass full mesh-backed validation.
+
+Completion (2026-07-26):
+
+- Advanced the public contract/config versions to `1.1.0`/`1.1` and enforced
+  strict open fractions for target/initial density, positive move/epsilon,
+  power-of-two beta continuation, nonzero loads in both modes, and supported
+  mechanism spring/material scaling.
+- Added pure pre-mesh estimates and independent trusted limits for elements,
+  nodes, displacement DOFs, iterations, solver-weighted work, peak memory, output,
+  and wall time. Tool 1 rejects over-budget configs before geometry; Tool 2 repeats
+  admission before full validation and incorporates its trusted timeout.
+- Calibrated the model in the pinned serial image. Compliance `80x30x10` measured
+  220.7 MiB, 1.125 MiB output, and 2.96 s against estimates of 264.3 MiB,
+  1.378 MiB, and 3.14 s. Mechanism `50x50x10` measured 231.9 MiB, 1.164 MiB
+  output, and 3.57 s against 286.1 MiB, 1.427 MiB, and 3.60 s. The fixture and
+  default limits are regression-tested in `tests/fixtures/resource_calibration.json`.
+- Expanded real-mesh validation to all support/load facets, mechanism spring
+  nodes, and passive-zone cells. It rejects unmatched regions, overlapping
+  tractions, tractions on full clamps, constrained/overlapping springs,
+  solid/void overlap, voided required neighborhoods, and forced-solid volume
+  infeasibility. Successful and failed validation includes an inspectable typed
+  entity-count/bounds report.
+- Verified 66 root-discovered tests (one intentional TH-3 expected failure), full
+  validation of both reference configs, unchanged compliance/mechanism numerical
+  baselines, and refreshed real MCP schema snapshots.
 
 ### TH-3 — Numerical correctness and explicit solver state
 

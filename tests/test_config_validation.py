@@ -215,6 +215,23 @@ class AgentSafeConfigTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             AgentSafeConfig.model_validate(missing)
 
+    def test_rejects_open_fraction_endpoints_and_invalid_beta_schedule(self):
+        from fenitop.tools.config_models import AgentSafeConfig
+
+        mutations = [
+            ("vol_frac_zero", lambda c: c["opt"].update(vol_frac=0)),
+            ("vol_frac_one", lambda c: c["opt"].update(vol_frac=1)),
+            ("initial_density_zero", lambda c: c["opt"].update(initial_density=0)),
+            ("epsilon_zero", lambda c: c["opt"].update(epsilon=0)),
+            ("move_zero", lambda c: c["opt"].update(move=0)),
+            ("beta_not_power_of_two", lambda c: c["opt"].update(beta_max=100)),
+        ]
+        for name, mutate in mutations:
+            config = _load()
+            mutate(config)
+            with self.subTest(name=name), self.assertRaises(ValidationError):
+                AgentSafeConfig.model_validate(config)
+
     def test_compiler_adds_only_trusted_solver_settings(self):
         from fenitop.tools.config_models import compile_solver_config
 
@@ -246,6 +263,10 @@ class ToolContractTests(unittest.TestCase):
             "render_snapshot",
             "allow_large_run",
             "max_complexity",
+            "resource_limits",
+            "max_elements",
+            "max_work_units",
+            "max_peak_memory_mb",
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, config_schema_text)
@@ -274,6 +295,7 @@ class ToolContractTests(unittest.TestCase):
             "render_snapshot": False,
             "allow_large_run": True,
             "max_complexity": 1e30,
+            "resource_limits": {"max_elements": 1},
         }.items():
             with self.subTest(key=key), self.assertRaises(ValidationError):
                 RunTopoptRequest.model_validate({"config": _load(), key: value})
@@ -357,9 +379,132 @@ class SafetyEstimateTests(unittest.TestCase):
         )
         self.assertEqual(
             estimate_cost(
-                mechanism["mesh"], mechanism["opt"]["max_iter"]
+                mechanism["mesh"],
+                mechanism["opt"]["max_iter"],
+                problem_type=mechanism["opt"]["problem_type"],
             )["complexity_score"],
             20_000_000,
+        )
+
+    def test_estimate_has_independent_memory_work_output_and_solver_terms(self):
+        from fenitop.tools.safety import estimate_cost
+
+        beam = _load()
+        mechanism = _load("mechanism_2d")
+        beam_cost = estimate_cost(
+            beam["mesh"],
+            beam["opt"]["max_iter"],
+            problem_type=beam["opt"]["problem_type"],
+        )
+        mechanism_cost = estimate_cost(
+            mechanism["mesh"],
+            mechanism["opt"]["max_iter"],
+            problem_type=mechanism["opt"]["problem_type"],
+        )
+        self.assertEqual(beam_cost["solver_profile"], "iterative")
+        self.assertEqual(mechanism_cost["solver_profile"], "direct")
+        self.assertEqual(beam_cost["linear_solves_per_iteration"], 3)
+        self.assertEqual(mechanism_cost["linear_solves_per_iteration"], 4)
+        for field in (
+            "work_units",
+            "estimated_peak_memory_mb",
+            "estimated_output_mb",
+            "estimated_wall_time_seconds",
+        ):
+            self.assertGreater(beam_cost[field], 0)
+        self.assertGreater(
+            mechanism_cost["estimated_peak_memory_mb"],
+            beam_cost["estimated_peak_memory_mb"],
+        )
+
+    def test_triangle_mesh_counts_are_not_underestimated(self):
+        from fenitop.tools.safety import estimate_cost
+
+        cost = estimate_cost(
+            {"divisions": [10, 5], "cell_type": "triangle"},
+            2,
+        )
+        self.assertEqual(cost["num_elements"], 100)
+        self.assertEqual(cost["num_nodes"], 66)
+
+    def test_committed_medium_calibration_is_conservative(self):
+        from fenitop.tools.contracts import ResourceLimits
+        from fenitop.tools.safety import estimate_cost
+
+        with open(
+            REPO_ROOT / "tests" / "fixtures" / "resource_calibration.json",
+            encoding="utf-8",
+        ) as handle:
+            calibration = json.load(handle)
+        for case in calibration["cases"]:
+            estimate = estimate_cost(
+                {
+                    "divisions": case["divisions"],
+                    "cell_type": "quadrilateral",
+                },
+                case["max_iter"],
+                problem_type=case["problem_type"],
+            )
+            with self.subTest(case=case["name"]):
+                self.assertAlmostEqual(
+                    estimate["estimated_peak_memory_mb"],
+                    case["estimated_peak_memory_mb"],
+                )
+                self.assertAlmostEqual(
+                    estimate["estimated_wall_time_seconds"],
+                    case["estimated_wall_seconds"],
+                )
+                self.assertGreaterEqual(
+                    estimate["estimated_peak_memory_mb"],
+                    case["observed_peak_rss_mb"],
+                )
+                self.assertGreaterEqual(
+                    estimate["estimated_wall_time_seconds"],
+                    case["observed_wall_seconds"],
+                )
+                self.assertAlmostEqual(
+                    estimate["estimated_output_mb"],
+                    case["estimated_output_mb"],
+                )
+                self.assertGreaterEqual(
+                    estimate["estimated_output_mb"],
+                    case["observed_output_mb"],
+                )
+        self.assertEqual(
+            ResourceLimits().model_dump(),
+            calibration["default_limits"],
+        )
+
+    def test_each_trusted_resource_dimension_has_a_stable_error_code(self):
+        from fenitop.tools.contracts import ResourceLimits
+        from fenitop.tools.safety import estimate_cost, resource_limit_errors
+
+        estimate = estimate_cost(
+            {"divisions": [4, 4], "cell_type": "quadrilateral"},
+            5,
+        )
+        limits = ResourceLimits(
+            max_elements=1,
+            max_nodes=1,
+            max_displacement_dofs=1,
+            max_iterations=1,
+            max_work_units=1,
+            max_peak_memory_mb=1,
+            max_output_mb=0.001,
+            max_estimated_wall_time_seconds=0.1,
+        )
+        self.assertEqual(
+            {error.code for error in resource_limit_errors(estimate, limits)},
+            {
+                "mesh_element_limit",
+                "mesh_node_limit",
+                "displacement_dof_limit",
+                "iteration_limit",
+                "work_limit",
+                "memory_limit",
+                "output_limit",
+                "estimated_timeout",
+            },
         )
 
 
@@ -397,8 +542,92 @@ class ValidateConfigToolTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "ok")
         self.assertTrue(
-            any("risk band" in warning["message"] for warning in result["warnings"])
+            any("policy band" in warning["message"] for warning in result["warnings"])
         )
+
+    def test_nonzero_external_load_is_required_for_both_modes(self):
+        from fenitop.tools.contracts import TrustedValidationPolicy
+        from fenitop.tools.validate_config import validate_config_tool
+
+        for config_name in ("beam_2d", "mechanism_2d"):
+            config = _load(config_name)
+            config["fem"]["traction_bcs"] = []
+            config["fem"]["body_force"] = [0, 0]
+            result = validate_config_tool(
+                {"config": config},
+                policy=TrustedValidationPolicy(check_geometry=False),
+            )
+            with self.subTest(config=config_name):
+                self.assertEqual(result["stage"], "semantic_validation")
+                self.assertIn(
+                    "external_load_required",
+                    {error["code"] for error in result["errors"]},
+                )
+
+    def test_zero_traction_and_extreme_spring_scale_have_stable_errors(self):
+        from fenitop.tools.contracts import TrustedValidationPolicy
+        from fenitop.tools.validate_config import validate_config_tool
+
+        beam = _load()
+        beam["fem"]["traction_bcs"][0]["value"] = [0, 0]
+        zero = validate_config_tool(
+            {"config": beam},
+            policy=TrustedValidationPolicy(check_geometry=False),
+        )
+        self.assertIn("zero_traction", {error["code"] for error in zero["errors"]})
+
+        mechanism = _load("mechanism_2d")
+        mechanism["opt"]["in_spring"]["stiffness"] = 1e-10
+        scale = validate_config_tool(
+            {"config": mechanism},
+            policy=TrustedValidationPolicy(check_geometry=False),
+        )
+        self.assertIn(
+            "spring_material_scale", {error["code"] for error in scale["errors"]}
+        )
+
+    def test_huge_mesh_and_enormous_iteration_budget_fail_before_geometry(self):
+        from fenitop.tools.contracts import TrustedValidationPolicy
+        from fenitop.tools.validate_config import validate_config_tool
+
+        huge_mesh = _load()
+        huge_mesh["mesh"]["divisions"] = [2000, 2000]
+        huge_mesh["opt"]["max_iter"] = 1
+        result = validate_config_tool(
+            {"config": huge_mesh},
+            policy=TrustedValidationPolicy(check_geometry=True),
+        )
+        self.assertEqual(result["stage"], "resource_validation")
+        self.assertFalse(result["checked"]["geometry"])
+        codes = {e["code"] for e in result["errors"]}
+        self.assertIn("mesh_element_limit", codes)
+        self.assertIn("displacement_dof_limit", codes)
+        self.assertIn("memory_limit", codes)
+
+        huge_work = _load()
+        huge_work["mesh"]["divisions"] = [4, 4]
+        huge_work["opt"]["max_iter"] = 50_000
+        result = validate_config_tool(
+            {"config": huge_work},
+            policy=TrustedValidationPolicy(check_geometry=True),
+        )
+        self.assertEqual(result["stage"], "resource_validation")
+        self.assertFalse(result["checked"]["geometry"])
+        self.assertIn("iteration_limit", {e["code"] for e in result["errors"]})
+
+    def test_aspect_ratio_and_filter_axis_warnings_are_structured(self):
+        from fenitop.tools.contracts import TrustedValidationPolicy
+        from fenitop.tools.validate_config import validate_config_tool
+
+        config = _load()
+        config["mesh"]["divisions"] = [200, 4]
+        result = validate_config_tool(
+            {"config": config},
+            policy=TrustedValidationPolicy(check_geometry=False),
+        )
+        messages = [warning["message"] for warning in result["warnings"]]
+        self.assertTrue(any("aspect ratio" in message for message in messages))
+        self.assertTrue(any("larger element axis" in message for message in messages))
 
 
 class RigidBodyRankTests(unittest.TestCase):

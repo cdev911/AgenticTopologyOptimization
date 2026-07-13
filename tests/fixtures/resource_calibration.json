@@ -1,0 +1,45 @@
+{
+  "calibration_schema_version": "1",
+  "measured_at": "2026-07-26",
+  "execution_scope": "serial",
+  "runtime_source": "pinned Docker image documented in numerical_baselines.json",
+  "method": "Fresh docker compose run process; render_snapshot disabled; Python resource.ru_maxrss and perf_counter measured around run_topopt_tool.",
+  "cases": [
+    {
+      "name": "compliance_80x30x10",
+      "problem_type": "minimize_compliance",
+      "divisions": [80, 30],
+      "max_iter": 10,
+      "observed_wall_seconds": 2.9550300010000115,
+      "observed_peak_rss_mb": 220.7421875,
+      "observed_output_mb": 1.124969482421875,
+      "estimated_work_units": 72000.0,
+      "estimated_peak_memory_mb": 264.3170623779297,
+      "estimated_output_mb": 1.3776397705078125,
+      "estimated_wall_seconds": 3.144
+    },
+    {
+      "name": "mechanism_50x50x10",
+      "problem_type": "compliant_mechanism",
+      "divisions": [50, 50],
+      "max_iter": 10,
+      "observed_wall_seconds": 3.5651048349999996,
+      "observed_peak_rss_mb": 231.88671875,
+      "observed_output_mb": 1.1641645431518555,
+      "estimated_work_units": 300000.0,
+      "estimated_peak_memory_mb": 286.0512237548828,
+      "estimated_output_mb": 1.4272308349609375,
+      "estimated_wall_seconds": 3.6
+    }
+  ],
+  "default_limits": {
+    "max_elements": 250000,
+    "max_nodes": 300000,
+    "max_displacement_dofs": 600000,
+    "max_iterations": 2000,
+    "max_work_units": 500000000.0,
+    "max_peak_memory_mb": 2048.0,
+    "max_output_mb": 1024.0,
+    "max_estimated_wall_time_seconds": 900.0
+  }
+}
