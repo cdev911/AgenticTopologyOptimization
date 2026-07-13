@@ -14,17 +14,12 @@ except Exception:  # pragma: no cover
 
 def _materialize(value):
     if isinstance(value, str):
-        if value.startswith("lambda"):
-            try:
-                return eval(value, {"np": np, "__builtins__": {}}, {})
-            except Exception:
-                return value
         return value
     if isinstance(value, list):
         return [_materialize(item) for item in value]
+    if is_region_spec(value):
+        return compile_region(value)
     if isinstance(value, dict):
-        if is_region_spec(value):
-            return compile_region(value)
         return {key: _materialize(item) for key, item in value.items()}
     return value
 
@@ -121,6 +116,12 @@ def load_config(config_path: Optional[str] = None, default_case: str = "beam_2d"
         config_path = str(Path(__file__).resolve().parent.parent / "config" / f"{default_case}.json")
     with open(config_path, "r", encoding="utf-8") as handle:
         raw_config = json.load(handle)
+    if raw_config.get("schema_version") is not None:
+        from fenitop.tools.config_models import compile_solver_config
+        raw_config = compile_solver_config(
+            raw_config,
+            output_prefix=Path(config_path).stem,
+        )
     config = _materialize(raw_config)
     return validate_config(config)
 
@@ -155,23 +156,21 @@ def build_mesh(mesh_spec: Dict[str, Any], comm=None):
 
 
 def build_fem_opt(config: Dict[str, Any], comm=None):
-    """Build the (fem, opt) dicts consumed by topopt() from a JSON-safe,
-    not-yet-materialized config (e.g. the "normalized_config" a validate_config
-    call returns -- markers/locators still lambda strings or region-DSL
-    dicts, never compiled callables).
+    """Build the (fem, opt) dictionaries consumed by topopt().
 
-    Factors out the logic duplicated between scripts/beam_2d.py::build_problem()
-    and scripts/mechanism_2d.py::build_problem() so agent-tool callers (and any
-    future entry point) don't need to reimplement it. Those two scripts are
-    unaffected and keep working exactly as before -- they materialize via
-    load_config() themselves before ever touching normalize_boundary_conditions,
-    a distinct code path this function does not alter.
+    A schema-versioned AgentSafeConfig is deterministically compiled to the
+    solver's legacy internal dictionary first. Region-DSL objects are then
+    compiled to callables; serialized Python source is never evaluated. Trusted
+    internal callers may still pass an already-materialized legacy dictionary.
     """
     if comm is None:
         if MPI is None:
             raise RuntimeError("mpi4py is required to build the mesh.")
         comm = MPI.COMM_WORLD
 
+    if config.get("schema_version") is not None:
+        from fenitop.tools.config_models import compile_solver_config
+        config = compile_solver_config(config)
     config = _materialize(config)
     mesh_spec = config.get("mesh", {})
     mesh = build_mesh(mesh_spec, comm)

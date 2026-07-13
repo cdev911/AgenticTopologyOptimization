@@ -27,14 +27,22 @@ class RunTopoptSmokeTests(unittest.TestCase):
         self.tmp_dir = tempfile.mkdtemp(prefix="fenitop_test_")
         self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
 
+    def _policy(self, **updates):
+        from fenitop.tools.contracts import TrustedRunPolicy
+
+        return TrustedRunPolicy(
+            output_root=Path(self.tmp_dir),
+            output_prefix="smoke_beam_2d",
+            **updates,
+        )
+
     def test_smoke_run_succeeds_with_expected_artifacts(self):
         from fenitop.tools.run_topopt import run_topopt_tool
 
-        result = run_topopt_tool({
-            "config": _load_smoke_config(),
-            "output_root": self.tmp_dir,
-            "render_snapshot": True,
-        })
+        result = run_topopt_tool(
+            {"config": _load_smoke_config()},
+            policy=self._policy(render_snapshot=True),
+        )
         self.assertEqual(result["status"], "ok", result.get("error"))
         self.assertIn("run_id", result)
         self.assertEqual(result["iterations"], 5)
@@ -51,8 +59,12 @@ class RunTopoptSmokeTests(unittest.TestCase):
         from fenitop.tools.run_topopt import run_topopt_tool
 
         config = _load_smoke_config()
-        r1 = run_topopt_tool({"config": config, "output_root": self.tmp_dir, "render_snapshot": False})
-        r2 = run_topopt_tool({"config": config, "output_root": self.tmp_dir, "render_snapshot": False})
+        r1 = run_topopt_tool(
+            {"config": config}, policy=self._policy(render_snapshot=False)
+        )
+        r2 = run_topopt_tool(
+            {"config": config}, policy=self._policy(render_snapshot=False)
+        )
         self.assertEqual(r1["status"], "ok")
         self.assertEqual(r2["status"], "ok")
         self.assertNotEqual(r1["run_id"], r2["run_id"])
@@ -66,10 +78,10 @@ class RunTopoptSmokeTests(unittest.TestCase):
         from fenitop.tools.run_topopt import run_topopt_tool
 
         config = _load_smoke_config()
-        result = run_topopt_tool({
-            "config": config, "output_root": self.tmp_dir, "scoped_output": False,
-            "render_snapshot": False,
-        })
+        result = run_topopt_tool(
+            {"config": config},
+            policy=self._policy(scoped_output=False, render_snapshot=False),
+        )
         self.assertEqual(result["status"], "ok")
         run_log = next(a for a in result["artifacts"] if a["role"] == "run_log")
         self.assertEqual(Path(run_log["path"]).parent, Path(self.tmp_dir))
@@ -79,9 +91,9 @@ class RunTopoptSmokeTests(unittest.TestCase):
 
         config = _load_smoke_config()
         config["mesh"]["bounds"] = [[0, 0], [0, 0]]  # zero-size domain
-        result = run_topopt_tool({"config": config, "output_root": self.tmp_dir})
+        result = run_topopt_tool({"config": config}, policy=self._policy())
         self.assertEqual(result["status"], "error")
-        self.assertIn(result["stage"], ("pre_flight_validation", "solve"))
+        self.assertEqual(result["stage"], "request")
 
     def test_oversized_config_is_rejected_near_instantly(self):
         from fenitop.tools.run_topopt import run_topopt_tool
@@ -90,7 +102,7 @@ class RunTopoptSmokeTests(unittest.TestCase):
         config["mesh"]["divisions"] = [2000, 2000]
         config["opt"]["max_iter"] = 50000
         start = time.perf_counter()
-        result = run_topopt_tool({"config": config, "output_root": self.tmp_dir})
+        result = run_topopt_tool({"config": config}, policy=self._policy())
         elapsed = time.perf_counter() - start
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["stage"], "safety_check")
@@ -102,10 +114,10 @@ class RunTopoptSmokeTests(unittest.TestCase):
         # and keeps this test fast regardless of outcome.
         from fenitop.tools.run_topopt import run_topopt_tool
 
-        result = run_topopt_tool({
-            "config": _load_smoke_config(), "output_root": self.tmp_dir,
-            "max_complexity_override": 1,
-        })
+        result = run_topopt_tool(
+            {"config": _load_smoke_config()},
+            policy=self._policy(max_complexity=1),
+        )
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["stage"], "safety_check")
 
@@ -116,10 +128,14 @@ class RunTopoptSmokeTests(unittest.TestCase):
         # attempting to actually solve a genuinely huge problem.
         from fenitop.tools.run_topopt import run_topopt_tool
 
-        result = run_topopt_tool({
-            "config": _load_smoke_config(), "output_root": self.tmp_dir,
-            "max_complexity_override": 1, "allow_large_run": True, "render_snapshot": False,
-        })
+        result = run_topopt_tool(
+            {"config": _load_smoke_config()},
+            policy=self._policy(
+                max_complexity=1,
+                allow_large_run=True,
+                render_snapshot=False,
+            ),
+        )
         self.assertEqual(result["status"], "ok", result.get("error"))
 
 

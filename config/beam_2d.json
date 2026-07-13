@@ -1,81 +1,55 @@
 {
+  "schema_version": "1.0",
   "mesh": {
     "kind": "rectangle",
     "bounds": [[0, 0], [60, 20]],
     "divisions": [200, 60],
-    "cell_type": "quadrilateral",
-    "ghost_mode": "shared_facet"
+    "cell_type": "quadrilateral"
   },
   "fem": {
-    "young's modulus": 100,
-    "poisson's ratio": 0.25,
-    "disp_bc": "lambda x: np.isclose(x[0], 0)",
+    "young_modulus": 100,
+    "poisson_ratio": 0.25,
     "dirichlet_bcs": [
       {
-        "marker": "lambda x: np.isclose(x[0], 0)",
-        "value": [0.0, 0.0]
+        "marker": {"op": "plane", "axis": "x", "value": 0},
+        "value": [0, 0]
       }
     ],
     "traction_bcs": [
       {
         "value": [0, -0.2],
-        "locator": "lambda x: (np.isclose(x[0], 60) & np.greater(x[1], 8) & np.less(x[1], 12))"
+        "locator": {
+          "op": "and",
+          "regions": [
+            {"op": "plane", "axis": "x", "value": 60},
+            {
+              "op": "range",
+              "axis": "y",
+              "min": 8,
+              "max": 12,
+              "min_inclusive": false,
+              "max_inclusive": false
+            }
+          ]
+        }
       }
     ],
-    "body_force": [0, 0],
-    "quadrature_degree": 2,
-    "petsc_options": {
-      "ksp_type": "cg",
-      "pc_type": "gamg"
-    }
-  },
-  "parameter_guidance": {
-    "max_iter": {
-      "description": "Maximum optimization iterations. Must be a positive integer.",
-      "type": "integer",
-      "minimum": 1
-    },
-    "vol_frac": {
-      "description": "Target volume fraction. Must be between 0 and 1 inclusive.",
-      "type": "number",
-      "minimum": 0.0,
-      "maximum": 1.0
-    },
-    "initial_density": {
-      "description": "Initial material density assigned to each design variable before optimization. Must be between 0 and 1 inclusive.",
-      "type": "number",
-      "minimum": 0.0,
-      "maximum": 1.0
-    },
-    "output_interval": {
-      "description": "How often the optimizer writes a history snapshot. Must be a positive integer.",
-      "type": "integer",
-      "minimum": 1
-    },
-    "move": {
-      "description": "Maximum design update magnitude per iteration. Must be between 0 and 1 inclusive.",
-      "type": "number",
-      "minimum": 0.0,
-      "maximum": 1.0
-    }
+    "body_force": [0, 0]
   },
   "opt": {
+    "problem_type": "minimize_compliance",
+    "optimizer": "oc",
     "max_iter": 400,
     "opt_tol": 1e-5,
     "vol_frac": 0.5,
     "initial_density": 0.5,
-    "solid_zone": "lambda x: np.full(x.shape[1], False)",
-    "void_zone": "lambda x: np.full(x.shape[1], False)",
-    "penalty": 3.0,
+    "solid_zone": {"op": "none"},
+    "void_zone": {"op": "none"},
+    "penalty": 3,
     "epsilon": 1e-6,
     "filter_radius": 1.2,
     "beta_interval": 50,
     "beta_max": 128,
-    "use_oc": true,
-    "move": 0.02,
-    "opt_compliance": true,
-    "output_folder": "results",
-    "output_prefix": "beam_2d",
-    "output_interval": 20
+    "move": 0.02
   }
 }

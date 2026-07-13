@@ -1,0 +1,13 @@
+{
+  "contract_version": "1.0.0",
+  "input_sha256": {
+    "validate_config": "dfe470ab3a3c925a7a381daaf405c5517801a9d6cb2dbf5cf7c3b4315492a361",
+    "run_topopt": "99c58601f3d80b98097dc48cf6d2f86ff1c8b01fe56b1bdb83e7b221a4b554f5",
+    "analyze_results": "c89a709073813343bd6babebf8306acdaa4f8079fc219e0de09c303f8909c0ae"
+  },
+  "output_sha256": {
+    "validate_config": "7191b96b912416b7567d8056e380dc8c6ed7d5dd4c5b00057ff7311ab7e03c2d",
+    "run_topopt": "005a6d582eac3c63f587cae6448c2950e56e1ed42a06c170ded73d2fbd2e1d6f",
+    "analyze_results": "0657c68888c133983ee56eed06bd82da714be42dad6dcd4748ac8f36b95ad15c"
+  }
+}
