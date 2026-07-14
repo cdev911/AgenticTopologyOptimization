@@ -1,20 +1,18 @@
-"""Tool 2: run_topopt.
+"""Tool 2: validate, contain, and run one topology-optimization solve.
 
-Orchestrates fenitop.topopt.topopt(fem, opt) without touching its physics:
-always re-validates first (never trusts the caller already called Tool 1),
-enforces a safety ceiling on problem size before spending any CPU, scopes
-output into a fresh per-run directory by default, catches every exception
-(including PETSc/dolfinx ones) into a structured failure envelope instead of
-a bare traceback, derives converged/stop_reason, surfaces the MMA optimizer's
-inner-iteration-cap warning, and renders a density-field PNG plus a
-coordinate-binned .npz grid while the dolfinx Function/mesh objects are still
-live in memory -- so Tool 3 never needs h5py or mesh reconstruction.
+The public entry point owns trusted paths, idempotency, capacity, and lifecycle
+state, then launches the serial numerical implementation in a credential-scrubbed
+child process group. The worker writes native artifacts plus a typed result; the
+parent translates timeout, cancellation, signals, and missing/invalid results.
 
-Needs the full dolfinx/PETSc/MPI stack; only runs inside the docker image.
+The numerical implementation re-validates before solving, enforces resource
+ceilings, reports checked optimizer/convergence state, and renders the density
+artifacts while Dolfinx objects are live. It requires the pinned Docker runtime.
 """
 from __future__ import annotations
 
 import math
+import sys
 import time
 import traceback
 import uuid
@@ -51,11 +49,20 @@ def _truncated_traceback(exc: BaseException, limit_chars: int = 4000) -> str:
     return text[-limit_chars:] if len(text) > limit_chars else text
 
 
-def _list_partial_artifacts(output_dir: Path) -> List[Dict[str, str]]:
+def _list_partial_artifacts(output_dir: Path) -> List[Dict[str, Any]]:
     if not output_dir.is_dir():
         return []
-    return [{"role": path.stem, "path": str(path), "format": path.suffix.lstrip(".")}
-            for path in sorted(output_dir.iterdir())]
+    artifacts = []
+    for path in sorted(output_dir.iterdir()):
+        if path.is_symlink() or not path.is_file():
+            continue
+        artifacts.append({
+            "role": path.stem,
+            "path": str(path),
+            "format": path.suffix.lstrip("."),
+            "complete": False,
+        })
+    return artifacts
 
 
 def _render_snapshot(result: Dict[str, Any], opt: Dict[str, Any]
@@ -144,8 +151,6 @@ def _reject_oversized(
     policy: TrustedRunPolicy,
     validation: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
-    if policy.allow_large_run:
-        return None
     limits = policy.resource_limits.model_copy(
         update={
             "max_estimated_wall_time_seconds": min(
@@ -175,12 +180,24 @@ def _response(data: dict) -> dict:
     return data
 
 
-def run_topopt_tool(
+def _agent_world_size() -> int:
+    try:
+        from mpi4py import MPI
+    except ImportError:
+        return 1
+    return int(MPI.COMM_WORLD.size)
+
+
+def _run_topopt_in_process(
     request: Dict[str, Any] | RunTopoptRequest,
     *,
     policy: TrustedRunPolicy | None = None,
 ) -> Dict[str, Any]:
-    """Run a safe config under an application-owned execution policy."""
+    """Execute Tool 2 in the current process.
+
+    TH-4's public entry point invokes this only inside ``solver_worker``.
+    It remains importable for focused numerical fault injection tests.
+    """
     run_policy = policy or TrustedRunPolicy()
     try:
         parsed_request = (
@@ -232,7 +249,7 @@ def run_topopt_tool(
         {"config": config},
         policy=TrustedValidationPolicy(
             check_geometry=True,
-            enforce_resource_limits=not run_policy.allow_large_run,
+            enforce_resource_limits=True,
             solver_profile=run_policy.solver_profile,
             output_interval=run_policy.output_interval,
             resource_limits=run_policy.resource_limits,
@@ -262,9 +279,8 @@ def run_topopt_tool(
         "compliance_2d" if problem_type == "minimize_compliance" else "mechanism_2d"
     )
     run_id = run_policy.run_id or _make_run_id(output_prefix)
-    scoped = run_policy.scoped_output
-    output_root = run_policy.output_root
-    output_dir = (output_root / run_id) if scoped else output_root
+    output_root = run_policy.output_root.resolve()
+    output_dir = output_root / run_id
 
     solver_config = compile_solver_config(
         config,
@@ -355,22 +371,23 @@ def run_topopt_tool(
     summary = result.get("summary") or {}
     artifacts = [
         {"role": "density_history", "format": "xdmf",
-         "path": str(output_dir / f"{output_prefix}_density_history.xdmf")},
+         "path": str(output_dir / f"{output_prefix}_density_history.xdmf"), "complete": True},
         {"role": "density_history_data", "format": "hdf5",
-         "path": str(output_dir / f"{output_prefix}_density_history.h5")},
+         "path": str(output_dir / f"{output_prefix}_density_history.h5"), "complete": True},
         {"role": "displacement_history", "format": "xdmf",
-         "path": str(output_dir / f"{output_prefix}_displacement_history.xdmf")},
+         "path": str(output_dir / f"{output_prefix}_displacement_history.xdmf"), "complete": True},
         {"role": "displacement_history_data", "format": "hdf5",
-         "path": str(output_dir / f"{output_prefix}_displacement_history.h5")},
-        {"role": "run_log", "format": "text+jsonlines", "path": str(run_log_path)},
-        {"role": "summary", "format": "json", "path": str(output_dir / f"{output_prefix}_summary.json")},
+         "path": str(output_dir / f"{output_prefix}_displacement_history.h5"), "complete": True},
+        {"role": "run_log", "format": "text+jsonlines", "path": str(run_log_path), "complete": True},
+        {"role": "summary", "format": "json",
+         "path": str(output_dir / f"{output_prefix}_summary.json"), "complete": True},
     ]
     if render_paths.get("density_snapshot_png"):
         artifacts.append({"role": "density_snapshot_png", "format": "png",
-                           "path": render_paths["density_snapshot_png"]})
+                           "path": render_paths["density_snapshot_png"], "complete": True})
     if render_paths.get("density_grid_npz"):
         artifacts.append({"role": "density_grid", "format": "npz",
-                           "path": render_paths["density_grid_npz"]})
+                           "path": render_paths["density_grid_npz"], "complete": True})
 
     logger.info("run_topopt: status=ok run_id=%s (%d artifact(s))", run_id, len(artifacts))
     return _response(ok_envelope(
@@ -391,6 +408,533 @@ def run_topopt_tool(
         optimizer_status=converged_raw["optimizer_status"],
         mma_inner_iteration_warnings=mma_warnings, wall_time_seconds=wall_time,
         artifacts=artifacts, validation=check, error=None))
+
+
+def _terminal_process_error(
+    *,
+    run_id: str,
+    stage: str,
+    code: str,
+    message: str,
+    lifecycle: dict[str, Any],
+    output_dir: Path,
+    output_prefix: str,
+    validation: dict[str, Any],
+    retryable: bool,
+) -> dict[str, Any]:
+    history = read_history(output_dir / f"{output_prefix}_run.log")
+    return _response(error_envelope(
+        "run_topopt",
+        [FieldError("worker", code, message, retryable=retryable)],
+        stage=stage,
+        run_id=run_id,
+        validation=validation,
+        lifecycle=lifecycle,
+        error={
+            "exception_type": code,
+            "message": message,
+            "traceback": "",
+            "code": code,
+        },
+        last_known_good_metrics=(history[-1] if history else None),
+        artifacts=_list_partial_artifacts(output_dir),
+    ))
+
+
+def _validate_worker_artifacts(response: dict[str, Any], run_dir: Path) -> None:
+    for artifact in response.get("artifacts", []):
+        path = Path(artifact["path"])
+        if path.is_symlink():
+            raise RuntimeError(f"Worker artifact is a symlink: {path.name}")
+        resolved = path.resolve(strict=response["status"] == "ok")
+        if not resolved.is_relative_to(run_dir):
+            raise RuntimeError(f"Worker artifact escaped its run directory: {path}")
+        if response["status"] == "ok" and not resolved.is_file():
+            raise RuntimeError(f"Worker success artifact is missing: {path}")
+
+
+def _existing_job_response(
+    *,
+    run_dir: Path,
+    request_hash: str,
+    validation: dict[str, Any],
+) -> dict[str, Any]:
+    from fenitop.tools.lifecycle import (
+        RESPONSE_NAME,
+        LifecycleError,
+        read_json,
+        read_lifecycle,
+    )
+
+    try:
+        lifecycle = read_lifecycle(run_dir)
+    except Exception as exc:
+        return _response(error_envelope(
+            "run_topopt",
+            [FieldError(
+                "run_id", "run_directory_collision",
+                f"Existing run directory has no valid lifecycle manifest: {exc}",
+            )],
+            stage="lifecycle",
+            validation=validation,
+        ))
+    if lifecycle["request_hash"] != request_hash:
+        return _response(error_envelope(
+            "run_topopt",
+            [FieldError(
+                "idempotency_key",
+                "idempotency_conflict",
+                "The idempotency key/run ID already belongs to a different request.",
+            )],
+            stage="idempotency",
+            run_id=lifecycle["run_id"],
+            lifecycle=lifecycle,
+            validation=validation,
+        ))
+
+    response_path = run_dir / RESPONSE_NAME
+    if response_path.is_file() and not response_path.is_symlink():
+        try:
+            response = read_json(response_path)
+            _validate_worker_artifacts(response, run_dir)
+            response["idempotent_replay"] = True
+            response["lifecycle"] = lifecycle
+            return _response(response)
+        except Exception as exc:
+            return _response(error_envelope(
+                "run_topopt",
+                [FieldError(
+                    "response", "stored_response_invalid",
+                    f"Stored idempotent response is invalid: {exc}",
+                )],
+                stage="idempotency",
+                run_id=lifecycle["run_id"],
+                lifecycle=lifecycle,
+                validation=validation,
+            ))
+
+    retryable = lifecycle["state"] in {"queued", "running"}
+    code = "job_already_active" if retryable else "terminal_response_missing"
+    return _response(error_envelope(
+        "run_topopt",
+        [FieldError(
+            "idempotency_key",
+            code,
+            (
+                "The same job is already queued/running."
+                if retryable
+                else "The existing terminal job has no durable response."
+            ),
+            retryable=retryable,
+        )],
+        stage="idempotency",
+        run_id=lifecycle["run_id"],
+        lifecycle=lifecycle,
+        validation=validation,
+        idempotent_replay=True,
+    ))
+
+
+def run_topopt_tool(
+    request: Dict[str, Any] | RunTopoptRequest,
+    *,
+    policy: TrustedRunPolicy | None = None,
+) -> Dict[str, Any]:
+    """Validate in the parent, then execute one contained serial worker."""
+    from fenitop.tools.lifecycle import (
+        CANCEL_NAME,
+        JOB_MANIFEST_NAME,
+        RESPONSE_NAME,
+        WORKER_REQUEST_NAME,
+        WORKER_RESULT_NAME,
+        LifecycleError,
+        acquire_active_lock,
+        allocate_run_directory,
+        atomic_write_json,
+        canonical_json_hash,
+        check_disk_capacity,
+        idempotency_hash,
+        new_lifecycle,
+        read_json,
+        recover_orphaned_jobs,
+        release_active_lock,
+        resolve_output_root,
+        update_lifecycle,
+        validate_identifier,
+        write_lifecycle,
+    )
+    from fenitop.tools.worker_process import (
+        launch_worker_process,
+        sanitized_worker_environment,
+    )
+    from fenitop.tools.worker_protocol import SolverWorkerRequest, SolverWorkerResult
+
+    run_policy = policy or TrustedRunPolicy()
+    try:
+        parsed_request = (
+            request
+            if isinstance(request, RunTopoptRequest)
+            else RunTopoptRequest.model_validate(request)
+        )
+    except ValidationError as exc:
+        return _response(error_envelope(
+            "run_topopt",
+            translate_validation_error(exc),
+            stage="request",
+            message="Request did not match RunTopoptRequest.",
+        ))
+    except Exception as exc:
+        return _response(error_envelope(
+            "run_topopt",
+            [FieldError("<root>", "malformed_request", str(exc))],
+            stage="request",
+        ))
+    config = parsed_request.config
+
+    if _agent_world_size() != 1:
+        return _response(error_envelope(
+            "run_topopt",
+            [FieldError(
+                "mpi_processes",
+                "mpi_unsupported",
+                "The agent-facing solver worker is serial-only.",
+            )],
+            stage="execution_policy",
+        ))
+
+    try:
+        quick_cost = estimate_cost(
+            config.mesh.model_dump(mode="json"),
+            config.opt.max_iter,
+            problem_type=config.opt.problem_type,
+            solver_profile=run_policy.solver_profile,
+            output_interval=run_policy.output_interval,
+        )
+        quick_reject = _reject_oversized(quick_cost, run_policy, validation=None)
+        if quick_reject is not None:
+            return _response(quick_reject)
+    except Exception:
+        pass
+
+    check = validate_config_tool(
+        {"config": config},
+        policy=TrustedValidationPolicy(
+            check_geometry=True,
+            enforce_resource_limits=True,
+            solver_profile=run_policy.solver_profile,
+            output_interval=run_policy.output_interval,
+            resource_limits=run_policy.resource_limits,
+        ),
+    )
+    if check["status"] == "error":
+        return _response(error_envelope(
+            "run_topopt",
+            check["errors"],
+            stage="pre_flight_validation",
+            warnings=check.get("warnings", []),
+            validation=check,
+        ))
+    reject = _reject_oversized(check["estimated_cost"], run_policy, validation=check)
+    if reject is not None:
+        return _response(reject)
+
+    problem_type = config.opt.problem_type
+    output_prefix = run_policy.output_prefix or (
+        "compliance_2d" if problem_type == "minimize_compliance" else "mechanism_2d"
+    )
+    try:
+        validate_identifier(output_prefix, field="output_prefix")
+        root = resolve_output_root(run_policy.output_root)
+        recover_orphaned_jobs(root)
+        check_disk_capacity(
+            root,
+            estimated_output_mb=check["estimated_cost"]["estimated_output_mb"],
+            minimum_free_mb=run_policy.min_free_disk_mb,
+        )
+    except (LifecycleError, OSError) as exc:
+        code = getattr(exc, "code", "output_root_error")
+        return _response(error_envelope(
+            "run_topopt",
+            [FieldError("output_root", code, str(exc), retryable=True)],
+            stage="filesystem",
+            validation=check,
+        ))
+
+    key_hash = idempotency_hash(run_policy.idempotency_key)
+    if run_policy.run_id is not None:
+        run_id = run_policy.run_id
+    elif key_hash is not None:
+        run_id = f"{output_prefix[:54]}_{key_hash[:16]}"
+    else:
+        run_id = _make_run_id(output_prefix[:54])
+    request_material = {
+        "contract_version": check["contract_version"],
+        "config": check["normalized_config"],
+        "solver_profile": run_policy.solver_profile,
+        "output_interval": run_policy.output_interval,
+        "render_snapshot": run_policy.render_snapshot,
+    }
+    request_hash = canonical_json_hash(request_material)
+
+    try:
+        run_dir, created = allocate_run_directory(root, run_id)
+    except (LifecycleError, OSError) as exc:
+        code = getattr(exc, "code", "run_directory_error")
+        return _response(error_envelope(
+            "run_topopt",
+            [FieldError("run_id", code, str(exc))],
+            stage="filesystem",
+            validation=check,
+        ))
+    if not created:
+        return _existing_job_response(
+            run_dir=run_dir, request_hash=request_hash, validation=check
+        )
+
+    lifecycle = new_lifecycle(
+        run_id=run_id,
+        request_hash=request_hash,
+        idempotency_key_hash=key_hash,
+    )
+    try:
+        lifecycle = write_lifecycle(run_dir, lifecycle)
+    except Exception as exc:
+        return _response(error_envelope(
+            "run_topopt",
+            [FieldError("lifecycle", "manifest_write_failed", str(exc))],
+            stage="filesystem",
+            run_id=run_id,
+            validation=check,
+        ))
+
+    try:
+        active_lock = acquire_active_lock(root, run_id)
+    except LifecycleError as exc:
+        lifecycle = update_lifecycle(
+            run_dir, lifecycle, state="failed", message=str(exc)
+        )
+        response = _terminal_process_error(
+            run_id=run_id,
+            stage="capacity",
+            code=exc.code,
+            message=str(exc),
+            lifecycle=lifecycle,
+            output_dir=run_dir,
+            output_prefix=output_prefix,
+            validation=check,
+            retryable=True,
+        )
+        atomic_write_json(run_dir / RESPONSE_NAME, response)
+        return response
+
+    request_path = run_dir / WORKER_REQUEST_NAME
+    result_path = run_dir / WORKER_RESULT_NAME
+    stdout_path = run_dir / "worker.stdout.log"
+    stderr_path = run_dir / "worker.stderr.log"
+    cancel_path = run_dir / CANCEL_NAME
+
+    def worker_started(pid: int) -> None:
+        nonlocal lifecycle
+        lifecycle = update_lifecycle(
+            run_dir,
+            lifecycle,
+            state="running",
+            worker_pid=pid,
+            message="Solver worker started.",
+        )
+
+    command = [
+        sys.executable,
+        "-m",
+        "fenitop.tools.solver_worker",
+        "--request",
+        str(request_path),
+    ]
+    repository_root = Path(__file__).resolve().parents[2]
+    try:
+        worker_request = SolverWorkerRequest(
+            run_id=run_id,
+            request_hash=request_hash,
+            output_dir=run_dir,
+            output_prefix=output_prefix,
+            config=config,
+            validation=check,
+            render_snapshot=run_policy.render_snapshot,
+            solver_profile=run_policy.solver_profile,
+            output_interval=run_policy.output_interval,
+        )
+        atomic_write_json(request_path, worker_request.model_dump(mode="json"))
+        outcome = launch_worker_process(
+            command,
+            cwd=repository_root,
+            environment=sanitized_worker_environment(),
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            cancel_path=cancel_path,
+            timeout_seconds=run_policy.timeout_seconds,
+            termination_grace_seconds=run_policy.termination_grace_seconds,
+            poll_interval_seconds=run_policy.poll_interval_seconds,
+            on_started=worker_started,
+        )
+    except Exception as exc:
+        lifecycle = update_lifecycle(
+            run_dir,
+            lifecycle,
+            state="failed",
+            message=f"Worker launch failed: {exc}",
+        )
+        response = _terminal_process_error(
+            run_id=run_id,
+            stage="worker_launch",
+            code="worker_launch_failed",
+            message=str(exc),
+            lifecycle=lifecycle,
+            output_dir=run_dir,
+            output_prefix=output_prefix,
+            validation=check,
+            retryable=True,
+        )
+        atomic_write_json(run_dir / RESPONSE_NAME, response)
+        return response
+    finally:
+        release_active_lock(active_lock, run_id)
+
+    history = read_history(run_dir / f"{output_prefix}_run.log")
+    last_iteration = history[-1]["iteration"] if history else None
+    common_terminal = {
+        "worker_pid": outcome.worker_pid,
+        "exit_code": outcome.exit_code,
+        "terminating_signal": outcome.terminating_signal,
+        "last_iteration": last_iteration,
+    }
+    if outcome.cancelled:
+        lifecycle = update_lifecycle(
+            run_dir,
+            lifecycle,
+            state="cancelled",
+            cancelled=True,
+            message="Cancellation was requested; the worker process group was terminated.",
+            **common_terminal,
+        )
+        response = _terminal_process_error(
+            run_id=run_id,
+            stage="cancelled",
+            code="worker_cancelled",
+            message=lifecycle["message"],
+            lifecycle=lifecycle,
+            output_dir=run_dir,
+            output_prefix=output_prefix,
+            validation=check,
+            retryable=False,
+        )
+    elif outcome.timed_out:
+        lifecycle = update_lifecycle(
+            run_dir,
+            lifecycle,
+            state="timed_out",
+            timed_out=True,
+            message=f"Worker exceeded the {run_policy.timeout_seconds:g}s timeout.",
+            **common_terminal,
+        )
+        response = _terminal_process_error(
+            run_id=run_id,
+            stage="timeout",
+            code="worker_timed_out",
+            message=lifecycle["message"],
+            lifecycle=lifecycle,
+            output_dir=run_dir,
+            output_prefix=output_prefix,
+            validation=check,
+            retryable=True,
+        )
+    elif outcome.exit_code != 0 or not result_path.is_file():
+        lifecycle = update_lifecycle(
+            run_dir,
+            lifecycle,
+            state="failed",
+            message=(
+                f"Worker exited with code {outcome.exit_code} "
+                "without a valid result."
+            ),
+            **common_terminal,
+        )
+        response = _terminal_process_error(
+            run_id=run_id,
+            stage="worker_crash",
+            code="worker_crashed",
+            message=lifecycle["message"],
+            lifecycle=lifecycle,
+            output_dir=run_dir,
+            output_prefix=output_prefix,
+            validation=check,
+            retryable=True,
+        )
+    else:
+        try:
+            worker_result = SolverWorkerResult.model_validate(read_json(result_path))
+            response = worker_result.response.model_dump(mode="json")
+            _validate_worker_artifacts(response, run_dir)
+            if worker_result.worker_api_key_present:
+                raise RuntimeError("Solver worker inherited an API key.")
+            terminal_state = "succeeded" if response["status"] == "ok" else "failed"
+            lifecycle = update_lifecycle(
+                run_dir,
+                lifecycle,
+                state=terminal_state,
+                worker_api_key_present=worker_result.worker_api_key_present,
+                message=(
+                    "Solver worker completed successfully."
+                    if terminal_state == "succeeded"
+                    else "Solver worker returned a typed failure."
+                ),
+                **common_terminal,
+            )
+            response["lifecycle"] = lifecycle
+            response["idempotent_replay"] = False
+            response["wall_time_seconds"] = outcome.wall_time_seconds
+            response["artifacts"].extend([
+                {
+                    "role": "worker_stdout",
+                    "format": "text",
+                    "path": str(stdout_path),
+                    "complete": True,
+                },
+                {
+                    "role": "worker_stderr",
+                    "format": "text",
+                    "path": str(stderr_path),
+                    "complete": True,
+                },
+                {
+                    "role": "job_manifest",
+                    "format": "json",
+                    "path": str(run_dir / JOB_MANIFEST_NAME),
+                    "complete": True,
+                },
+            ])
+            response = _response(response)
+        except Exception as exc:
+            lifecycle = update_lifecycle(
+                run_dir,
+                lifecycle,
+                state="failed",
+                message=f"Worker result validation failed: {exc}",
+                **common_terminal,
+            )
+            response = _terminal_process_error(
+                run_id=run_id,
+                stage="worker_result",
+                code="worker_result_invalid",
+                message=lifecycle["message"],
+                lifecycle=lifecycle,
+                output_dir=run_dir,
+                output_prefix=output_prefix,
+                validation=check,
+                retryable=True,
+            )
+
+    atomic_write_json(run_dir / RESPONSE_NAME, response)
+    return response
 
 
 def main() -> int:

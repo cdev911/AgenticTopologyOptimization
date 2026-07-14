@@ -96,6 +96,9 @@ class SerialNumericalBaselineTests(unittest.TestCase):
             "displacement_history_data",
             "run_log",
             "summary",
+            "worker_stdout",
+            "worker_stderr",
+            "job_manifest",
         }
         self.assertEqual(set(artifact_by_role), expected_roles)
         for role, path in artifact_by_role.items():

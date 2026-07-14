@@ -1,6 +1,6 @@
 # Tool Hardening Plan
 
-Status: TH-0 through TH-3 complete; TH-4 is next
+Status: TH-0 through TH-4 complete; TH-5 is next
 Created: 2026-07-26
 Owner/source of truth for status: `docs/spec.md` §0 and §11
 
@@ -458,6 +458,37 @@ Exit criteria:
 - Traversal/glob/safety-override attempts cannot affect files outside the run root.
 - The worker environment does not contain the API key.
 - Timeout, cancellation, crash, duplicate request, and restart recovery tests pass.
+
+Completion (2026-07-26):
+
+- Advanced the public contract to `3.0.0` while retaining agent-safe config schema
+  `1.1`. Trusted policies no longer expose flat/scoped overwrite or safety-bypass
+  controls; run IDs/prefixes use a bounded safe alphabet and reserved names fail.
+- Added trusted-root resolution, exclusive `0700` run-directory allocation,
+  symlink/escape checks for worker artifacts, disk-space admission, durable atomic
+  JSON replacement, canonical request hashes, hashed idempotency keys, and an
+  exclusive root-level one-solve lock. Matching retries replay existing state or
+  response; changed content under the same key fails as a conflict.
+- Added typed internal worker request/result contracts and a dedicated serial
+  solver entry point. The parent launches it in a new process group with fixed
+  cwd, closed stdin, captured stdout/stderr, and a scrubbed environment that
+  removes OpenAI and common API-key/token/secret/password credentials.
+- Added timeout and cancellation polling with process-group TERM→grace→KILL
+  escalation. Parent-side envelopes preserve exit code, terminating signal, last
+  durable iteration, and incomplete partial artifacts for timeout, cancellation,
+  launch/setup failure, invalid result, and native crash.
+- Added atomic lifecycle states
+  `queued | running | succeeded | failed | timed_out | cancelled | orphaned`,
+  cancellation requests scoped by trusted root/run ID, stale-parent recovery, and
+  conservative recovery of incomplete lock files. Agent-facing MPI worlds are
+  explicitly rejected.
+- Added adversarial and real-process tests for traversal/reserved/removed
+  capabilities, symlinked directories/artifacts, insufficient disk, concurrent
+  capacity, setup failure, duplicate/replay/conflict, secret removal, timeout,
+  cancellation, `SIGABRT`, native-crash translation, MPI rejection, and orphan
+  recovery. Refreshed medium child-RSS/wall/durable-output measurements remain
+  below the existing estimates. The full pinned suite passes: 95 tests and 54
+  subtests with no expected failures.
 
 ### TH-5 — Clean transports and total tool boundaries
 

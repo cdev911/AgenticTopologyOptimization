@@ -14,6 +14,8 @@ import time
 import unittest
 from pathlib import Path
 
+from pydantic import ValidationError
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -74,17 +76,9 @@ class RunTopoptSmokeTests(unittest.TestCase):
         self.assertTrue(dir1.is_dir())
         self.assertTrue(dir2.is_dir())
 
-    def test_scoped_output_false_reproduces_flat_overwrite_layout(self):
-        from fenitop.tools.run_topopt import run_topopt_tool
-
-        config = _load_smoke_config()
-        result = run_topopt_tool(
-            {"config": config},
-            policy=self._policy(scoped_output=False, render_snapshot=False),
-        )
-        self.assertEqual(result["status"], "ok")
-        run_log = next(a for a in result["artifacts"] if a["role"] == "run_log")
-        self.assertEqual(Path(run_log["path"]).parent, Path(self.tmp_dir))
+    def test_flat_overwrite_policy_is_no_longer_representable(self):
+        with self.assertRaises(ValidationError):
+            self._policy(scoped_output=False, render_snapshot=False)
 
     def test_degenerate_config_returns_error_envelope_not_a_crash(self):
         from fenitop.tools.run_topopt import run_topopt_tool
@@ -125,23 +119,15 @@ class RunTopoptSmokeTests(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["stage"], "safety_check")
 
-    def test_allow_large_run_overrides_an_artificially_lowered_ceiling(self):
-        # allow_large_run=True bypasses the (artificially lowered) ceiling,
-        # and the underlying problem is still the tiny 32-element/5-iteration
-        # smoke config -- this exercises the override path without ever
-        # attempting to actually solve a genuinely huge problem.
-        from fenitop.tools.run_topopt import run_topopt_tool
+    def test_large_run_safety_override_is_no_longer_representable(self):
         from fenitop.tools.contracts import ResourceLimits
 
-        result = run_topopt_tool(
-            {"config": _load_smoke_config()},
-            policy=self._policy(
+        with self.assertRaises(ValidationError):
+            self._policy(
                 resource_limits=ResourceLimits(max_work_units=1),
                 allow_large_run=True,
                 render_snapshot=False,
-            ),
-        )
-        self.assertEqual(result["status"], "ok", result.get("error"))
+            )
 
     def test_timeout_budget_participates_in_preflight_admission(self):
         from fenitop.tools.run_topopt import run_topopt_tool

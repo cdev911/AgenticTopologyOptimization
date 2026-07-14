@@ -9,31 +9,31 @@ Last updated: 2026-07-26
 
 ## 0. Current Status (read this first; update it last, every session)
 
-- **Stage**: Tool Hardening implementation; TH-0 through TH-3 are complete and TH-4 is next.
+- **Stage**: Tool Hardening implementation; TH-0 through TH-4 are complete and TH-5 is next.
   Agentic work remains deliberately gated on the full Stage TH gate (§11).
 - **As of**: 2026-07-26.
-- **Just finished**: TH-3 numerical/state correctness. Contract `2.0.0` (config
-  schema remains `1.1`) checks PETSc convergence and residuals for elasticity,
-  adjoint, and density-filter solves; rejects non-finite/unbounded states; and
-  surfaces explicit successful/failing OC/MMA status. Configured/passive initial
-  density is honored and fully evaluated at iteration zero. Every update is
-  evaluated before logging/saving, so final density, displacement, summary,
-  history, rendered grid, and metrics now describe the same state. Conventional
-  grayness and complementary binarization are distinct; final beta and continuation
-  completion gate convergence. Compliance, volume, and mechanism gradients pass
-  central directional finite differences through filter/projection. The resource
-  estimator now charges `max_iter + 1` evaluated states and remains conservative
-  against refreshed medium runs. All 80 pinned tests pass with no expected failures.
+- **Just finished**: TH-4 contained execution. Contract `3.0.0` (config schema
+  remains `1.1`) gives every public solve a fresh, exclusively created run
+  directory under a trusted root; safe identifiers; canonical request hashing and
+  idempotent replay; an atomic one-solve capacity lock; and a durable lifecycle
+  record covering `queued | running | succeeded | failed | timed_out | cancelled |
+  orphaned`. The numerical solve runs serially in a separate process group with a
+  fixed working directory, captured streams, a credential-scrubbed environment,
+  timeout/cancel TERM→KILL escalation, and parent-side crash/signal translation.
+  Disk admission, symlink/path containment, incomplete partial artifacts, explicit
+  MPI rejection, stale-job recovery, and setup-failure lock release are tested.
+  Refreshed child-RSS/wall/output calibration remains beneath the existing
+  conservative estimator. All 95 pinned tests and 54 subtests pass.
 - **Architecture decisions updated** (§3, §6, §6a): deterministic orchestration
   replaces the three-agent tool-calling pipeline; solver execution stays in the
   same image/container but moves to a child process without the API key;
   clarification is allowed for incomplete/ambiguous requests without adding a
   pre-run confirmation gate; and `gpt-5.6-terra` replaces the old
   `gpt-4.1-mini` default.
-- **Next action**: Stage TH-4 (§11 and `docs/tool-hardening-plan.md` §4) —
-  contain each solve in a serial child process with trusted path ownership,
-  idempotent lifecycle state, atomic manifests, sanitized environment, and tested
-  timeout/cancel/crash/orphan handling. Do not start `agentic/` yet.
+- **Next action**: Stage TH-5 (§11 and `docs/tool-hardening-plan.md` §4) — make
+  every public JSON-shaped call total, keep tracebacks local, reserve CLI stdout
+  for exactly one response, and verify real CLI and MCP stdio framing. Do not start
+  `agentic/` yet.
 - **If you're an AI assistant picking this up cold**: read this whole file before
   doing anything, then summarize your understanding of current state + proposed
   next step back to the user before acting. See `CLAUDE.md`/`AGENTS.md` at the
@@ -112,7 +112,7 @@ processes.** Streamlit/CrewAI and Dolfinx share the pinned image for simple demo
 deployment, but every expensive/native solve runs in a child worker process. The
 parent assigns trusted paths/limits, strips `OPENAI_API_KEY` from the worker
 environment, captures progress, enforces timeout/cancellation, and translates
-exit/signal/crash state into a run manifest. This supersedes the earlier
+exit/signal/crash state into a job lifecycle manifest. This supersedes the earlier
 same-container/**same-process** decision: Python exception handling cannot contain
 PETSc/MPI native aborts or OOM, and the current solver's stdout would corrupt a
 stdio protocol.
@@ -165,7 +165,7 @@ checkpoint, after the Stage TH tool gate passes — not just the folder shell.
 Source of truth: `fenitop/tools/contracts.py`,
 `fenitop/tools/config_models.py`, and the three tool implementations.
 
-- Public contract version is `2.0.0`; agent-safe config schema is `1.1`. Every
+- Public contract version is `3.0.0`; agent-safe config schema is `1.1`. Every
   request and response is a strict Pydantic model with unknown fields forbidden
   and structured issue records.
 - The LLM-visible inputs are exactly `validate_config(config)`,
@@ -213,11 +213,12 @@ incomplete physical validation, unverified PETSc convergence/final-state
 consistency, and lossy Tool 2→Tool 3 composition. TH-1 removed executable strings
 and public execution controls, added typed direct composition, and contained Tool
 3 reads; TH-2 completed semantic/resource validation; TH-3 completed numerical
-and evaluated-state correctness. The remaining findings are assigned to TH-4
-through TH-6.
+and evaluated-state correctness; TH-4 added process/filesystem/lifecycle
+containment. The remaining findings are assigned to TH-5 and TH-6.
 
 The detailed remediation source is `docs/tool-hardening-plan.md`. TH-1 implements
-the first two boundary decisions below; the remaining Stage TH gates still apply:
+the capability split and typed-envelope portions of the first two boundary
+decisions below; the complete analysis manifest remains a TH-6 gate:
 
 1. **Two capability levels**: a strict `AgentSafeConfig` (physics only, region DSL
    only) and trusted application-owned run policy (paths, solver profile, limits,
@@ -337,16 +338,18 @@ Existing (unittest-based, already in place):
   complete support/load/spring/passive-zone entity/conflict checks, filter/stop
   semantics, central directional finite differences, PETSc/filter/optimizer fault
   injection, configured/passive initialization, final-grid metric consistency,
-  cleanup, config-hash guards, and artifact consistency.
+  cleanup, config-hash guards, artifact consistency, isolated worker execution,
+  credential scrubbing, path/idempotency/capacity behavior, and real process-group
+  timeout/cancellation/crash recovery.
 - Test entry point: `docker compose run --rm -T fenitop python -m unittest discover -v`.
   `tests/__init__.py` makes nested discovery reliable; zero collection exits 5.
-  Current result: all 80 tests pass with no expected failures.
+  Current result: all 95 tests and 54 subtests pass with no expected failures.
 
-Planned additions for agent-workflow compatibility (not yet implemented):
-- **Tool-hardening suite (blocks agent work)**: contract/schema, generated
-  adversarial JSON, path/security, real geometry, compliance+mechanism numerics,
-  PETSc/optimizer failure injection, subprocess timeout/cancel/crash/idempotency,
-  CLI stdout, actual MCP stdio, artifact integrity, and direct Tool 2→Tool 3
+Remaining additions for agent-workflow compatibility:
+- **Tool-hardening suite (blocks agent work)**: contract/schema, path/security,
+  geometry/numerics/fault injection, and subprocess lifecycle coverage are in
+  place. TH-5/TH-6 still add generated adversarial JSON, CLI stdout, actual MCP
+  stdio, complete artifact integrity, and manifest-driven Tool 2→Tool 3
   composition. Full matrix: `docs/tool-hardening-plan.md` §5–§6.
 - **Measured resource calibration**: completed in TH-2 and frozen in
   `tests/fixtures/resource_calibration.json`; refresh deliberately if the runtime,
@@ -375,6 +378,16 @@ Flagged during initial planning (2026-07-25), not yet actioned:
 
 Reverse-chronological. Each entry: date, decision, why, status.
 
+- **2026-07-26** — TH-4 advances the public contract to `3.0.0` while retaining
+  config schema `1.1`. The application allocates immutable per-run directories and
+  owns safe IDs, request hashes, idempotency, disk admission, and a single active
+  solve. Each solve executes serially in a credential-scrubbed child process group;
+  atomic job state records timeout, cancellation, signal/exit status, partial
+  artifacts, and restart orphan recovery. A duplicate idempotency key replays the
+  matching state/result and conflicts on changed request content. Reason: Python
+  exception handling in the API-bearing parent cannot contain native PETSc/MPI
+  failure or make concurrent retries safe. Status: implemented and verified by 94
+  tests and 54 subtests, including real timeout/cancel/signal cases.
 - **2026-07-26** — TH-3 advances the public contract to `2.0.0` while retaining
   config schema `1.1`. A topology state is public only after filter, projection,
   elasticity/adjoint evaluation, and metric checks complete; iteration zero and
@@ -432,7 +445,7 @@ Reverse-chronological. Each entry: date, decision, why, status.
 - **2026-07-26** — Keep one Docker image/container for demo simplicity but run each
   solver invocation in a separate child process, with timeout/cancellation,
   trusted paths/limits, captured transports, and no API key in the worker.
-  Status: decided, tracked in Stage TH-4.
+  Status: implemented in Stage TH-4.
 - **2026-07-26** — Free-text remains the only UI input, with
   `ready | needs_clarification | unsupported` interpretation. Clarification for
   missing/ambiguous physics is allowed and required; there is still no confirmation
@@ -477,12 +490,12 @@ Reverse-chronological. Each entry: date, decision, why, status.
 ## 10. Open Questions / Next Checkpoint
 
 The hardening architecture and order are decided. The next checkpoint is Stage
-TH-4 contained execution and lifecycle state. Items intentionally resolved by
+TH-5 total boundaries and clean transports. Items intentionally resolved by
 measurement/implementation rather than guessed now:
 
 - The trusted iterative compliance and direct mechanism PETSc profiles passed
-  TH-3 convergence/residual checks and finite differences; retain them for TH-4's
-  child worker unless process-level testing finds a containment-specific issue.
+  TH-3 convergence/residual checks and finite differences and TH-4 isolated-worker
+  calibration; retain them unless later testing finds a profile-specific issue.
 - Component-wise/roller supports and nonzero prescribed displacement are explicitly
   rejected in agent-safe v1. A future implementation must add correct
   lifting/subspace behavior and tests before changing that capability.
@@ -515,7 +528,7 @@ index; check items here only when the corresponding plan exit gate passes.
       finite checks; explicit MMA/OC failure status; honor initial density; correct
       iteration-0 and final evaluated state; consistent artifacts/metrics;
       grayness+binarization naming; cleanup warnings eliminated.
-- [ ] **TH-4 Contained execution** — fixed contained run root/slug IDs; no
+- [x] **TH-4 Contained execution** — fixed contained run root/slug IDs; no
       untrusted deletion/overwrite; idempotent job lifecycle; child solver process
       without API key; timeout/cancel/crash/orphan handling; atomic manifests;
       serial-only agent surface.

@@ -1,6 +1,6 @@
 {
   "baseline_schema_version": "1",
-  "tool_contract_version": "2.0.0",
+  "tool_contract_version": "3.0.0",
   "execution_scope": "serial",
   "characterized_from_commit": "de06b50b99334f9631be3ca0cf11d5260c004dca",
   "runtime": {

@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from fenitop.tools.config_models import AgentSafeConfig
 from fenitop.tools.schema import TOOL_CONTRACT_VERSION
@@ -66,6 +66,7 @@ class ArtifactRecord(ContractModel):
     role: str
     format: str
     path: str
+    complete: bool = True
 
 
 class ValidateConfigRequest(ContractModel):
@@ -109,13 +110,38 @@ class TrustedRunPolicy(ContractModel):
     output_prefix: str | None = Field(
         default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
     )
-    scoped_output: bool = True
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=256)
     render_snapshot: bool = True
     solver_profile: Literal["auto", "iterative", "direct"] = "auto"
     output_interval: int = Field(default=20, ge=1, le=100)
-    allow_large_run: bool = False
     resource_limits: ResourceLimits = Field(default_factory=ResourceLimits)
     timeout_seconds: float = Field(default=900.0, gt=0)
+    termination_grace_seconds: float = Field(default=2.0, gt=0, le=30)
+    poll_interval_seconds: float = Field(default=0.05, gt=0, le=1)
+    min_free_disk_mb: float = Field(default=128.0, ge=0)
+
+    @field_validator("run_id", "output_prefix")
+    @classmethod
+    def reject_reserved_identifiers(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        reserved = {
+            "CON", "PRN", "AUX", "NUL",
+            *(f"COM{i}" for i in range(1, 10)),
+            *(f"LPT{i}" for i in range(1, 10)),
+        }
+        if value.upper() in reserved:
+            raise ValueError("Identifier is a reserved filesystem name.")
+        return value
+
+    @model_validator(mode="after")
+    def explicit_run_id_requires_idempotency(self):
+        if self.run_id is not None and self.idempotency_key is None:
+            raise ValueError(
+                "An explicit run_id requires an idempotency_key so retries "
+                "cannot accidentally alias unrelated work."
+            )
+        return self
 
 
 class TrustedAnalysisPolicy(ContractModel):
@@ -175,6 +201,27 @@ class SolverErrorRecord(ContractModel):
     residual_norm: float | None = None
 
 
+class JobLifecycleRecord(ContractModel):
+    state: Literal[
+        "queued", "running", "succeeded", "failed",
+        "timed_out", "cancelled", "orphaned",
+    ]
+    run_id: str
+    request_hash: str
+    idempotency_key_hash: str | None = None
+    created_at: str
+    updated_at: str
+    parent_pid: int | None = None
+    worker_pid: int | None = None
+    exit_code: int | None = None
+    terminating_signal: int | None = None
+    timed_out: bool = False
+    cancelled: bool = False
+    last_iteration: int | None = None
+    worker_api_key_present: bool | None = None
+    message: str | None = None
+
+
 class IterationMetrics(ContractModel):
     state: Literal["initial", "iterate"]
     iteration: int
@@ -208,6 +255,8 @@ class RunTopoptResponse(ContractModel):
     mma_inner_iteration_warnings: int | None = None
     wall_time_seconds: float | None = None
     artifacts: list[ArtifactRecord] = Field(default_factory=list)
+    lifecycle: JobLifecycleRecord | None = None
+    idempotent_replay: bool = False
     validation: ValidateConfigResponse | None = None
     estimated_cost: CostEstimate | None = None
     error: SolverErrorRecord | None = None
