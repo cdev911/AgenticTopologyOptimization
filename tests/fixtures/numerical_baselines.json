@@ -1,6 +1,6 @@
 {
   "baseline_schema_version": "1",
-  "tool_contract_version": "1.1.0",
+  "tool_contract_version": "2.0.0",
   "execution_scope": "serial",
   "characterized_from_commit": "de06b50b99334f9631be3ca0cf11d5260c004dca",
   "runtime": {
@@ -19,11 +19,14 @@
       "problem_type": "minimize_compliance",
       "iterations": 5,
       "stop_reason": "max_iterations_reached",
+      "final_beta": 1.0,
+      "continuation_completed": false,
       "metrics": {
-        "final_compliance": 0.15857966408607072,
-        "final_volume": 0.4000020814522742,
+        "final_compliance": 0.15606970814531007,
+        "final_volume": 0.40000693256281866,
         "final_objective": 0.0,
-        "grayness": 0.1507128839819919,
+        "grayness": 0.9272996302339234,
+        "binarization_score": 0.07270036976607663,
         "final_change": 0.03903293673166053
       },
       "relative_tolerance": 0.00005,
@@ -35,11 +38,14 @@
       "problem_type": "compliant_mechanism",
       "iterations": 5,
       "stop_reason": "max_iterations_reached",
+      "final_beta": 1.0,
+      "continuation_completed": false,
       "metrics": {
-        "final_compliance": 0.3869788964994092,
-        "final_volume": 0.29610996024381214,
-        "final_objective": -0.011438731917522607,
-        "grayness": 0.2296876995208994,
+        "final_compliance": 0.4973817681142362,
+        "final_volume": 0.27727411618464265,
+        "final_objective": -0.02722738885061788,
+        "grayness": 0.7942507557235264,
+        "binarization_score": 0.20574924427647356,
         "final_change": 0.04999938428808718
       },
       "relative_tolerance": 0.00005,

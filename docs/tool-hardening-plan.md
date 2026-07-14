@@ -1,6 +1,6 @@
 # Tool Hardening Plan
 
-Status: TH-0 through TH-2 complete; TH-3 is next
+Status: TH-0 through TH-3 complete; TH-4 is next
 Created: 2026-07-26
 Owner/source of truth for status: `docs/spec.md` §0 and §11
 
@@ -371,6 +371,41 @@ Exit criteria:
 - Compliance and mechanism baselines remain within documented tolerances.
 - Tiny-mesh analytical/adjoint sensitivities agree with finite differences within
   documented numerical tolerances.
+
+Completion (2026-07-26):
+
+- Advanced the public tool contract to `2.0.0` while retaining agent-safe config
+  schema `1.1`. Successful run responses now expose conventional physical-density
+  grayness, its complementary binarization score, final beta, continuation
+  completion, and explicit OC/MMA status.
+- Added a shared typed numerical-failure layer. Every elasticity, adjoint,
+  density-filter forward, and density-filter adjoint solve checks PETSc's
+  convergence reason and residual; all state fields, objectives, constraints,
+  gradients, updates, and summaries are checked for finiteness, with densities
+  additionally bounded.
+- OC now rejects invalid volume gradients, complex/non-descent square-root
+  updates, infeasible linearized volume constraints, non-finite updates, and
+  failed bisection. MMA reports successful residual/iteration status and converts
+  singular Newton systems, exhausted line searches, inner caps, and non-finite
+  states into typed numerical failures rather than warnings.
+- Replaced the mixed pre/post-update loop with one evaluated-state contract:
+  configured/passive initial density is filtered, projected, solved, logged, and
+  saved at iteration zero; every update is then evaluated before logging/saving;
+  the returned density, displacement, history, summary, render grid, and metrics
+  all describe the same final state. Tolerance convergence additionally requires
+  completed projection continuation and at least one update after the final beta
+  transition.
+- Added central directional finite-difference checks for compliance, volume, and
+  compliant-mechanism objective/constraint sensitivities through the complete
+  filter/projection chain (relative tolerance `3e-3`, absolute tolerance `2e-6`).
+  Fault injection covers elasticity, adjoint, filter forward/adjoint, optimizer
+  non-finiteness, and singular MMA subproblems.
+- Added deterministic cleanup for run logger handlers and owned PETSc
+  solvers/matrices/vectors. Repeated-run tests leave no run logger handler open.
+  The resource model now charges `max_iter + 1` evaluated states; fresh pinned
+  medium measurements remain below its memory/output/wall estimates.
+- Refreshed both numerical baselines to the corrected final evaluated state and
+  verified all 80 root-discovered tests with no expected failures.
 
 ### TH-4 — Filesystem safety, idempotency, and subprocess containment
 

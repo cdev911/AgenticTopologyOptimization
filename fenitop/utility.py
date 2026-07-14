@@ -25,6 +25,8 @@ from dolfinx.fem.petsc import assemble_matrix, assemble_vector, create_matrix, c
 from petsc4py import PETSc
 from scipy.spatial import cKDTree
 
+from fenitop.numerics import check_ksp, require_finite
+
 
 def create_mechanism_vectors(func_space, in_spring, out_spring):
     """Create vectors for compliant mechanism design."""
@@ -93,7 +95,7 @@ class LinearProblem:
         self.rhs_vec.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
         set_bc(self.rhs_vec, self.bcs)
 
-    def solve_fem(self):
+    def solve_fem(self, iteration=None):
         """Solve K*x=F for FEM."""
         self.lhs_mat.zeroEntries()
         assemble_matrix(self.lhs_mat, self.lhs_form, bcs=self.bcs)
@@ -101,20 +103,42 @@ class LinearProblem:
         if self.spring_vec is not None:
             self.lhs_mat.setDiagonal(self.lhs_mat.getDiagonal() + self.spring_vec)
         self.solver.solve(self.rhs_vec, self.u_wrap)
+        check_ksp(self.solver, component="elasticity", iteration=iteration)
         self.u.x.scatter_forward()
+        require_finite(
+            "displacement", self.u.x.array,
+            component="elasticity", iteration=iteration,
+            comm=self.u.function_space.mesh.comm,
+        )
 
-    def solve_adjoint(self):
+    def solve_adjoint(self, iteration=None):
         """Solve K*lambda=-L for the adjoint equation."""
         self.solver.solve(-self.l_vec, self.lam_wrap)
+        check_ksp(self.solver, component="adjoint", iteration=iteration)
         self.lam.x.scatter_forward()
+        require_finite(
+            "adjoint field", self.lam.x.array,
+            component="adjoint", iteration=iteration,
+            comm=self.lam.function_space.mesh.comm,
+        )
 
-    def __del__(self):
+    def close(self):
+        """Release PETSc resources deterministically; safe to call repeatedly."""
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
         self.solver.destroy()
         self.lhs_mat.destroy()
         self.rhs_vec.destroy()
         if self.spring_vec is not None:
             self.spring_vec.destroy()
             self.l_vec.destroy()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 class Communicator:

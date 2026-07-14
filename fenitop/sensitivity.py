@@ -24,6 +24,8 @@ from dolfinx.fem import form, assemble_scalar
 from dolfinx.fem.petsc import create_vector, create_matrix, assemble_vector, assemble_matrix
 from petsc4py import PETSc
 
+from fenitop.numerics import require_finite
+
 
 class Sensitivity():
     def __init__(self, comm, opt, problem, u_field, lambda_field, rho_phys):
@@ -43,6 +45,7 @@ class Sensitivity():
         assemble_vector(self.dVdrho_vec, dVdrho_form)
         self.dVdrho_vec.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
         self.dVdrho_vec /= self.total_volume
+        self.dVdrho_work = self.dVdrho_vec.copy()
 
         # Displacement
         self.opt_compliance = opt["opt_compliance"]
@@ -54,11 +57,7 @@ class Sensitivity():
             self.dUdrho_vec = rho_phys.x.petsc_vec.copy()
             self.prod_vec = u_field.x.petsc_vec.copy()
 
-    def __del__(self):
-        if not getattr(self, 'opt_compliance', True) and hasattr(self, 'prod_vec'):
-            self.prod_vec.destroy()
-
-    def evaluate(self):
+    def evaluate(self, iteration=None):
         # Compliance
         if self.opt_compliance:
             C_value = self.comm.allreduce(assemble_scalar(self.C_form), op=MPI.SUM)
@@ -71,12 +70,12 @@ class Sensitivity():
         self.dCdrho_vec.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
         actual_volume = self.comm.allreduce(assemble_scalar(self.V_form), op=MPI.SUM)
         V_value = actual_volume / self.total_volume
-        self.dVdrho_vec_copy = self.dVdrho_vec.copy()
+        self.dVdrho_vec.copy(self.dVdrho_work)
 
         # Displacement
         if not self.opt_compliance:
             U_value = self.u_field.x.petsc_vec.dot(self.l_vec)
-            self.problem.solve_adjoint()
+            self.problem.solve_adjoint(iteration=iteration)
             self.dfdrho_mat.zeroEntries()
             assemble_matrix(self.dfdrho_mat, self.dfdrho_form)
             self.dfdrho_mat.assemble()
@@ -85,5 +84,34 @@ class Sensitivity():
             U_value, self.dUdrho_vec = 0, None
 
         func_values = [C_value, V_value, U_value]
-        sensitivities = [self.dCdrho_vec, self.dVdrho_vec_copy, self.dUdrho_vec]
+        require_finite(
+            "objective and constraints", func_values,
+            component="sensitivity_evaluation", iteration=iteration, comm=self.comm,
+        )
+        sensitivities = [self.dCdrho_vec, self.dVdrho_work, self.dUdrho_vec]
+        for index, vector in enumerate(sensitivities):
+            if vector is not None:
+                require_finite(
+                    f"sensitivity {index}", vector.array,
+                    component="sensitivity_evaluation", iteration=iteration, comm=self.comm,
+                )
         return func_values, sensitivities
+
+    def close(self):
+        """Release PETSc resources deterministically; safe to call repeatedly."""
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+        self.dCdrho_vec.destroy()
+        self.dVdrho_vec.destroy()
+        self.dVdrho_work.destroy()
+        if not self.opt_compliance:
+            self.dfdrho_mat.destroy()
+            self.dUdrho_vec.destroy()
+            self.prod_vec.destroy()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass

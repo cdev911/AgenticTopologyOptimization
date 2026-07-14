@@ -49,7 +49,14 @@ def estimate_cost(
     linear_solves = 3 if problem_type == "minimize_compliance" else 4
     solver_work_multiplier = 1 if profile == "iterative" else 3
     complexity_score = float(num_elements * max(max_iter, 1))
-    work_units = complexity_score * linear_solves * solver_work_multiplier
+    # The evaluated-state contract solves iteration zero plus every updated
+    # design, so max_iter updates produce max_iter + 1 complete states.
+    evaluated_states = max(max_iter, 1) + 1
+    work_units = (
+        float(num_elements * evaluated_states)
+        * linear_solves
+        * solver_work_multiplier
+    )
 
     # Sparse matrix/vector + mesh/field planning model. The 12x direct factor
     # multiplier accounts for fill-in in the supported 2D problem sizes.
@@ -100,6 +107,7 @@ def estimate_cost(
         "num_design_variables": num_design_variables,
         "displacement_dofs": displacement_dofs,
         "max_iter": max_iter,
+        "evaluated_states": evaluated_states,
         "linear_solves_per_iteration": linear_solves,
         "complexity_score": complexity_score,
         "work_units": work_units,

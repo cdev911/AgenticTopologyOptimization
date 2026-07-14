@@ -78,7 +78,9 @@ Each run writes FEniCSx-native XDMF time series output with HDF5 sidecar data:
 - `<prefix>_density_history.xdmf` and `<prefix>_density_history.h5` contain the scalar physical density history.
 - `<prefix>_displacement_history.xdmf` and `<prefix>_displacement_history.h5` contain the vector displacement history.
 - `<prefix>_run.log` contains flushed per-iteration logging and structured `history` JSON records.
-- `<prefix>_summary.json` contains the final compliance, volume, objective, grayness, and iteration count.
+- `<prefix>_summary.json` contains final evaluated compliance, volume, objective,
+  conventional grayness, binarization, design change, beta/continuation state,
+  optimizer status, and iteration count.
 
 The XDMF files are intended to be opened in ParaView. Density and displacement are written as separate time series so each file has a clean, selectable field while keeping all time steps for that field in one place.
 
@@ -90,13 +92,15 @@ policy. Generated output files are ignored by Git.
 
 Beyond the example scripts, `fenitop/tools/` exposes the config-driven workflow as three composable tools for an agent (or any script) to call, each usable as a plain Python function, a `--input`/`--output` JSON CLI, or an MCP tool — one implementation behind all three. The tool wrappers send their own logging to stderr so stdout can be reserved for machine-readable responses; the hardening note below records a remaining solver-level violation of that contract.
 
-> **Hardening status (2026-07-26):** TH-0 through TH-2 are complete. The runtime
-> and numerical baselines are pinned; the public tools now use contract `1.1.0`
+> **Hardening status (2026-07-26):** TH-0 through TH-3 are complete. The runtime
+> and numerical baselines are pinned; the public tools now use contract `2.0.0`
 > and physics-only config schema `1.1`. Source strings and execution controls are
 > absent from the agent surface, semantic/mesh-backed validation covers every
-> current solver input, and independent resource ceilings are calibrated in the
-> pinned image. Numerical-state correctness, subprocess containment, transport
-> isolation, and a verified run manifest remain. Agentic development stays paused
+> current solver input, independent resource ceilings are calibrated in the
+> pinned image, and successful solves now require checked linear solves, finite
+> bounded states, explicit optimizer success, and consistent evaluated artifacts.
+> Subprocess containment, transport isolation, and a verified run manifest remain.
+> Agentic development stays paused
 > until the full blocking [tool-hardening plan](docs/tool-hardening-plan.md) passes;
 > `docs/spec.md` is the live status source.
 
@@ -199,9 +203,9 @@ The package marker at `tests/__init__.py` is intentional: without it Python's
 default unittest discovery can silently skip nested test modules. A zero-test run
 now exits nonzero. The suite includes fast real solves for compliance and
 compliant-mechanism modes with tolerance-based references in
-`tests/fixtures/numerical_baselines.json`. One expected failure records the known
-`initial_density` bug until TH-3 fixes it. The TH-2 checkpoint runs 66 tests with
-that one expected failure.
+`tests/fixtures/numerical_baselines.json`, directional finite-difference
+sensitivity checks, injected numerical failures, initial/final-state consistency,
+and cleanup checks. The TH-3 checkpoint runs all 80 tests successfully.
 
 ## Repository layout
 

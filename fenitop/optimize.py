@@ -18,27 +18,91 @@ Reference:
   https://doi.org/10.1007/s00158-024-03818-7
 """
 
+from dataclasses import asdict, dataclass
+
 import numpy as np
 from mpi4py import MPI
 from scipy import sparse as sparse
 from scipy.linalg import solve
 
+from fenitop.numerics import NumericalError, NumericalFailure, require_finite
+
+
+@dataclass(frozen=True)
+class OptimizerStatus:
+    method: str
+    converged: bool
+    outer_iterations: int
+    newton_iterations: int = 0
+    line_search_iterations: int = 0
+    residual_norm: float | None = None
+    residual_max: float | None = None
+
+    def as_dict(self):
+        return asdict(self)
+
 
 def optimality_criteria(rho, rho_min, rho_max, V, dCdrho, dVdrho, move=0.05):
     """Solution update scheme with optimality criteria (OC)."""
+    component = "optimality_criteria"
+    require_finite("inputs", [V, move], component=component)
+    for name, values in [
+        ("density", rho), ("lower bounds", rho_min), ("upper bounds", rho_max),
+        ("objective gradient", dCdrho), ("volume gradient", dVdrho),
+    ]:
+        require_finite(name, values, component=component)
+    if np.any(dVdrho <= 0):
+        raise NumericalError(NumericalFailure(
+            code="oc_invalid_volume_gradient", component=component,
+            message="OC requires a strictly positive volume gradient.",
+        ))
+    ratio_numerator = -dCdrho / dVdrho
+    if np.any(ratio_numerator < -1e-12):
+        raise NumericalError(NumericalFailure(
+            code="oc_non_descent_gradient", component=component,
+            message=(
+                "OC requires a non-positive compliance gradient so its "
+                "square-root update is real and descending."
+            ),
+        ))
+    ratio_numerator = np.maximum(ratio_numerator, 0.0)
     lb, ub = 0.0, 1e6
     comm = MPI.COMM_WORLD
-    while ub-lb > 1e-4:
+    minimum_linearized_volume = V + comm.allreduce(
+        dVdrho @ (rho_min - rho), op=MPI.SUM
+    )
+    if minimum_linearized_volume > 1e-10:
+        raise NumericalError(NumericalFailure(
+            code="oc_infeasible_volume_update", component=component,
+            message=(
+                "OC cannot satisfy the linearized volume constraint within "
+                "the supplied density bounds."
+            ),
+        ))
+    iterations = 0
+    while ub-lb > 1e-4 and iterations < 100:
+        iterations += 1
         mid = (lb+ub) / 2.0
-        case1 = np.minimum.reduce([rho*(-dCdrho/(dVdrho+1e-12)/mid)**0.5, rho+move, rho_max])
+        case1 = np.minimum.reduce([
+            rho * np.sqrt(ratio_numerator / mid), rho + move, rho_max
+        ])
         rho_new = np.maximum.reduce([case1, rho-move, rho_min])
+        require_finite("density update", rho_new, component=component)
         dV = comm.allreduce(dVdrho@(rho_new-rho), op=MPI.SUM)
         if V + dV > 0:
             lb = mid
         else:
             ub = mid
+    if iterations >= 100:
+        raise NumericalError(NumericalFailure(
+            code="oc_bisection_failed", component=component,
+            message="OC volume-multiplier bisection did not converge.",
+        ))
     change = comm.allreduce(np.max(np.abs(rho_new-rho), initial=0), op=MPI.MAX)
-    return rho_new, change
+    require_finite("design change", change, component=component)
+    return rho_new, change, OptimizerStatus(
+        method="oc", converged=True, outer_iterations=iterations
+    )
 
 
 def mma_optimizer(m, n, opt_iter, xval, xmin, xmax, xold1, xold2, df0dx, fval,
@@ -137,12 +201,23 @@ def mma_optimizer(m, n, opt_iter, xval, xmin, xmax, xold1, xold2, df0dx, fval,
     b = P_mat@(1.0/(upp-xval)) + Q_mat@(1.0/(xval-low))
     b = comm.allreduce(b, op=MPI.SUM) - fval
 
+    for name, values in [
+        ("design", xval), ("objective gradient", df0dx),
+        ("constraints", fval), ("constraint gradients", dfdx),
+        ("lower asymptotes", low), ("upper asymptotes", upp),
+    ]:
+        require_finite(name, values, component="mma", iteration=opt_iter)
+
     # Solve the subproblem with a primal-dual interior-point approach
-    x_new = solve_subproblem(m, epsimin, low, upp, alpha, beta, p0, q0,
-                             P_mat, Q_mat, a0, a, b, c, d,
-                             logger=logger, opt_iter=opt_iter)
+    x_new, status = solve_subproblem(
+        m, epsimin, low, upp, alpha, beta, p0, q0,
+        P_mat, Q_mat, a0, a, b, c, d,
+        logger=logger, opt_iter=opt_iter,
+    )
+    require_finite("density update", x_new, component="mma", iteration=opt_iter)
     change = comm.allreduce(np.max(np.abs(x_new-xval), initial=0), op=MPI.MAX)
-    return x_new, change, low, upp
+    require_finite("design change", change, component="mma", iteration=opt_iter)
+    return x_new, change, low, upp, status
 
 
 def solve_subproblem(m, epsimin, low, upp, alpha, beta, p0, q0, P_mat, Q_mat,
@@ -169,7 +244,11 @@ def solve_subproblem(m, epsimin, low, upp, alpha, beta, p0, q0, P_mat, Q_mat,
         mu = np.maximum(0.5*c, 1.0)
         zeta = 1.0
 
+    outer_iterations = 0
+    total_newton_iterations = 0
+    total_line_search_iterations = 0
     while eps > epsimin:  # Primal-dual interior point method
+        outer_iterations += 1
         p_lambda = p0 + _lambda@P_mat
         q_lambda = q0 + _lambda@Q_mat
         g_vec = P_mat@(1.0/(upp-x)) + Q_mat@(1.0/(x-low))
@@ -196,13 +275,15 @@ def solve_subproblem(m, epsimin, low, upp, alpha, beta, p0, q0, P_mat, Q_mat,
             res_norm, res_max = None, None
         res_norm = comm.bcast(res_norm, root=0)
         res_max = comm.bcast(res_max, root=0)
+        require_finite(
+            "primal-dual residuals", [res_norm, res_max],
+            component="mma_subproblem", iteration=opt_iter, comm=comm,
+        )
 
         newton_iter = 0
         while res_max > 0.9*eps and newton_iter < 100:  # Newton's method for the search direction
             newton_iter += 1
-            if newton_iter == 100 and comm.rank == 0:
-                msg = f"mma_inner_iteration_cap_reached iteration={opt_iter} newton_iter={newton_iter}"
-                logger.warning(msg) if logger is not None else print(msg, flush=True)
+            total_newton_iterations += 1
 
             # Evaluate the left-hand side
             p_lambda = p0 + _lambda@P_mat
@@ -236,7 +317,20 @@ def solve_subproblem(m, epsimin, low, upp, alpha, beta, p0, q0, P_mat, Q_mat,
 
             # Solve the search direction
             if comm.rank == 0:
-                solution = solve(lhs, rhs)
+                try:
+                    solution = solve(lhs, rhs)
+                except Exception as exc:
+                    raise NumericalError(NumericalFailure(
+                        code="mma_singular_subproblem",
+                        component="mma_subproblem",
+                        iteration=opt_iter,
+                        message=f"MMA subproblem linear solve failed: {exc}",
+                    )) from exc
+                require_finite(
+                    "Newton direction", solution,
+                    component="mma_subproblem", iteration=opt_iter,
+                    comm=MPI.COMM_SELF,
+                )
                 incr_lambda, incr_z = solution[:m], solution[m]
                 incr_y = -delta_y/diag_y + incr_lambda/diag_y
                 incr_mu = -mu + eps/y - (mu*incr_y)/y
@@ -284,6 +378,7 @@ def solve_subproblem(m, epsimin, low, upp, alpha, beta, p0, q0, P_mat, Q_mat,
             res_norm_new = 2*res_norm
             while res_norm_new > res_norm and search_iter < 50:  # Line search for the step size
                 search_iter += 1
+                total_line_search_iterations += 1
 
                 # Update the solutions
                 x = x_old + step*incr_x
@@ -321,11 +416,55 @@ def solve_subproblem(m, epsimin, low, upp, alpha, beta, p0, q0, P_mat, Q_mat,
                 else:
                     res_norm_new = None
                 res_norm_new = comm.bcast(res_norm_new, root=0)
+                require_finite(
+                    "line-search residual", res_norm_new,
+                    component="mma_subproblem", iteration=opt_iter, comm=comm,
+                )
                 step *= 0.5
 
+            if res_norm_new > res_norm:
+                raise NumericalError(NumericalFailure(
+                    code="mma_line_search_failed",
+                    component="mma_subproblem",
+                    iteration=opt_iter,
+                    residual_norm=float(res_norm_new),
+                    message=(
+                        "MMA line search exhausted 50 reductions without "
+                        "reducing the primal-dual residual."
+                    ),
+                ))
             res_norm = res_norm_new
             res_max = np.linalg.norm(res, ord=np.inf) if comm.rank == 0 else None
             res_max = comm.bcast(res_max, root=0)
+        if res_max > 0.9*eps:
+            msg = (
+                f"mma_inner_iteration_cap_reached iteration={opt_iter} "
+                f"newton_iter={newton_iter}"
+            )
+            if comm.rank == 0 and logger is not None:
+                logger.error(msg)
+            raise NumericalError(NumericalFailure(
+                code="mma_inner_iteration_cap",
+                component="mma_subproblem",
+                iteration=opt_iter,
+                residual_norm=float(res_norm),
+                message=(
+                    "MMA Newton solve reached its 100-iteration cap before "
+                    "meeting the residual tolerance."
+                ),
+            ))
         eps *= 0.1
 
-    return x
+    require_finite(
+        "subproblem solution", x,
+        component="mma_subproblem", iteration=opt_iter, comm=comm,
+    )
+    return x, OptimizerStatus(
+        method="mma",
+        converged=True,
+        outer_iterations=outer_iterations,
+        newton_iterations=total_newton_iterations,
+        line_search_iterations=total_line_search_iterations,
+        residual_norm=float(res_norm),
+        residual_max=float(res_max),
+    )
