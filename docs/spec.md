@@ -30,10 +30,11 @@ Last updated: 2026-07-26
   clarification is allowed for incomplete/ambiguous requests without adding a
   pre-run confirmation gate; and `gpt-5.6-terra` replaces the old
   `gpt-4.1-mini` default.
-- **Next action**: Stage TH-5 (§11 and `docs/tool-hardening-plan.md` §4) — make
-  every public JSON-shaped call total, keep tracebacks local, reserve CLI stdout
-  for exactly one response, and verify real CLI and MCP stdio framing. Do not start
-  `agentic/` yet.
+- **Next action**: Combined Stage TH-5+TH-6 (§11 and
+  `docs/tool-hardening-plan.md` §4) — finalize the manifest/analysis contract first,
+  then validate that exact contract across total direct, CLI, and MCP boundaries.
+  Use focused tests during implementation and one full numerical/transport/
+  composition regression at the combined gate. Do not start `agentic/` yet.
 - **If you're an AI assistant picking this up cold**: read this whole file before
   doing anything, then summarize your understanding of current state + proposed
   next step back to the user before acting. See `CLAUDE.md`/`AGENTS.md` at the
@@ -378,6 +379,16 @@ Flagged during initial planning (2026-07-25), not yet actioned:
 
 Reverse-chronological. Each entry: date, decision, why, status.
 
+- **2026-07-26** — Implement TH-5 and TH-6 as one combined checkpoint while
+  retaining both sets of exit criteria. Build the final manifest-driven Tool 2→Tool
+  3 contract before freezing CLI/MCP schemas and transport fixtures; use focused
+  tests during development and run the expensive full numerical/transport/
+  composition suite once at the combined gate. Keep TH-7 as a separate
+  documentation/final review, but reuse that full regression if no executable code
+  changes afterward. Reason: TH-6 necessarily changes the schemas and payloads
+  TH-5 must transport, so separate checkpoints would duplicate fixtures, schema
+  snapshots, and full solver runs without reducing risk. Status: decided; combined
+  implementation is next.
 - **2026-07-26** — TH-4 advances the public contract to `3.0.0` while retaining
   config schema `1.1`. The application allocates immutable per-run directories and
   owns safe IDs, request hashes, idempotency, disk admission, and a single active
@@ -489,9 +500,10 @@ Reverse-chronological. Each entry: date, decision, why, status.
 
 ## 10. Open Questions / Next Checkpoint
 
-The hardening architecture and order are decided. The next checkpoint is Stage
-TH-5 total boundaries and clean transports. Items intentionally resolved by
-measurement/implementation rather than guessed now:
+The hardening architecture and order are decided. The next checkpoint combines
+TH-5 total boundaries/transports with TH-6 manifest-driven analysis. TH-6's final
+payload is implemented before TH-5 freezes transport/schema tests. Items
+intentionally resolved by measurement/implementation rather than guessed now:
 
 - The trusted iterative compliance and direct mechanism PETSc profiles passed
   TH-3 convergence/residual checks and finite differences and TH-4 isolated-worker

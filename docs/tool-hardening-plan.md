@@ -1,6 +1,6 @@
 # Tool Hardening Plan
 
-Status: TH-0 through TH-4 complete; TH-5 is next
+Status: TH-0 through TH-4 complete; combined TH-5+TH-6 is next
 Created: 2026-07-26
 Owner/source of truth for status: `docs/spec.md` §0 and §11
 
@@ -664,6 +664,14 @@ After each workstream:
 - add a §9 decision entry only if implementation required a new design choice;
 - update this file if the accepted behavior or exit criterion changed;
 - do not begin the next workstream with unexplained failures or stale documentation.
+
+Execution consolidation (decided 2026-07-26): TH-5 and TH-6 are one implementation
+checkpoint, without merging or weakening their exit criteria. Finalize the
+RunManifest/analyzer payload before freezing CLI/MCP schemas and transport fixtures.
+Run focused affected tests while iterating, then run the full numerical, fault,
+transport, and composition suite once at the combined gate. TH-7 remains a separate
+documentation/final review and reuses that regression result if it makes no
+executable-code changes.
 
 ## 8. Definition of done
 
