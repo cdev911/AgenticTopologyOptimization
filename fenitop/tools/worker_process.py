@@ -1,4 +1,4 @@
-"""Subprocess launch, cancellation, and termination primitives for TH-4."""
+"""Subprocess launch, cancellation, and termination primitives."""
 from __future__ import annotations
 
 import os

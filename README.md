@@ -92,7 +92,8 @@ policy. Generated output files are ignored by Git.
 
 Beyond the example scripts, `fenitop/tools/` exposes the config-driven workflow as three composable tools for an agent (or any script) to call, each usable as a plain Python function, a `--input`/`--output` JSON CLI, or an MCP tool — one implementation behind all three. Logs and solver progress stay on stderr or in captured run files; CLI stdout is exactly one JSON response and real stdio MCP composition is tested.
 
-> **Hardening status (2026-07-26):** TH-0 through TH-7 are complete. The runtime
+> **Tool readiness (2026-07-26):** The tool layer is hardened and ready for the
+> deterministic agentic workflow. The runtime
 > and numerical baselines are pinned; the public tools now use contract `4.0.0`
 > and physics-only config schema `1.1`. Source strings and execution controls are
 > absent from the agent surface, semantic/mesh-backed validation covers every
@@ -103,10 +104,9 @@ Beyond the example scripts, `fenitop/tools/` exposes the config-driven workflow 
 > per-run paths, idempotent lifecycle state, one-solve admission, and tested
 > timeout/cancel/crash/orphan handling. Public boundaries are total and
 > transport-clean, and successful runs carry a durable, checksum-verified
-> `RunManifest` consumed directly by deterministic analysis. The full blocking
-> [tool-hardening plan](docs/tool-hardening-plan.md) has passed; deterministic
-> agentic development may begin after the model/secrets environment checkpoint.
-> `docs/spec.md` is the live status source.
+> `RunManifest` consumed directly by deterministic analysis. Deterministic agentic
+> development may begin after the model/secrets environment checkpoint.
+> `docs/spec.md` remains the live status source.
 
 The [hardened tool reference](docs/tool-reference.md) documents exact physics,
 every result field, lifecycle/artifact semantics, error and retry behavior, test
@@ -225,8 +225,7 @@ cleanup checks, path/idempotency adversarial cases, real isolated-worker timeout
 cancellation/signal recovery, generated malformed inputs, corrupt artifacts,
 calibrated heuristics, CLI purity, and real MCP composition. Focused development
 commands are listed in the [tool reference](docs/tool-reference.md); the full
-command above remains the checkpoint gate. The TH-7 gate passes all 107 tests in
-the pinned image.
+command above remains the checkpoint gate. All 107 tests pass in the pinned image.
 
 ## Repository layout
 

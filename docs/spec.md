@@ -9,30 +9,24 @@ Last updated: 2026-07-26
 
 ## 0. Current Status (read this first; update it last, every session)
 
-- **Stage**: Tool Hardening is complete; TH-0 through TH-7 and the full Stage TH
-  gate have passed. The next checkpoint is Stage 0 model environment/secrets
-  before deterministic agentic implementation.
+- **Stage**: Hardened tool layer complete. The next checkpoint is Stage 0 model
+  environment/secrets before deterministic agentic implementation.
 - **As of**: 2026-07-26.
-- **Just finished**: TH-7 documentation and holistic hardening review. The new
-  `docs/tool-reference.md` records exact physics, trust/capability limits, every
-  result family, lifecycle/artifacts, retry semantics, commands, test tiers, and
-  the future inspectable event trace. Every failure-matrix row now maps to a named
-  automated test. The review fixed two cross-phase defects: typed worker failures
-  now survive the parent boundary instead of being replaced by
-  `worker_result_invalid`, and successful-run analysis rejects malformed history
-  lines while crash recovery remains tolerant. Missing renderer and MMA-cap
-  regressions were also added. The pinned full gate passes all 107 tests in
-  18.706 seconds, including both numerical modes and real stdio MCP composition.
+- **Just finished**: post-hardening documentation cleanup. The obsolete workstream
+  plan and phase-by-phase history were removed; the final contract remains in
+  `docs/tool-reference.md`, the current architecture/decisions remain here, and
+  README contains the runnable public view. Generated Python caches were cleared
+  and local `.env` files are excluded from Git and Docker build contexts.
 - **Architecture decisions updated** (§3, §6, §6a): deterministic orchestration
   replaces the three-agent tool-calling pipeline; solver execution stays in the
   same image/container but moves to a child process without the API key;
   clarification is allowed for incomplete/ambiguous requests without adding a
   pre-run confirmation gate; and `gpt-5.6-terra` replaces the old
   `gpt-4.1-mini` default.
-- **Next action**: Stage 0 (§11): verify `.gitignore`, add `.env.example`, pin and
-  integrate the exact CrewAI/OpenAI environment, prove parent API access and
-  worker secret scrubbing, then run golden intent/model checks. Do not create
-  `agentic/` until the Stage 0 items that block it pass.
+- **Next action**: Stage 0 (§11): add `.env.example`, pin and integrate the exact
+  CrewAI/OpenAI environment, prove parent API access and worker secret scrubbing,
+  then run golden intent/model checks. Do not create `agentic/` until the Stage 0
+  items that block it pass.
 - **If you're an AI assistant picking this up cold**: read this whole file before
   doing anything, then summarize your understanding of current state + proposed
   next step back to the user before acting. See `CLAUDE.md`/`AGENTS.md` at the
@@ -87,12 +81,11 @@ describes the whole picture rather than being edited twice.
 
 ## 3. Architecture Overview: Brain vs Hands
 
-- **Hands** — `fenitop/` (existing; now entering hardening). The domain library:
-  FEM/topology optimization solver, plus `fenitop/tools/` — three framework-agnostic
-  operations (`validate_config`, `run_topopt`, `analyze_results`). The 2026-07-26
-  audit proved the happy path but also proved this is not yet a stable agent-facing
-  contract. Stage TH makes it typed, failure-contained, numerically explicit, and
-  safe before any CrewAI adapter exists.
+- **Hands** — `fenitop/` (complete for the supported v1 scope). The domain library:
+  FEM/topology optimization solver, plus `fenitop/tools/` — three hardened,
+  framework-agnostic operations (`validate_config`, `run_topopt`,
+  `analyze_results`). The contract is typed, failure-contained, numerically
+  explicit, and ready for a CrewAI adapter.
 - **Brain** — `agentic/` (new, not yet created — see Decision Log 2026-07-25). The
   natural-language interpretation and optional result-explanation layer. It does
   not decide whether validation/run/analysis happen or hand those deterministic
@@ -127,21 +120,21 @@ Practical implications, not yet done:
 - Verify the container has outbound internet access to reach api.openai.com.
 - `OPENAI_API_KEY` is supplied to the container via `docker-compose.yml`'s
   `env_file:` pointing at an untracked `.env` file — never baked into the image or
-  committed. `.env` needs adding to `.gitignore` (not yet checked). The solver
-  worker receives a sanitized environment without this key.
+  committed. Local `.env` files are excluded from Git and Docker build contexts.
+  The solver worker receives a sanitized environment without this key.
 
 ## 4. Repository Layout
 
 ### Current (as of 2026-07-26)
 ```
 fenitop/                  # domain library: solver + tools/
-  tools/                  # tool layer under Stage TH (validate_config, run_topopt, analyze_results)
+  tools/                  # hardened validate/run/analyze tool layer
 config/                   # example configs (beam_2d, mechanism_2d)
 scripts/                  # example CLI entry points (config-driven + legacy hardcoded)
 tests/                    # unittest-based, split dolfinx-free vs Docker-only
 results/                  # gitignored solver outputs
 docs/spec.md              # this file
-docs/tool-hardening-plan.md # detailed Stage TH workstreams, risks, and exit gates
+docs/tool-reference.md    # final tool capabilities, contracts, and operations
 ```
 
 ### Planned addition (not yet created)
@@ -156,8 +149,8 @@ agentic/
 tests/agentic/             # mocked-LLM + deterministic-flow integration tests
 ```
 
-Nothing under "Planned addition" exists yet. We create it deliberately, in a later
-checkpoint, after the Stage TH tool gate passes — not just the folder shell.
+Nothing under "Planned addition" exists yet. We create it deliberately after the
+Stage 0 environment/model checkpoint—not just as a folder shell.
 
 ## 5. Tool Contract (the "hands" API)
 
@@ -206,21 +199,7 @@ Source of truth: `fenitop/tools/contracts.py`,
   registration explicitly switches that generated model to `extra="forbid"` and
   tests both its schema and runtime behavior.
 
-**Historical audit correction (2026-07-26): the earlier “errors never raise” and
-“stable contract” claims were too strong.** Targeted checks found uncaught
-request/I/O/geometry errors, mixed CLI stdout, executable strings, path authority,
-incomplete physical validation, unverified PETSc convergence/final-state
-consistency, and lossy Tool 2→Tool 3 composition. TH-1 removed executable strings
-and public execution controls, added typed direct composition, and contained Tool
-3 reads; TH-2 completed semantic/resource validation; TH-3 completed numerical
-and evaluated-state correctness; TH-4 added process/filesystem/lifecycle
-containment; TH-5 and TH-6 closed total-boundary, transport, manifest, and
-composition gaps; TH-7 closed the documented failure matrix and cross-phase
-review.
-
-The detailed remediation source is `docs/tool-hardening-plan.md`. TH-1 implements
-the capability split and typed-envelope portions of the first two boundary
-decisions below; the complete analysis manifest remains a TH-6 gate:
+The final hardened boundary is built around six guarantees:
 
 1. **Two capability levels**: a strict `AgentSafeConfig` (physics only, region DSL
    only) and trusted application-owned run policy (paths, solver profile, limits,
@@ -242,8 +221,8 @@ decisions below; the complete analysis manifest remains a TH-6 gate:
    never asks an LLM to retype a config/path; stdout is one JSON response; real CLI
    and MCP integration tests verify framing.
 
-This Stage TH gate blocks any CrewAI wrapper. We do not wrap the current unsafe/raw
-surface and plan to fix it later.
+These guarantees are covered by the pinned 107-test suite. The detailed operational
+and field-level contract is in `docs/tool-reference.md`.
 
 ## 6. Brain: LLM Provider Strategy
 
@@ -347,16 +326,15 @@ Existing (unittest-based, already in place):
 - Test entry point: `docker compose run --rm -T fenitop python -m unittest discover -v`.
   `tests/__init__.py` makes nested discovery reliable; zero collection exits 5.
   Current result: all 107 tests pass with no expected failures
-  (`docker compose run --rm -T fenitop python -m unittest discover -v`, TH-7 gate,
-  18.706 seconds).
+  (`docker compose run --rm -T fenitop python -m unittest discover -v`, 18.706
+  seconds at the final tool checkpoint).
 
 Remaining additions for agent-workflow compatibility:
-- **Tool-hardening suite (passed)**: contract/schema, generated
+- **Hardened-tool suite (passed)**: contract/schema, generated
   adversarial JSON, path/security, geometry/numerics/fault injection, subprocess
   lifecycle, CLI stdout, actual MCP stdio, artifact integrity, and
-  manifest-driven Tool 2→Tool 3 composition are implemented. TH-7 maps every
-  failure scenario to named automated evidence.
-- **Measured resource calibration**: completed in TH-2 and frozen in
+  manifest-driven Tool 2→Tool 3 composition are implemented.
+- **Measured resource calibration**: frozen in
   `tests/fixtures/resource_calibration.json`; refresh deliberately if the runtime,
   estimator, solver profiles, or output state model changes.
 - **Mocked-LLM deterministic-flow integration test**: canned
@@ -379,7 +357,7 @@ Flagged during initial planning (2026-07-25), not yet actioned:
 - License/attribution check: confirm the origin/license of the `fenitop` codebase
   before presenting this publicly as a demo.
 
-TH-7 holistic review findings (2026-07-26):
+Final tool review findings (2026-07-26):
 
 - No architectural reversal is needed. Deterministic orchestration,
   same-container/separate-process solves, clarification without confirmation,
@@ -405,96 +383,20 @@ TH-7 holistic review findings (2026-07-26):
 
 Reverse-chronological. Each entry: date, decision, why, status.
 
-- **2026-07-26** — Close Stage TH after TH-7 documentation and holistic review.
-  Retain the existing architecture and contract `4.0.0`; add no new model-facing
-  capabilities. Fix typed worker failures being overwritten by success-manifest
-  construction and require strict successful-run history parsing while keeping
-  crash recovery tolerant. Add explicit renderer/MMA/parent-boundary/history
-  regressions, map every failure-matrix row to tests, and adopt focused versus full
-  test tiers. Reason: the final gate must test interactions between completed
-  phases and make accepted physics/trust limits visible before agentic code
-  depends on them. Status: implemented; all 107 pinned tests pass.
-- **2026-07-26** — Combined TH-5+TH-6 advances the public contract to `4.0.0`
-  while retaining config schema `1.1`. Successful Tool 2 results contain a
-  canonical/durable `RunManifest`; relative artifacts carry size, completeness,
-  and SHA-256 evidence. Tool 3 accepts only that manifest, verifies it and every
-  artifact, parses bounded non-pickle data, cross-checks final facts, and reports
-  explicit constraints plus versioned mesh/filter-aware heuristics. All direct
-  tools are total, public tracebacks are replaced by local debug references,
-  solver prints no longer touch transport stdout, CLI behavior/exit codes are
-  tested, and real stdio MCP composition survives an active solve. Reason: freeze
-  one trustworthy payload across direct, CLI, and MCP surfaces and make analysis
-  reject stale, corrupt, incomplete, or reconstructed evidence. Status:
-  implemented; all 103 tests and 99 subtests pass, including both real numerical
-  modes and one stdio MCP validate→run→analyze flow.
-- **2026-07-26** — Implement TH-5 and TH-6 as one combined checkpoint while
-  retaining both sets of exit criteria. Build the final manifest-driven Tool 2→Tool
-  3 contract before freezing CLI/MCP schemas and transport fixtures; use focused
-  tests during development and run the expensive full numerical/transport/
-  composition suite once at the combined gate. Keep TH-7 as a separate
-  documentation/final review, but reuse that full regression if no executable code
-  changes afterward. Reason: TH-6 necessarily changes the schemas and payloads
-  TH-5 must transport, so separate checkpoints would duplicate fixtures, schema
-  snapshots, and full solver runs without reducing risk. Status: implemented as
-  the contract `4.0.0` checkpoint.
-- **2026-07-26** — TH-4 advances the public contract to `3.0.0` while retaining
-  config schema `1.1`. The application allocates immutable per-run directories and
-  owns safe IDs, request hashes, idempotency, disk admission, and a single active
-  solve. Each solve executes serially in a credential-scrubbed child process group;
-  atomic job state records timeout, cancellation, signal/exit status, partial
-  artifacts, and restart orphan recovery. A duplicate idempotency key replays the
-  matching state/result and conflicts on changed request content. Reason: Python
-  exception handling in the API-bearing parent cannot contain native PETSc/MPI
-  failure or make concurrent retries safe. Status: implemented and verified by 95
-  tests and 54 subtests, including real timeout/cancel/signal cases.
-- **2026-07-26** — TH-3 advances the public contract to `2.0.0` while retaining
-  config schema `1.1`. A topology state is public only after filter, projection,
-  elasticity/adjoint evaluation, and metric checks complete; iteration zero and
-  every update use that same contract. Conventional grayness is
-  `mean(4ρ(1-ρ))` over physical density and binarization is its complement.
-  Design-change tolerance counts as convergence only after beta continuation is
-  complete and one update has run at the final beta. PETSc divergence,
-  non-finite/bounds failures, invalid OC assumptions, and failed MMA subproblems
-  are typed numerical errors. Reason: an agent must never receive success for an
-  unevaluated, stale, divergent, or ambiguously described design. Status:
-  implemented and verified by 80 tests, including finite differences and fault
-  injection.
-- **2026-07-26** — TH-2 advances the public contract/config versions to
-  `1.1.0`/`1.1`. Tool 1 now treats absent/zero loads, overlapping tractions,
-  tractions on full clamps, unmatched/overlapping/constrained springs,
-  unmatched/overlapping passive zones, voided required neighborhoods,
-  forced-solid volume infeasibility, and extreme spring/material scaling as hard
-  errors. Overlapping tractions are rejected rather than implicitly summed because
-  the current solver silently keeps the first facet tag. Resource admission uses
-  eight independent application-owned limits and a solver-aware estimate calibrated
-  against fresh medium serial compliance/mechanism runs. Reason: syntactically
-  valid input must still be physically meaningful and bounded before Dolfinx or an
-  expensive solve is reached. Status: implemented and verified.
-- **2026-07-26** — TH-1 replaces contract `0.1.0` with strict contract `1.0.0`
-  and config schema `1.0`. Agent requests contain only `AgentSafeConfig` physics;
-  trusted Python policies own execution authority. Serialized geometry is the
-  bounded 2D discriminated DSL only, mechanism springs are named and positive,
-  vectors are exact/finite, and v1 explicitly rejects nonzero or component-wise
-  supports. Tool 3 accepts Tool 2's typed envelope. Actual MCP input/output schemas
-  and outer-extra rejection are snapshot/runtime tested; artifact reads are
-  contained beneath trusted application roots. Reason: make invalid and
-  over-authorized states unrepresentable before an LLM is connected. Status:
-  implemented and verified; numerical/resource/process/manifest gates remain.
-- **2026-07-26** — TH-0 pins the immutable Dolfinx image digest, installed Ubuntu
-  package versions, Python 3.12 minor line, direct Python dependencies, and their
-  PyPI dependency closure. The current dict envelope is frozen as contract
-  `0.1.0`; incompatible typed-contract changes in TH-1 must increment it. Serial
-  compliance and mechanism reference cases use relative/absolute tolerances and
-  config hashes rather than byte-identical output. Reason: make later failures
-  attributable without treating floating-point artifacts as portable bytes.
-  Status: implemented and verified.
-- **2026-07-26** — Tool hardening is a blocking stage before any `agentic/`
-  implementation. The tools have a real tested happy path (59 intended-runtime
-  tests passed) but the audit found executable-string/path capabilities, incomplete
-  validation/exception containment, unverified numerical convergence,
-  inconsistent state/artifacts, stdout transport pollution, and lossy
-  Tool 2→Tool 3 composition. Detailed workstreams and exit gates are in
-  `docs/tool-hardening-plan.md`. Status: decided/planned, not implemented.
+- **2026-07-26** — Remove the completed tool-hardening workstream plan and
+  phase-by-phase history. Preserve the final contract in `docs/tool-reference.md`
+  and keep one consolidated completion decision here. Reason: completed
+  implementation scaffolding was obscuring the current Stage 0/1 handover.
+  Status: done.
+- **2026-07-26** — Freeze the hardened tool boundary at contract `4.0.0`, config
+  schema `1.1`, and manifest `1.0`. The agent surface is physics-only and typed;
+  validation is semantic, resource-aware, and mesh-backed; numerical success
+  requires converged finite sub-solves and consistent evaluated state; execution
+  uses contained credential-scrubbed child processes with lifecycle/idempotency;
+  direct/CLI/MCP transports are total and clean; and analysis consumes a
+  checksum-verified success manifest. Reason: give deterministic agentic
+  orchestration a trustworthy, exact handoff instead of compensating with prompts.
+  Status: implemented; all 107 pinned tests pass.
 - **2026-07-26** — Replace the 3-agent sequential tool pipeline with deterministic
   orchestration. The LLM interprets `ProblemIntent` and may explain deterministic
   analysis; typed application code owns compile→validate→run→analyze and exact
@@ -504,7 +406,7 @@ Reverse-chronological. Each entry: date, decision, why, status.
 - **2026-07-26** — Keep one Docker image/container for demo simplicity but run each
   solver invocation in a separate child process, with timeout/cancellation,
   trusted paths/limits, captured transports, and no API key in the worker.
-  Status: implemented in Stage TH-4.
+  Status: implemented in the hardened tool layer.
 - **2026-07-26** — Free-text remains the only UI input, with
   `ready | needs_clarification | unsupported` interpretation. Clarification for
   missing/ambiguous physics is allowed and required; there is still no confirmation
@@ -541,19 +443,15 @@ Reverse-chronological. Each entry: date, decision, why, status.
   orchestration code, kept separate from `fenitop/` so the domain library stays
   framework-agnostic. Status: decided; agent/task design now spec'd in §6a, folder
   creation tracked in §11 Stage 1.
-- **2026-07-25** — Confirmed the existing `fenitop/tools/` layer (from commit
-  `f04f2e4`) is suitable as-is for wrapping with CrewAI, with the four changes
-  listed in §5. Status: superseded by the deeper 2026-07-26 audit; do not wrap
-  before Stage TH passes.
 
 ## 10. Open Questions / Next Checkpoint
 
-The hardening gate is closed. The next checkpoint is Stage 0 model environment
-and secrets, followed by deterministic agentic Stage 1. Items intentionally
-resolved by measurement/implementation rather than guessed now:
+The next checkpoint is Stage 0 model environment and secrets, followed by
+deterministic agentic Stage 1. Items intentionally resolved by
+measurement/implementation rather than guessed now:
 
-- The trusted iterative compliance and direct mechanism PETSc profiles passed
-  TH-3 convergence/residual checks and finite differences and TH-4 isolated-worker
+- The trusted iterative compliance and direct mechanism PETSc profiles pass
+  convergence/residual checks, finite differences, and isolated-worker
   calibration; retain them unless later testing finds a profile-specific issue.
 - Component-wise/roller supports and nonzero prescribed displacement are explicitly
   rejected in agent-safe v1. A future implementation must add correct
@@ -561,62 +459,30 @@ resolved by measurement/implementation rather than guessed now:
 - The exact immutable OpenAI model snapshot/alias after golden intent tests; the
   current default decision is `gpt-5.6-terra` (§6).
 
-Prompt wording is deliberately deferred until the tool schemas/capabilities pass
-Stage TH; prompts must document the final contract, not today's unsafe surface.
+Prompt wording is deliberately deferred until Stage 1; prompts must document the
+final contract in `docs/tool-reference.md`.
 
 ## 11. Implementation Checklist
 
-The detailed Stage TH actions, failure matrix, and per-workstream exit criteria are
-in `docs/tool-hardening-plan.md`. This checklist is the high-level handover/status
-index; check items here only when the corresponding plan exit gate passes.
-
-**Stage TH — tool hardening** (blocks every agentic stage):
-
-- [x] **TH-0 Characterization/reproducibility** — pin Dolfinx/dependencies; make
-      zero-test discovery impossible; add fast compliance+mechanism numerical
-      baselines; record runtime/config/contract versions; declare agent v1 serial.
-- [x] **TH-1 Typed agent-safe contracts** — versioned Pydantic requests/responses;
-      strict discriminated 2D region DSL and named spring model; exact vectors;
-      separate AgentSafeConfig from trusted run policy; migrate reference configs;
-      remove source/path/PETSc/safety capabilities from LLM schema.
-- [x] **TH-2 Complete validation/resource policy** — finite/physical/cross-field
-      rules; load/support/spring/passive-zone entity checks and overlap/conflict
-      handling; independent pre-mesh memory/DOF ceiling; calibrated trusted work,
-      output, and timeout estimates.
-- [x] **TH-3 Numerical/state correctness** — PETSc/filter/adjoint convergence and
-      finite checks; explicit MMA/OC failure status; honor initial density; correct
-      iteration-0 and final evaluated state; consistent artifacts/metrics;
-      grayness+binarization naming; cleanup warnings eliminated.
-- [x] **TH-4 Contained execution** — fixed contained run root/slug IDs; no
-      untrusted deletion/overwrite; idempotent job lifecycle; child solver process
-      without API key; timeout/cancel/crash/orphan handling; atomic manifests;
-      serial-only agent surface.
-- [x] **TH-5 Total boundaries/transports** — no public exceptions for JSON-shaped
-      input; structured error codes/retryability; tracebacks local only; stderr
-      progress and exactly-one-JSON stdout; real CLI and MCP framing tests.
-- [x] **TH-6 Manifest-driven analysis** — self-contained verified RunManifest;
-      Tool 3 direct handoff without duplicate config/path; reject incomplete/corrupt
-      runs; constraint/convergence/continuation diagnostics; calibrated,
-      mesh-aware quality heuristics and deterministic narrative.
-- [x] **TH-7 Documentation/final gate** — capability/physics semantics, lifecycle,
-      artifacts, commands, event trace, README truthfulness, full failure matrix,
-      both end-to-end baselines, and final hardening review documented.
+Completed tool capabilities and their verification commands are maintained in
+`docs/tool-reference.md` and README. This checklist tracks only remaining work.
 
 **Stage 0 — model environment & secrets** (next; Stage 1 remains blocked until the
 required environment and golden-model checks pass):
 
 - [ ] Create/configure the OpenAI API account and generate an API key; cost alerts
       or prepaid limits are optional personal-account policy, not architecture.
-- [ ] Add `.env` to `.gitignore`; create an untracked `.env` and committed
-      `.env.example` containing `OPENAI_API_KEY=` and `OPENAI_MODEL=gpt-5.6-terra`.
+- [x] Exclude local `.env` files from Git and Docker build contexts.
+- [ ] Create an untracked `.env` and committed `.env.example` containing
+      `OPENAI_API_KEY=` and `OPENAI_MODEL=gpt-5.6-terra`.
 - [ ] Add/pin CrewAI only after its exact deterministic Flow/tool API is verified
       against the pinned Pydantic/runtime stack; rebuild the image once.
-- [ ] Wire `.env` into the parent application process and prove the Stage TH worker
+- [ ] Wire `.env` into the parent application process and prove the solver worker
       environment does not inherit `OPENAI_API_KEY`.
 - [ ] Verify outbound API access and run a throwaway structured-output smoke test.
 - [ ] Run golden intent scenarios and record/pin the final model ID/config (§6).
 
-**Stage 1 — deterministic `agentic/` build** (Stage TH passed; blocked on Stage 0):
+**Stage 1 — deterministic `agentic/` build** (blocked on Stage 0):
 
 - [ ] `intent.py` — typed `ProblemIntent` and
       `ready | needs_clarification | unsupported`.

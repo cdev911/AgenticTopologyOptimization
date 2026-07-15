@@ -189,7 +189,7 @@ def _run_topopt_in_process(
 ) -> Dict[str, Any]:
     """Execute Tool 2 in the current process.
 
-    TH-4's public entry point invokes this only inside ``solver_worker``.
+    The public entry point invokes this only inside ``solver_worker``.
     It remains importable for focused numerical fault injection tests.
     """
     run_policy = policy or TrustedRunPolicy()
