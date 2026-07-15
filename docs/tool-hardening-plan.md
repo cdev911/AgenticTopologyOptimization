@@ -1,6 +1,6 @@
 # Tool Hardening Plan
 
-Status: TH-0 through TH-6 complete; TH-7 final review is next
+Status: TH-0 through TH-7 complete; the tool hardening gate is closed
 Created: 2026-07-26
 Owner/source of truth for status: `docs/spec.md` §0 and §11
 
@@ -629,37 +629,61 @@ Exit criteria:
 - A new contributor can identify capabilities, run the full test suite, interpret
   every result field, and resume from `docs/spec.md` without chat history.
 
+Completion (2026-07-26):
+
+- Added `docs/tool-reference.md` as the stable human contract for exact physics,
+  trust/capability boundaries, request/result fields, lifecycle, artifacts,
+  integrity limits, errors/retryability, test tiers, and the future event trace.
+  README links the reference and contains only behavior exercised by the gate.
+- Audited every failure-matrix row against a named automated test and added missing
+  renderer, MMA-cap, typed-child-failure, and malformed-history regressions.
+- The cross-phase audit found and fixed two real boundary defects: a typed worker
+  failure was being replaced by `worker_result_invalid` when the parent
+  incorrectly attempted to build a success manifest, and successful-run analysis
+  silently skipped malformed history records because it reused the tolerant crash
+  recovery parser.
+- Reviewed the combined architecture and retained deterministic orchestration,
+  same-container/separate-process execution, clarification without a confirmation
+  gate, manifest-only analysis, and the current resource model. The remaining
+  caveats—nodal mechanism-spring scaling, unkeyed local integrity hashes, parent
+  exposure to container-level OOM, and derived analysis plots outside the solve
+  manifest—are explicit capability/trust limits rather than hidden blockers.
+- Documented focused test tiers so development does not repeatedly pay for the
+  entire numerical/transport suite; the full pinned gate remains mandatory at
+  checkpoints. The final documented command passes all 107 tests in 18.706
+  seconds, including both numerical baselines and real stdio MCP composition.
+
 ## 5. Failure-scenario matrix
 
 Each row requires at least one automated test before the gate passes.
 
-| Scenario | Expected behavior |
-|---|---|
-| Missing/wrong/extra config fields | All field errors returned together; no exception |
-| Unknown/deep/oversized region DSL | Typed validation error before compilation |
-| Lambda/source string in agent config | Rejected as an invalid region type |
-| NaN/Inf/extreme numeric values | Rejected before mesh construction |
-| Huge mesh, one iteration | Rejected by independent memory/DOF ceiling |
-| Tiny mesh, enormous iterations | Rejected by work/timeout policy |
-| No load | Hard validation error for both problem modes |
-| Marker/spring/zone matches nothing | Entity-specific geometry error |
-| Overlapping traction or solid/void regions | Explicit reject or documented combine rule |
-| Nonzero/partial prescribed displacement | Rejected until correctly implemented |
-| PETSc/filter divergence | Numerical failure with solver reason and iteration |
-| NaN sensitivity/optimizer update | Numerical failure; no success manifest |
-| MMA inner solver fails repeatedly | Non-converged numerical status, not a quiet warning |
-| Renderer unavailable | Solve remains valid; structured optional-artifact warning |
-| Disk full/read-only output | I/O failure with no false success |
-| Timeout/cancel/native crash | Parent returns terminal lifecycle state and partial inventory |
-| Duplicate kickoff/UI rerun | Existing idempotent run returned; no duplicate solve |
-| Traversal/absolute/glob identifier | Rejected; no filesystem effect outside run root |
-| Worker environment inspection | API key absent |
-| CLI run with progress | Stdout remains one JSON document |
-| MCP run with progress | JSON-RPC remains valid |
-| Empty/truncated/corrupt artifacts | Analyzer returns error, not a narrative |
-| Tool 2→Tool 3 direct handoff | Full target/constraint/connectivity context retained |
-| Repeated serial runs | No open-handler/PETSc resource warnings |
-| MPI request through agent surface | Explicit unsupported error in v1 |
+| Scenario | Expected behavior | Automated evidence |
+|---|---|---|
+| Missing/wrong/extra config fields | All field errors returned together; no exception | `test_config_validation`, `test_total_boundaries` |
+| Unknown/deep/oversized region DSL | Typed validation error before compilation | `test_config_validation.RegionDSLTests` |
+| Lambda/source string in agent config | Rejected as an invalid region type | `test_config_validation` source/capability tests |
+| NaN/Inf/extreme numeric values | Rejected before mesh construction | `test_config_validation`, generated total-boundary cases |
+| Huge mesh, one iteration | Rejected by independent memory/DOF ceiling | `test_huge_mesh_and_enormous_iteration_budget_fail_before_geometry`, Tool 2 oversized check |
+| Tiny mesh, enormous iterations | Rejected by work/timeout policy | Same resource-limit test plus timeout-budget preflight |
+| No load | Hard validation error for both problem modes | `test_nonzero_external_load_is_required_for_both_modes` |
+| Marker/spring/zone matches nothing | Entity-specific geometry error | `test_config_validation_geometry` unmatched entity cases |
+| Overlapping traction or solid/void regions | Explicit reject or documented combine rule | Geometry overlap tests |
+| Nonzero/partial prescribed displacement | Rejected until correctly implemented | `test_rejects_nonzero_supports_bad_vectors_and_nonfinite_values` |
+| PETSc/filter divergence | Numerical failure with solver reason and iteration | Elasticity/adjoint/filter fault tests in `test_numerical_integrity` |
+| NaN sensitivity/optimizer update | Numerical failure; no success manifest | Optimizer non-finite test and manifest success constraints |
+| MMA inner solver fails repeatedly | Numerical failure, not a quiet warning | MMA singular and inner-iteration-cap fault tests |
+| Renderer unavailable | Solve remains valid; structured optional-artifact warning | `test_optional_renderer_failure_does_not_invalidate_the_solve` |
+| Disk full/read-only output | I/O failure with no false success | Disk-capacity and worker-request-write tests |
+| Timeout/cancel/native crash | Parent returns terminal lifecycle state and partial inventory | Real and injected process-group lifecycle tests |
+| Duplicate kickoff/UI rerun | Existing idempotent run returned; no duplicate solve | Success replay, conflict, and active-duplicate tests |
+| Traversal/absolute/glob identifier | Rejected; no filesystem effect outside run root | Identifier and symlink containment tests |
+| Worker environment inspection | API key absent | Isolated success with injected `OPENAI_API_KEY` |
+| CLI run with progress | Stdout remains one JSON document | `test_transports` CLI progress test |
+| MCP run with progress | JSON-RPC remains valid | Real stdio validate→run→analyze test |
+| Empty/truncated/corrupt artifacts | Analyzer returns error, not a narrative | Analyzer empty, malformed-history, checksum, summary, and NPZ cases |
+| Tool 2→Tool 3 direct handoff | Full target/constraint/connectivity context retained | Analyzer manifest tests and real stdio composition |
+| Repeated serial runs | No open-handler/PETSc resource warnings | Repeated-run cleanup test |
+| MPI request through agent surface | Explicit unsupported error in v1 | `test_agent_facing_execution_rejects_mpi_worlds` |
 
 ## 6. Test layers
 

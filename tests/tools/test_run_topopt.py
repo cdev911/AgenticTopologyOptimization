@@ -13,6 +13,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from pydantic import ValidationError
 
@@ -139,6 +140,30 @@ class RunTopoptSmokeTests(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["stage"], "safety_check")
         self.assertIn("estimated_timeout", {e["code"] for e in result["errors"]})
+
+    def test_optional_renderer_failure_does_not_invalidate_the_solve(self):
+        from fenitop.tools.run_topopt import _run_topopt_in_process
+
+        with mock.patch(
+            "fenitop.tools.run_topopt._render_snapshot",
+            return_value=(
+                {"density_snapshot_png": None, "density_grid_npz": None},
+                ["Failed to render optional snapshot (injected)."],
+            ),
+        ):
+            result = _run_topopt_in_process(
+                {"config": _load_smoke_config()},
+                policy=self._policy(render_snapshot=True),
+            )
+
+        self.assertEqual(result["status"], "ok", result.get("errors"))
+        self.assertTrue(
+            any("optional snapshot" in warning["message"]
+                for warning in result["warnings"])
+        )
+        roles = {artifact["role"] for artifact in result["artifacts"]}
+        self.assertNotIn("density_snapshot_png", roles)
+        self.assertNotIn("density_grid", roles)
 
 
 if __name__ == "__main__":

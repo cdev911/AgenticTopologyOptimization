@@ -13,26 +13,46 @@ from pathlib import Path
 from typing import Any, Dict, List, Union
 
 _HISTORY_RE = re.compile(r"history (\{.*\})\s*$")
+_HISTORY_RECORD_START_RE = re.compile(r"\bhistory\s+\{")
 
 
-def read_history(run_log_path: Union[str, Path]) -> List[Dict[str, Any]]:
+class HistoryParseError(ValueError):
+    """A line advertised as durable history but was not valid JSON history."""
+
+
+def read_history(
+    run_log_path: Union[str, Path],
+    *,
+    strict: bool = False,
+) -> List[Dict[str, Any]]:
     """Return every "history {...}" JSON record in the log, in file order.
 
     Missing file returns an empty list rather than raising, since Tool 2's
-    failure path may call this before any log line was ever written.
+    failure path may call this before any log line was ever written. Recovery
+    callers use the default tolerant mode so a worker crash can still expose the
+    last complete record. Analysis of a successful manifest uses strict mode and
+    rejects any malformed history line instead of silently skipping it.
     """
     path = Path(run_log_path)
     if not path.is_file():
         return []
     records = []
     with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
+        for line_number, line in enumerate(handle, start=1):
             match = _HISTORY_RE.search(line)
             if not match:
+                if strict and _HISTORY_RECORD_START_RE.search(line):
+                    raise HistoryParseError(
+                        f"History line {line_number} is truncated or malformed."
+                    )
                 continue
             try:
                 records.append(json.loads(match.group(1)))
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as exc:
+                if strict:
+                    raise HistoryParseError(
+                        f"History line {line_number} contains invalid JSON."
+                    ) from exc
                 continue
     return records
 

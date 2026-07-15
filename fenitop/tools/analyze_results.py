@@ -46,9 +46,12 @@ def _read_json_object(path: Path, *, max_bytes: int = 2 * 1024 * 1024) -> dict[s
 
 
 def _read_history_strict(path: Path) -> list[dict[str, Any]]:
-    from fenitop.tools.logreader import read_history
+    from fenitop.tools.logreader import HistoryParseError, read_history
 
-    raw = read_history(path)
+    try:
+        raw = read_history(path, strict=True)
+    except HistoryParseError as exc:
+        raise ManifestError("history_record_invalid", str(exc)) from exc
     if not raw:
         raise ManifestError("history_empty", "Run history contains no evaluated states.")
     records: list[dict[str, Any]] = []

@@ -145,6 +145,24 @@ class NumericalFailureEnvelopeTests(unittest.TestCase):
         self.assertEqual(result["stage"], "numerical")
         self.assertEqual(result["error"]["code"], "mma_singular_subproblem")
 
+    def test_mma_inner_iteration_cap_is_a_typed_numerical_failure(self):
+        from fenitop.numerics import NumericalError, NumericalFailure
+
+        result = self._run_with_failure(
+            "fenitop.topopt.mma_optimizer",
+            NumericalError(NumericalFailure(
+                code="mma_inner_iteration_cap",
+                component="mma_subproblem",
+                iteration=1,
+                residual_norm=1.0,
+                message="injected MMA inner-iteration cap",
+            )),
+            fixture="smoke_mechanism_2d.json",
+        )
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["stage"], "numerical")
+        self.assertEqual(result["error"]["code"], "mma_inner_iteration_cap")
+
     def test_unexpected_solver_exception_is_sanitized(self):
         result = self._run_with_failure(
             "fenitop.topopt.topopt",

@@ -62,6 +62,7 @@ class AnalyzeResultsManifestTests(unittest.TestCase):
         grid=None,
         grid_payload: dict | None = None,
         empty_history: bool = False,
+        malformed_history: bool = False,
         summary_override: dict | None = None,
         metric_override: dict | None = None,
     ) -> dict:
@@ -73,6 +74,9 @@ class AnalyzeResultsManifestTests(unittest.TestCase):
             log_path.write_text("no history records\n", encoding="utf-8")
         else:
             shutil.copy(source / "beam_2d_run.log", log_path)
+            if malformed_history:
+                with log_path.open("a", encoding="utf-8") as handle:
+                    handle.write("2026-07-26 INFO history {\"iteration\":\n")
             if metric_override:
                 lines = log_path.read_text(encoding="utf-8").splitlines()
                 for index in range(len(lines) - 1, -1, -1):
@@ -294,6 +298,17 @@ class AnalyzeResultsManifestTests(unittest.TestCase):
         )
         result = self._analyze(mismatch)
         self.assertEqual(result["errors"][0]["code"], "summary_metric_mismatch")
+
+    def test_malformed_history_is_not_silently_skipped(self):
+        manifest = self._manifest(
+            converged=False,
+            iterations=400,
+            run_id="malformed_history",
+            malformed_history=True,
+        )
+        result = self._analyze(manifest)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["errors"][0]["code"], "history_record_invalid")
 
     def test_synthetic_checkerboard_and_connected_design_are_calibrated(self):
         import numpy as np

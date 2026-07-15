@@ -926,24 +926,25 @@ def _run_topopt_impl(
                     "complete": True,
                 },
             ])
-            manifest = build_run_manifest(
-                run_dir=run_dir,
-                output_prefix=output_prefix,
-                request_hash=request_hash,
-                response=response,
-                lifecycle=lifecycle,
-                artifacts=response["artifacts"],
-            )
-            manifest_path = write_run_manifest(run_dir, manifest)
-            response["run_manifest"] = manifest.model_dump(mode="json")
-            response["artifacts"].append(
-                {
-                    "role": "run_manifest",
-                    "format": "json",
-                    "path": str(manifest_path),
-                    "complete": True,
-                }
-            )
+            if response["status"] == "ok":
+                manifest = build_run_manifest(
+                    run_dir=run_dir,
+                    output_prefix=output_prefix,
+                    request_hash=request_hash,
+                    response=response,
+                    lifecycle=lifecycle,
+                    artifacts=response["artifacts"],
+                )
+                manifest_path = write_run_manifest(run_dir, manifest)
+                response["run_manifest"] = manifest.model_dump(mode="json")
+                response["artifacts"].append(
+                    {
+                        "role": "run_manifest",
+                        "format": "json",
+                        "path": str(manifest_path),
+                        "complete": True,
+                    }
+                )
             response = _response(response)
         except Exception as exc:
             lifecycle = update_lifecycle(
