@@ -91,7 +91,8 @@ def build_narrative(convergence: Dict[str, Any], quality_flags: Dict[str, Any],
 
     compliance = metrics.get("final_compliance")
     volume = metrics.get("final_volume")
-    vol_target = metrics.get("vol_frac_target")
+    constraints = metrics.get("constraints") or {}
+    vol_target = constraints.get("volume_target")
     tail = []
     if compliance is not None:
         tail.append(f"final compliance={_fmt(compliance, '.4g')}")
@@ -102,5 +103,17 @@ def build_narrative(convergence: Dict[str, Any], quality_flags: Dict[str, Any],
         tail.append(vol_str)
     if tail:
         sentences.append(_capitalize_first(", ".join(tail)) + ".")
+
+    if constraints and not constraints.get("volume_satisfied", True):
+        sentences.append(
+            "Warning: the final volume constraint is outside the analysis "
+            f"tolerance (error={_fmt(constraints.get('volume_error'), '.3g')})."
+        )
+    if constraints.get("compliance_bound_satisfied") is False:
+        sentences.append(
+            "Warning: the compliant-mechanism design violates its compliance bound "
+            f"({_fmt(compliance, '.4g')} > "
+            f"{_fmt(constraints.get('compliance_bound'), '.4g')})."
+        )
 
     return " ".join(sentences)

@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from fenitop.tools.config_models import AgentSafeConfig
+from fenitop.tools.config_models import AgentSafeConfig, CONFIG_SCHEMA_VERSION
 from fenitop.tools.schema import TOOL_CONTRACT_VERSION
 
 
@@ -67,6 +67,29 @@ class ArtifactRecord(ContractModel):
     format: str
     path: str
     complete: bool = True
+
+
+class ManifestArtifactRecord(ContractModel):
+    role: str
+    format: str
+    path: str
+    size_bytes: int = Field(ge=0)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    exists: Literal[True] = True
+    complete: Literal[True] = True
+
+    @field_validator("path")
+    @classmethod
+    def require_contained_relative_path(cls, value: str) -> str:
+        path = Path(value)
+        if (
+            not value
+            or path.is_absolute()
+            or ".." in path.parts
+            or "." in path.parts
+        ):
+            raise ValueError("Manifest artifact paths must be normalized and relative.")
+        return path.as_posix()
 
 
 class ValidateConfigRequest(ContractModel):
@@ -151,6 +174,9 @@ class TrustedAnalysisPolicy(ContractModel):
     grayness_threshold: float = Field(default=0.4, ge=0, le=1)
     checkerboard_threshold: float = Field(default=0.15, ge=0)
     density_threshold: float = Field(default=0.5, ge=0, le=1)
+    volume_tolerance: float = Field(default=0.01, ge=0, le=0.1)
+    max_grid_mb: float = Field(default=64.0, gt=0)
+    max_total_artifact_mb: float = Field(default=2_048.0, gt=0)
     make_plots: bool = True
 
 
@@ -193,12 +219,12 @@ class OptimizerStatusRecord(ContractModel):
 class SolverErrorRecord(ContractModel):
     exception_type: str
     message: str
-    traceback: str
     code: str | None = None
     component: str | None = None
     iteration: int | None = None
     reason: int | None = None
     residual_norm: float | None = None
+    debug_artifact_role: str | None = None
 
 
 class JobLifecycleRecord(ContractModel):
@@ -237,6 +263,75 @@ class IterationMetrics(ContractModel):
     time_seconds: float | None = None
 
 
+class RuntimeVersionRecord(ContractModel):
+    name: str
+    version: str
+
+
+class RunManifest(ContractModel):
+    manifest_version: Literal["1.0"] = "1.0"
+    manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    contract_version: Literal[TOOL_CONTRACT_VERSION]
+    config_schema_version: Literal[CONFIG_SCHEMA_VERSION]
+    run_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+    run_directory: str
+    output_prefix: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+    request_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    config_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    problem_type: Literal["minimize_compliance", "compliant_mechanism"]
+    normalized_config: AgentSafeConfig
+    lifecycle: JobLifecycleRecord
+    numerical_status: Literal["succeeded"]
+    converged: bool
+    stop_reason: Literal[
+        "tolerance_met", "max_iterations_reached", "continuation_incomplete"
+    ]
+    iterations: int = Field(ge=0)
+    metrics: RunMetrics
+    optimizer_status: OptimizerStatusRecord
+    mma_inner_iteration_warnings: int = Field(ge=0)
+    estimated_cost: CostEstimate
+    geometry_report: GeometryReport
+    warnings: list[IssueRecord]
+    runtime_versions: list[RuntimeVersionRecord]
+    artifacts: list[ManifestArtifactRecord]
+
+    @field_validator("run_directory")
+    @classmethod
+    def require_absolute_run_directory(cls, value: str) -> str:
+        path = Path(value)
+        if not path.is_absolute() or ".." in path.parts:
+            raise ValueError("RunManifest run_directory must be an absolute path.")
+        return str(path)
+
+    @model_validator(mode="after")
+    def require_successful_lifecycle(self):
+        if self.lifecycle.state != "succeeded":
+            raise ValueError("A successful RunManifest requires lifecycle=succeeded.")
+        if self.lifecycle.run_id != self.run_id:
+            raise ValueError("RunManifest and lifecycle run IDs must match.")
+        if self.lifecycle.request_hash != self.request_hash:
+            raise ValueError("RunManifest and lifecycle request hashes must match.")
+        if self.normalized_config.opt.problem_type != self.problem_type:
+            raise ValueError("RunManifest problem type must match its normalized config.")
+        required_metrics = (
+            "final_compliance",
+            "final_volume",
+            "final_objective",
+            "grayness",
+            "binarization_score",
+            "final_change",
+            "opt_tol",
+            "final_beta",
+            "continuation_completed",
+        )
+        if any(getattr(self.metrics, name) is None for name in required_metrics):
+            raise ValueError("A successful RunManifest requires complete final metrics.")
+        if not self.optimizer_status.converged:
+            raise ValueError("A successful RunManifest requires optimizer success.")
+        return self
+
+
 class RunTopoptResponse(ContractModel):
     contract_version: Literal[TOOL_CONTRACT_VERSION]
     tool: Literal["run_topopt"]
@@ -263,18 +358,20 @@ class RunTopoptResponse(ContractModel):
     last_known_good_metrics: IterationMetrics | None = None
     rank: int | None = None
     note: str | None = None
+    run_manifest: RunManifest | None = None
 
 
 class AnalyzeResultsRequest(ContractModel):
-    run_topopt_envelope: RunTopoptResponse = Field(
-        description="The exact successful envelope returned by run_topopt."
+    run_manifest: RunManifest = Field(
+        description="The exact successful RunManifest returned by run_topopt."
     )
 
 
 class AnalysisSource(ContractModel):
-    output_folder: str
+    run_directory: str
     output_prefix: str
-    run_id: str | None
+    run_id: str
+    manifest_hash: str
 
 
 class ConvergenceAnalysis(ContractModel):
@@ -289,6 +386,19 @@ class ConvergenceAnalysis(ContractModel):
     move_limit: float | None
     final_beta: float | None = None
     continuation_completed: bool | None = None
+    iteration_cap_reached: bool
+    move_limit_pinned: bool | None
+    oscillation_detected: bool | None
+    plateau_detected: bool | None
+    optimizer_warning_count: int = Field(ge=0)
+
+
+class ConnectivityRecord(ContractModel):
+    region_kind: Literal["traction", "spring"]
+    region_index: int = Field(ge=0)
+    matched_grid_points: int = Field(ge=0)
+    connected_to_support: bool | None
+    nearby_component_labels: list[int]
 
 
 class QualityFlags(ContractModel):
@@ -302,13 +412,26 @@ class QualityFlags(ContractModel):
     largest_component_fraction: float | None
     has_disconnected_material: bool | None
     load_path_connected: bool | None
+    checkerboard_method: str | None
+    connectivity_method: str | None
+    connectivity: list[ConnectivityRecord]
+
+
+class ConstraintAnalysis(ContractModel):
+    volume_target: float
+    volume_error: float
+    volume_tolerance: float
+    volume_satisfied: bool
+    compliance_bound: float | None
+    compliance_bound_satisfied: bool | None
+    density_bounds_satisfied: bool
 
 
 class AnalysisMetrics(ContractModel):
     final_compliance: float | None
     final_volume: float | None
     final_objective: float | None
-    vol_frac_target: float | None
+    constraints: ConstraintAnalysis
 
 
 class PlotRecord(ContractModel):

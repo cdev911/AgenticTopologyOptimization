@@ -1,6 +1,6 @@
 # Tool Hardening Plan
 
-Status: TH-0 through TH-4 complete; combined TH-5+TH-6 is next
+Status: TH-0 through TH-6 complete; TH-7 final review is next
 Created: 2026-07-26
 Owner/source of truth for status: `docs/spec.md` §0 and §11
 
@@ -515,6 +515,20 @@ Exit criteria:
 - All fuzz/adversarial JSON-shaped requests return schema-valid envelopes.
 - MCP calls survive a real solver run with progress logging enabled.
 
+Completion (2026-07-26):
+
+- Wrapped all three direct implementations in final typed exception boundaries.
+  Unexpected failures are logged locally and return stable `internal_error`
+  records; raw tracebacks and private exception details are absent from public
+  responses. Every returned envelope is Pydantic- and JSON-validated.
+- Replaced the last solver `print()` with logging. Worker output remains captured,
+  and CLI stdout uses one explicit JSON write. CLI stdin/file input, stdout/file
+  output, malformed JSON, response validation, and `0 | 1 | 2` success/tool/
+  transport exit behavior are tested.
+- Added generated adversarial JSON-shape coverage across all direct tools. Added a
+  real MCP stdio client/server test that calls validate→run→analyze while solver
+  progress is enabled; JSON-RPC framing remains intact.
+
 ### TH-6 — Self-contained artifacts and deterministic analysis
 
 Goal: make Tool 3 a reliable consumer of Tool 2, not another place for an LLM to
@@ -562,6 +576,34 @@ Exit criteria:
 - `analyze_results({"run_manifest": manifest})` requires no duplicated config/path.
 - Empty/corrupt/incomplete runs fail cleanly.
 - Synthetic heuristic tests and both real baselines produce expected flags.
+
+Completion (2026-07-26):
+
+- Advanced the public contract to `4.0.0` and added an atomic, canonical
+  `RunManifest` containing contract/config versions, run/config/request hashes,
+  trusted run directory/prefix, normalized config, lifecycle/numerical/convergence
+  state, validation/resource/geometry evidence, complete metrics/optimizer status,
+  runtime versions, warnings, and artifact inventory.
+- Manifest artifacts use normalized relative paths and record role, format,
+  existence/completeness, byte size, and SHA-256. Tool 2 verifies artifacts before
+  success; idempotent replay rechecks the embedded/durable manifest. Tool 3 checks
+  the canonical hash, exact durable copy, trusted root, symlinks, size, and checksum
+  for every artifact before parsing.
+- Tool 3 now accepts only `{"run_manifest": ...}`. It rejects empty/non-monotonic
+  history, summary/history/manifest disagreements, missing/corrupt artifacts, and
+  bounded NPZ violations covering pickle/object dtype, keys, dimensions, file size,
+  coordinates, finiteness, and density bounds.
+- Analysis reports explicit volume error/satisfaction, mechanism compliance-bound
+  status, density bounds, iteration-cap/continuation/move-limit/plateau/oscillation
+  diagnostics, and optimizer warning counts. Grid grayness and complementary
+  binarization are recomputed and cross-checked.
+- Checkerboard detection is named `binary_2x2_alternation_v1`. Connectivity is
+  named `component_labels_filter_scaled_dilation_v1`, scales its neighborhood by
+  mesh/filter length, and reports each traction/input-spring/output-spring region
+  against supports. Synthetic checkerboard/connected/corrupt grids and both real
+  compliance/mechanism baselines are covered.
+- Refreshed medium manifest-inclusive wall/RSS/output measurements remain below
+  existing estimates. The single combined gate passes 103 tests and 99 subtests.
 
 ### TH-7 — Documentation and tool usability
 

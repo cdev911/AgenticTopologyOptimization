@@ -1,16 +1,10 @@
-"""Tool 3: analyze_results.
-
-Deliberately dolfinx/MPI-free for its core metrics: <prefix>_run.log's
-"history" JSON lines and <prefix>_summary.json are both plain text/JSON. The
-only "mesh-shaped" data this tool touches is Tool 2's coordinate-binned .npz
-density grid, never the raw XDMF/H5 (which would need h5py and mesh
-reconstruction) -- that's the whole point of Tool 2 exporting it up front.
-"""
+"""Tool 3: verify a RunManifest and derive deterministic analysis evidence."""
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -18,208 +12,419 @@ from fenitop.tools.config_models import translate_validation_error
 from fenitop.tools.contracts import (
     AnalyzeResultsRequest,
     AnalyzeResultsResponse,
+    IterationMetrics,
+    RunManifest,
     TrustedAnalysisPolicy,
 )
 from fenitop.tools.logging_config import get_logger
-from fenitop.tools.logreader import read_history
+from fenitop.tools.manifest import (
+    ManifestError,
+    verify_manifest_artifacts,
+)
 from fenitop.tools.narrative import build_narrative
 from fenitop.tools.plotting import plot_convergence, plot_density_grid_fallback
 from fenitop.tools.schema import FieldError, error_envelope, ok_envelope
 
 logger = get_logger(__name__)
+_CHECKERBOARD_METHOD = "binary_2x2_alternation_v1"
+_CONNECTIVITY_METHOD = "component_labels_filter_scaled_dilation_v1"
 
 
-def _artifact_paths_from_envelope(envelope: Dict[str, Any]) -> Dict[str, str]:
-    return {a["role"]: a["path"] for a in envelope.get("artifacts", []) if a.get("path")}
+def _response(data: dict[str, Any]) -> dict[str, Any]:
+    AnalyzeResultsResponse.model_validate(data)
+    return data
 
 
-def _check_artifact_containment(
-    envelope: Dict[str, Any], allowed_roots: tuple[Path, ...]
-) -> list[FieldError]:
-    """Reject artifact paths that resolve outside application-owned roots."""
-    roots = [root.resolve() for root in allowed_roots]
-    errors: list[FieldError] = []
-    if not roots:
-        return [
-            FieldError(
-                "run_topopt_envelope.artifacts",
-                "no_trusted_artifact_root",
-                "Application policy did not configure an allowed artifact root.",
+def _read_json_object(path: Path, *, max_bytes: int = 2 * 1024 * 1024) -> dict[str, Any]:
+    if path.stat().st_size > max_bytes:
+        raise ManifestError("summary_too_large", "Summary exceeds the analysis limit.")
+    with path.open("r", encoding="utf-8") as handle:
+        value = json.load(handle)
+    if not isinstance(value, dict):
+        raise ManifestError("summary_invalid", "Summary must contain a JSON object.")
+    return value
+
+
+def _read_history_strict(path: Path) -> list[dict[str, Any]]:
+    from fenitop.tools.logreader import read_history
+
+    raw = read_history(path)
+    if not raw:
+        raise ManifestError("history_empty", "Run history contains no evaluated states.")
+    records: list[dict[str, Any]] = []
+    previous_iteration = -1
+    for index, item in enumerate(raw):
+        try:
+            record = IterationMetrics.model_validate(item).model_dump(mode="json")
+        except ValidationError as exc:
+            raise ManifestError(
+                "history_record_invalid", f"History record {index} is invalid: {exc}"
+            ) from exc
+        if record["iteration"] <= previous_iteration:
+            raise ManifestError(
+                "history_not_monotonic", "History iterations must be strictly increasing."
             )
-        ]
-    for index, artifact in enumerate(envelope.get("artifacts", [])):
-        candidate = Path(artifact["path"]).resolve()
-        if not any(candidate.is_relative_to(root) for root in roots):
-            errors.append(
-                FieldError(
-                    f"run_topopt_envelope.artifacts[{index}].path",
-                    "artifact_outside_trusted_root",
-                    "Artifact path resolves outside the application-owned analysis roots.",
-                )
+        previous_iteration = record["iteration"]
+        records.append(record)
+    if records[0]["state"] != "initial" or records[0]["iteration"] != 0:
+        raise ManifestError(
+            "history_initial_state_missing",
+            "History must begin with evaluated initial state iteration zero.",
+        )
+    return records
+
+
+def _verify_summary(
+    summary: dict[str, Any],
+    manifest: RunManifest,
+    history: list[dict[str, Any]],
+) -> None:
+    if summary.get("iterations") != manifest.iterations:
+        raise ManifestError(
+            "summary_iteration_mismatch",
+            "Summary iteration count does not match the RunManifest.",
+        )
+    if history[-1]["iteration"] != manifest.iterations:
+        raise ManifestError(
+            "history_iteration_mismatch",
+            "Final history iteration does not match the RunManifest.",
+        )
+    comparisons = {
+        "final_compliance": manifest.metrics.final_compliance,
+        "final_volume": manifest.metrics.final_volume,
+        "final_objective": manifest.metrics.final_objective,
+        "grayness": manifest.metrics.grayness,
+        "binarization_score": manifest.metrics.binarization_score,
+    }
+    for field, expected in comparisons.items():
+        observed = summary.get(field)
+        if expected is None and observed is None:
+            continue
+        if (
+            expected is None
+            or observed is None
+            or not math.isfinite(float(observed))
+            or not math.isclose(float(observed), expected, rel_tol=1e-9, abs_tol=1e-11)
+        ):
+            raise ManifestError(
+                "summary_metric_mismatch",
+                f"Summary field {field} does not match the RunManifest.",
             )
-    return errors
+    final_history = history[-1]
+    for history_field, metric_field in (
+        ("compliance", "final_compliance"),
+        ("volume", "final_volume"),
+        ("objective", "final_objective"),
+        ("grayness", "grayness"),
+        ("binarization_score", "binarization_score"),
+        ("change", "final_change"),
+    ):
+        observed = final_history.get(history_field)
+        expected = getattr(manifest.metrics, metric_field)
+        if observed is None:
+            continue
+        if not math.isclose(
+            float(observed), float(expected), rel_tol=1e-9, abs_tol=1e-11
+        ):
+            raise ManifestError(
+                "history_metric_mismatch",
+                f"Final history field {history_field} does not match the RunManifest.",
+            )
 
 
-def _read_summary(path: Optional[str]) -> Dict[str, Any]:
-    if not path or not Path(path).is_file():
-        return {}
-    with open(path, "r", encoding="utf-8") as handle:
-        return json.load(handle)
-
-
-def _derive_convergence(history: List[Dict[str, Any]], opt_tol: Optional[float],
-                         move_limit: Optional[float]) -> Dict[str, Any]:
-    """Best-effort convergence derivation from the log alone. Note run.log /
-    summary.json never record max_iter, so without a `config` this can only
-    compare final_change to opt_tol -- it cannot distinguish "hit the
-    iteration cap while still above tolerance" from "the config's max_iter
-    happened to equal this run's length right as it converged". When a Tool 2
-    envelope is available, its own live-computed converged/stop_reason (which
-    does know max_iter) is used instead -- see analyze_results_tool.
-    """
-    iterate = [r for r in history if r.get("state") == "iterate"]
-    if not iterate or opt_tol is None:
-        return {
-            "converged": None, "stop_reason": "unknown",
-            "iterations": (iterate[-1]["iteration"] if iterate else None),
-            "final_change": (iterate[-1].get("change") if iterate else None),
-            "opt_tol": opt_tol, "fraction_iterations_at_move_limit": None, "move_limit": move_limit,
-        }
-
-    final_change = iterate[-1].get("change")
-    converged = final_change is not None and final_change <= opt_tol
-
+def _derive_convergence(
+    history: list[dict[str, Any]], manifest: RunManifest
+) -> dict[str, Any]:
+    opt = manifest.normalized_config.opt
+    iterate = [record for record in history if record["state"] == "iterate"]
+    changes = [
+        float(record["change"])
+        for record in iterate
+        if record.get("change") is not None
+    ]
     fraction_pinned = None
-    if move_limit is not None:
-        changes = [r.get("change") for r in iterate if r.get("change") is not None]
-        if changes:
-            fraction_pinned = sum(1 for c in changes if abs(c - move_limit) < 1e-9) / len(changes)
+    move_limit_pinned = None
+    if changes:
+        fraction_pinned = sum(
+            math.isclose(value, float(opt.move), rel_tol=0, abs_tol=1e-9)
+            for value in changes
+        ) / len(changes)
+        move_limit_pinned = fraction_pinned > 0.5
+
+    tail_changes = changes[-8:]
+    plateau = None
+    if len(tail_changes) >= 4:
+        plateau = (
+            max(tail_changes) - min(tail_changes)
+            <= max(float(opt.opt_tol) * 0.1, 1e-12)
+            and tail_changes[-1] > float(opt.opt_tol)
+        )
+
+    objectives = [
+        float(record["objective"])
+        for record in iterate[-10:]
+        if record.get("objective") is not None
+    ]
+    oscillation = None
+    if len(objectives) >= 5:
+        deltas = [
+            right - left for left, right in zip(objectives, objectives[1:])
+            if not math.isclose(right, left, rel_tol=1e-12, abs_tol=1e-14)
+        ]
+        sign_changes = sum(
+            left * right < 0 for left, right in zip(deltas, deltas[1:])
+        )
+        oscillation = sign_changes >= 3
 
     return {
-        "converged": converged,
-        "stop_reason": "tolerance_met" if converged else "max_iterations_reached",
-        "iterations": iterate[-1]["iteration"],
-        "final_change": final_change,
-        "opt_tol": opt_tol,
+        "converged": manifest.converged,
+        "stop_reason": manifest.stop_reason,
+        "iterations": manifest.iterations,
+        "final_change": manifest.metrics.final_change,
+        "opt_tol": manifest.metrics.opt_tol,
         "fraction_iterations_at_move_limit": fraction_pinned,
-        "move_limit": move_limit,
+        "move_limit": float(opt.move),
+        "final_beta": manifest.metrics.final_beta,
+        "continuation_completed": manifest.metrics.continuation_completed,
+        "iteration_cap_reached": (
+            manifest.iterations >= opt.max_iter and not manifest.converged
+        ),
+        "move_limit_pinned": move_limit_pinned,
+        "oscillation_detected": oscillation,
+        "plateau_detected": plateau,
+        "optimizer_warning_count": manifest.mma_inner_iteration_warnings,
     }
 
 
-def _check_load_path_connected(coords_xyz, labeled, config: Dict[str, Any]) -> Optional[bool]:
-    """Compile safe region DSL specs to find which labeled
-    connected component the Dirichlet (support) and traction (load) regions
-    land in. Dilates each region's grid mask by a couple of cells first,
-    since the exact boundary nodes are not guaranteed to be solid even in a
-    perfectly valid design -- what matters is solid material *near* the BC,
-    not literally at it.
-    """
+def _grid_region_connectivity(
+    xs,
+    ys,
+    labeled,
+    config: dict[str, Any],
+) -> tuple[list[dict[str, Any]], bool | None, str]:
     import numpy as np
     from scipy.ndimage import binary_dilation
 
     from fenitop.regions import compile_region
 
-    fem_cfg = config.get("fem", {})
-    dirichlet_bcs = fem_cfg.get("dirichlet_bcs", [])
-    traction_bcs = fem_cfg.get("traction_bcs", [])
-    if not dirichlet_bcs or not traction_bcs:
-        return None
+    x_spacing = float(np.min(np.diff(xs)))
+    y_spacing = float(np.min(np.diff(ys)))
+    cell_scale = min(x_spacing, y_spacing)
+    filter_radius = float(config["opt"]["filter_radius"])
+    dilation_cells = max(1, min(32, math.ceil(filter_radius / cell_scale)))
+    method = f"{_CONNECTIVITY_METHOD}:dilation_cells={dilation_cells}"
 
-    def region_labels(spec) -> Optional[set]:
-        """None means "could not evaluate this marker/locator on the grid at
-        all" (matched zero grid points -- Tool 1's geometry check should
-        already reject this at the facet level). An empty set is a real,
-        meaningful result: the marker/locator geometrically matched grid
-        points, but none of them (even after dilating outward a couple of
-        cells) are near any solid material -- i.e. genuinely no material
-        near that support/load region, which is exactly the failure this
-        check exists to catch, not an "undetermined" case.
-        """
-        if spec is None:
-            return None
-        region_fn = compile_region(spec)
-        mask = region_fn(coords_xyz).reshape(labeled.shape)
-        if not mask.any():
-            return None
-        mask = binary_dilation(mask, iterations=2)
-        return set(int(v) for v in labeled[mask] if v > 0)
+    X, Y = np.meshgrid(xs, ys)
+    coords_xyz = np.stack([X.ravel(), Y.ravel(), np.zeros(X.size)], axis=0)
 
-    support_label_sets = [region_labels(bc.get("marker")) for bc in dirichlet_bcs]
-    load_label_sets = [region_labels(bc.get("locator")) for bc in traction_bcs]
-    if any(s is None for s in support_label_sets) or any(s is None for s in load_label_sets):
-        return None
+    def labels_near(spec) -> tuple[int, list[int]]:
+        mask = compile_region(spec)(coords_xyz).reshape(labeled.shape)
+        matched = int(mask.sum())
+        if not matched:
+            return 0, []
+        near = binary_dilation(mask, iterations=dilation_cells)
+        labels = sorted({int(value) for value in labeled[near] if value > 0})
+        return matched, labels
 
-    support_labels: set = set().union(*support_label_sets) if support_label_sets else set()
-    load_labels: set = set().union(*load_label_sets) if load_label_sets else set()
-    return bool(support_labels & load_labels)
+    support_labels: set[int] = set()
+    for boundary in config["fem"]["dirichlet_bcs"]:
+        _, labels = labels_near(boundary["marker"])
+        support_labels.update(labels)
+
+    regions: list[tuple[str, int, dict[str, Any]]] = [
+        ("traction", index, boundary["locator"])
+        for index, boundary in enumerate(config["fem"]["traction_bcs"])
+    ]
+    if config["opt"]["problem_type"] == "compliant_mechanism":
+        regions.extend([
+            ("spring", 0, config["opt"]["in_spring"]["region"]),
+            ("spring", 1, config["opt"]["out_spring"]["region"]),
+        ])
+
+    records: list[dict[str, Any]] = []
+    determinate: list[bool] = []
+    for kind, index, spec in regions:
+        matched, nearby = labels_near(spec)
+        connected = None if matched == 0 else bool(support_labels.intersection(nearby))
+        if connected is not None:
+            determinate.append(connected)
+        records.append({
+            "region_kind": kind,
+            "region_index": index,
+            "matched_grid_points": matched,
+            "connected_to_support": connected,
+            "nearby_component_labels": nearby,
+        })
+    aggregate = all(determinate) if len(determinate) == len(records) and records else None
+    return records, aggregate, method
 
 
-def _analyze_density_grid(grid_path: str, density_threshold: float, checkerboard_threshold: float,
-                           config: Optional[Dict[str, Any]]) -> Tuple[Dict[str, Any], List[str]]:
-    """scipy.ndimage-based connected-component + checkerboard heuristics on
-    Tool 2's coordinate-binned grid. scipy is already a hard dependency."""
+def _analyze_density_grid(
+    grid_path: Path,
+    manifest: RunManifest,
+    policy: TrustedAnalysisPolicy,
+) -> tuple[dict[str, Any], list[str], bool]:
     import numpy as np
     from scipy import ndimage
 
-    warnings: List[str] = []
-    data = np.load(grid_path)
-    grid, xs, ys = data["density"], data["x"], data["y"]
-    finite = np.isfinite(grid)
-    binary = np.zeros_like(grid, dtype=bool)
-    binary[finite] = grid[finite] >= density_threshold
+    if grid_path.stat().st_size > int(policy.max_grid_mb * 1024**2):
+        raise ManifestError("density_grid_too_large", "Density grid exceeds analysis limit.")
+    try:
+        with np.load(grid_path, allow_pickle=False) as data:
+            if set(data.files) != {"density", "x", "y"}:
+                raise ManifestError(
+                    "density_grid_keys_invalid",
+                    "Density grid must contain exactly density, x, and y arrays.",
+                )
+            grid = np.asarray(data["density"])
+            xs = np.asarray(data["x"])
+            ys = np.asarray(data["y"])
+    except (ValueError, OSError) as exc:
+        raise ManifestError("density_grid_invalid", f"Cannot read density grid: {exc}") from exc
 
+    nx, ny = manifest.normalized_config.mesh.divisions
+    (x0, y0), (x1, y1) = manifest.normalized_config.mesh.bounds
+    if (
+        grid.ndim != 2
+        or xs.ndim != 1
+        or ys.ndim != 1
+        or grid.shape != (ny + 1, nx + 1)
+        or grid.shape != (ys.size, xs.size)
+    ):
+        raise ManifestError(
+            "density_grid_shape_mismatch",
+            "Density grid dimensions do not match the normalized mesh config.",
+        )
+    if not all(np.issubdtype(array.dtype, np.number) for array in (grid, xs, ys)):
+        raise ManifestError(
+            "density_grid_dtype_invalid",
+            "Density grid arrays must use numeric, non-object dtypes.",
+        )
+    if (
+        not np.isfinite(grid).all()
+        or not np.isfinite(xs).all()
+        or not np.isfinite(ys).all()
+        or not np.all(np.diff(xs) > 0)
+        or not np.all(np.diff(ys) > 0)
+        or not np.isclose(xs[0], float(x0))
+        or not np.isclose(xs[-1], float(x1))
+        or not np.isclose(ys[0], float(y0))
+        or not np.isclose(ys[-1], float(y1))
+    ):
+        raise ManifestError(
+            "density_grid_values_invalid",
+            "Density grid coordinates/densities must be finite and monotonic.",
+        )
+    density_bounds_satisfied = bool(
+        np.all(grid >= -1e-10) and np.all(grid <= 1.0 + 1e-10)
+    )
+    if not density_bounds_satisfied:
+        raise ManifestError(
+            "density_grid_bounds_invalid", "Density grid contains values outside [0,1]."
+        )
+    computed_grayness = float(np.mean(4.0 * grid * (1.0 - grid)))
+    computed_binarization = 1.0 - computed_grayness
+    if (
+        not math.isclose(
+            computed_grayness,
+            float(manifest.metrics.grayness),
+            rel_tol=1e-9,
+            abs_tol=1e-11,
+        )
+        or not math.isclose(
+            computed_binarization,
+            float(manifest.metrics.binarization_score),
+            rel_tol=1e-9,
+            abs_tol=1e-11,
+        )
+    ):
+        raise ManifestError(
+            "density_grid_metric_mismatch",
+            "Density grid grayness/binarization does not match the RunManifest.",
+        )
+
+    binary = grid >= policy.density_threshold
     labeled, num_components = ndimage.label(binary)
-    total_solid = float(binary.sum())
-    if num_components > 0 and total_solid > 0:
+    total_solid = int(binary.sum())
+    if num_components and total_solid:
         sizes = ndimage.sum(binary, labeled, index=range(1, num_components + 1))
         largest_fraction = float(np.max(sizes)) / total_solid
     else:
         largest_fraction = 0.0
 
-    # Checkerboard heuristic: 2x2 alternation kernel, normalized against the
-    # grid's own variance. Coarse -- can false-positive near sharp, legitimate
-    # gradients at point loads/supports; a heuristic, not a rigorous QA metric.
-    fill_value = float(np.nanmean(grid[finite])) if finite.any() else 0.0
-    filled = np.where(finite, grid, fill_value)
-    kernel = np.array([[1.0, -1.0], [-1.0, 1.0]])
-    conv = ndimage.convolve(filled, kernel, mode="nearest")
-    variance = float(np.var(filled)) or 1.0
-    checkerboard_score = float(np.mean(conv**2)) / (4.0 * variance)
+    if grid.shape[0] >= 2 and grid.shape[1] >= 2:
+        alternating = (
+            (binary[:-1, :-1] == binary[1:, 1:])
+            & (binary[:-1, 1:] == binary[1:, :-1])
+            & (binary[:-1, :-1] != binary[:-1, 1:])
+        )
+        checkerboard_score = float(alternating.mean())
+    else:
+        checkerboard_score = 0.0
 
-    flags: Dict[str, Any] = {
-        "checkerboard_detected": checkerboard_score > checkerboard_threshold,
+    config = manifest.normalized_config.model_dump(mode="json")
+    connectivity, load_path_connected, connectivity_method = (
+        _grid_region_connectivity(xs, ys, labeled, config)
+    )
+    flags = {
+        "grayness": computed_grayness,
+        "binarization_score": computed_binarization,
+        "checkerboard_detected": (
+            checkerboard_score > policy.checkerboard_threshold
+        ),
         "checkerboard_score": checkerboard_score,
         "num_components": int(num_components),
         "largest_component_fraction": largest_fraction,
         "has_disconnected_material": num_components > 1,
-        "load_path_connected": None,
+        "load_path_connected": load_path_connected,
+        "checkerboard_method": _CHECKERBOARD_METHOD,
+        "connectivity_method": connectivity_method,
+        "connectivity": connectivity,
+    }
+    return flags, [], density_bounds_satisfied
+
+
+def _constraint_analysis(
+    manifest: RunManifest,
+    *,
+    density_bounds_satisfied: bool,
+    volume_tolerance: float,
+) -> dict[str, Any]:
+    opt = manifest.normalized_config.opt
+    final_volume = manifest.metrics.final_volume
+    if final_volume is None:
+        raise ManifestError("final_volume_missing", "Manifest has no final volume.")
+    target = float(opt.vol_frac)
+    volume_error = float(final_volume) - target
+    compliance_bound = getattr(opt, "compliance_bound", None)
+    final_compliance = manifest.metrics.final_compliance
+    compliance_satisfied = None
+    if compliance_bound is not None:
+        compliance_satisfied = bool(
+            final_compliance is not None
+            and final_compliance <= float(compliance_bound) * (1 + 1e-9)
+        )
+    return {
+        "volume_target": target,
+        "volume_error": volume_error,
+        "volume_tolerance": volume_tolerance,
+        "volume_satisfied": abs(volume_error) <= volume_tolerance,
+        "compliance_bound": (
+            float(compliance_bound) if compliance_bound is not None else None
+        ),
+        "compliance_bound_satisfied": compliance_satisfied,
+        "density_bounds_satisfied": density_bounds_satisfied,
     }
 
-    if config is not None:
-        try:
-            X, Y = np.meshgrid(xs, ys)  # shape (len(ys), len(xs)), matches grid/labeled
-            coords_xyz = np.stack([X.ravel(), Y.ravel(), np.zeros(X.size)], axis=0)
-            flags["load_path_connected"] = _check_load_path_connected(coords_xyz, labeled, config)
-        except Exception as exc:  # noqa: BLE001 - optional deeper check, degrade gracefully
-            warnings.append(f"Load-path connectivity check failed: {exc}")
 
-    return flags, warnings
-
-
-def _response(data: dict) -> dict:
-    AnalyzeResultsResponse.model_validate(data)
-    return data
-
-
-def analyze_results_tool(
-    request: Dict[str, Any] | AnalyzeResultsRequest,
+def _analyze_results_impl(
+    request: dict[str, Any] | AnalyzeResultsRequest,
     *,
     policy: TrustedAnalysisPolicy | None = None,
-) -> Dict[str, Any]:
-    """Analyze only the exact typed result of Tool 2."""
+) -> dict[str, Any]:
     analysis_policy = policy or TrustedAnalysisPolicy()
     try:
-        parsed_request = (
+        parsed = (
             request
             if isinstance(request, AnalyzeResultsRequest)
             else AnalyzeResultsRequest.model_validate(request)
@@ -231,94 +436,39 @@ def analyze_results_tool(
             stage="request",
             message="Request did not match AnalyzeResultsRequest.",
         ))
-    except Exception as exc:
+
+    manifest = parsed.run_manifest
+    try:
+        paths = verify_manifest_artifacts(
+            manifest,
+            analysis_policy.allowed_roots,
+            max_total_bytes=int(analysis_policy.max_total_artifact_mb * 1024**2),
+        )
+        if "run_log" not in paths or "summary" not in paths:
+            raise ManifestError(
+                "required_artifact_missing",
+                "Manifest must include complete run_log and summary artifacts.",
+            )
+        history = _read_history_strict(paths["run_log"])
+        summary = _read_json_object(paths["summary"])
+        _verify_summary(summary, manifest, history)
+    except (ManifestError, OSError, json.JSONDecodeError) as exc:
+        code = getattr(exc, "code", "artifact_validation_failed")
         return _response(error_envelope(
             "analyze_results",
-            [FieldError("<root>", "malformed_request", str(exc))],
-            stage="request",
+            [FieldError("run_manifest", code, str(exc))],
+            stage="artifact_validation",
         ))
 
-    envelope = parsed_request.run_topopt_envelope.model_dump(mode="json")
-    if envelope["status"] != "ok":
-        return _response(error_envelope(
-            "analyze_results",
-            [FieldError(
-                "run_topopt_envelope.status",
-                "run_not_successful",
-                "Only a successful run_topopt envelope can be analyzed.",
-            )],
-            stage="request",
-        ))
-
-    containment_errors = _check_artifact_containment(
-        envelope, analysis_policy.allowed_roots
-    )
-    if containment_errors:
-        return _response(error_envelope(
-            "analyze_results",
-            containment_errors,
-            stage="request",
-            message="Run artifacts are outside the trusted analysis boundary.",
-        ))
-
-    validation = envelope.get("validation") or {}
-    config = validation.get("normalized_config")
-    opt_cfg = config.get("opt", {}) if config else {}
-    paths = _artifact_paths_from_envelope(envelope)
-    run_id = envelope.get("run_id")
-    output_prefix = run_id or "fenitop"
-    problem_type = envelope.get("problem_type") or "minimize_compliance"
-    opt_tol = (envelope.get("metrics") or {}).get("opt_tol")
-    prior_converged = envelope.get("converged")
-    prior_stop_reason = envelope.get("stop_reason")
-    prior_iterations = envelope.get("iterations")
-
-    logger.info("analyze_results: analyzing output_prefix=%s run_id=%s", output_prefix, run_id)
-    move_limit = opt_cfg.get("move")
-    grayness_threshold = analysis_policy.grayness_threshold
-    checkerboard_threshold = analysis_policy.checkerboard_threshold
-    density_threshold = analysis_policy.density_threshold
-    make_plots = analysis_policy.make_plots
-
-    run_log_path = paths.get("run_log")
-    if not run_log_path or not Path(run_log_path).is_file():
-        logger.error("analyze_results: run_log not found at %r", run_log_path)
-        return _response(error_envelope(
-            "analyze_results",
-            [FieldError(
-                "run_topopt_envelope.artifacts",
-                "run_log_missing",
-                f"run_log not found at {run_log_path!r}; cannot analyze.",
-            )],
-            stage="request",
-        ))
-
-    history = read_history(run_log_path)
-    summary = _read_summary(paths.get("summary"))
-
-    convergence = _derive_convergence(history, opt_tol, move_limit)
-    if prior_converged is not None:
-        # Trust Tool 2's own live-computed values (it knows max_iter) over a
-        # log-only re-derivation, which can only compare against opt_tol.
-        convergence["converged"] = prior_converged
-        convergence["stop_reason"] = prior_stop_reason
-        convergence["iterations"] = prior_iterations
-    run_metrics = envelope.get("metrics") or {}
-    convergence["final_beta"] = run_metrics.get("final_beta")
-    convergence["continuation_completed"] = run_metrics.get("continuation_completed")
-
-    warnings: List[str] = []
-
-    grayness = summary.get("grayness", run_metrics.get("grayness"))
-    binarization_score = summary.get(
-        "binarization_score", run_metrics.get("binarization_score")
-    )
-    quality_flags: Dict[str, Any] = {
+    convergence = _derive_convergence(history, manifest)
+    warnings: list[str] = []
+    grayness = manifest.metrics.grayness
+    quality_flags: dict[str, Any] = {
         "grayness": grayness,
-        "binarization_score": binarization_score,
-        "grayness_threshold": grayness_threshold,
+        "binarization_score": manifest.metrics.binarization_score,
+        "grayness_threshold": analysis_policy.grayness_threshold,
         "high_grayness_warning": bool(
-            grayness is not None and grayness > grayness_threshold
+            grayness is not None and grayness > analysis_policy.grayness_threshold
         ),
         "checkerboard_detected": None,
         "checkerboard_score": None,
@@ -326,57 +476,132 @@ def analyze_results_tool(
         "largest_component_fraction": None,
         "has_disconnected_material": None,
         "load_path_connected": None,
+        "checkerboard_method": None,
+        "connectivity_method": None,
+        "connectivity": [],
     }
-
+    density_bounds_satisfied = True
     grid_path = paths.get("density_grid")
-    if grid_path and Path(grid_path).is_file():
-        grid_flags, grid_warnings = _analyze_density_grid(
-            grid_path, density_threshold, checkerboard_threshold, config)
+    if grid_path is not None:
+        try:
+            grid_flags, grid_warnings, density_bounds_satisfied = (
+                _analyze_density_grid(grid_path, manifest, analysis_policy)
+            )
+        except ManifestError as exc:
+            return _response(error_envelope(
+                "analyze_results",
+                [FieldError("run_manifest.artifacts", exc.code, str(exc))],
+                stage="artifact_validation",
+            ))
         quality_flags.update(grid_flags)
         warnings.extend(grid_warnings)
     else:
-        logger.warning("analyze_results: no density grid (.npz) found for %s; "
-                        "design-quality checks skipped", output_prefix)
         warnings.append(
-            "No density grid (.npz) artifact found; connected-component and checkerboard "
-            "checks were skipped. Re-run Tool 2 with render_snapshot=true to enable them.")
+            "No density grid artifact is present; optional topology heuristics "
+            "were skipped."
+        )
 
-    plots: List[Dict[str, str]] = []
-    if make_plots:
-        plot_dir = Path(run_log_path).parent
-        plots = plot_convergence(history, plot_dir, output_prefix, opt_tol=opt_tol, move_limit=move_limit)
-
-    density_png = paths.get("density_snapshot_png")
-    if density_png and Path(density_png).is_file():
-        plots.append({"role": "density_field", "path": density_png, "source": "reused_from_run_topopt"})
-    elif grid_path and Path(grid_path).is_file():
-        try:
-            fallback_path = Path(run_log_path).parent / f"{output_prefix}_density_field_fallback.png"
-            plot_density_grid_fallback(grid_path, fallback_path)
-            plots.append({"role": "density_field", "path": str(fallback_path), "source": "matplotlib_fallback"})
-        except Exception as exc:  # noqa: BLE001 - a plot failure shouldn't fail the whole analysis
-            warnings.append(f"Failed to render fallback density image: {exc}")
-
+    constraints = _constraint_analysis(
+        manifest,
+        density_bounds_satisfied=density_bounds_satisfied,
+        volume_tolerance=analysis_policy.volume_tolerance,
+    )
     metrics = {
-        "final_compliance": summary.get("final_compliance"),
-        "final_volume": summary.get("final_volume"),
-        "final_objective": summary.get("final_objective"),
-        "vol_frac_target": opt_cfg.get("vol_frac"),
+        "final_compliance": manifest.metrics.final_compliance,
+        "final_volume": manifest.metrics.final_volume,
+        "final_objective": manifest.metrics.final_objective,
+        "constraints": constraints,
     }
-    narrative = build_narrative(convergence, quality_flags, metrics, problem_type)
-    logger.info("analyze_results: status=ok converged=%s stop_reason=%s (%d warning(s))",
-                convergence["converged"], convergence["stop_reason"], len(warnings))
 
+    plots: list[dict[str, str]] = []
+    run_dir = Path(manifest.run_directory).resolve(strict=True)
+    if analysis_policy.make_plots:
+        plots = plot_convergence(
+            history,
+            run_dir,
+            manifest.output_prefix,
+            opt_tol=manifest.metrics.opt_tol,
+            move_limit=float(manifest.normalized_config.opt.move),
+        )
+    density_png = paths.get("density_snapshot_png")
+    if density_png is not None:
+        plots.append({
+            "role": "density_field",
+            "path": str(density_png),
+            "source": "verified_run_artifact",
+        })
+    elif grid_path is not None and analysis_policy.make_plots:
+        fallback_path = (
+            run_dir / f"{manifest.output_prefix}_density_field_fallback.png"
+        )
+        try:
+            plot_density_grid_fallback(grid_path, fallback_path)
+        except Exception:
+            logger.exception("analyze_results: fallback rendering failed")
+            warnings.append(
+                "Failed to render the optional fallback density image; inspect "
+                "local logs."
+            )
+        else:
+            plots.append({
+                "role": "density_field",
+                "path": str(fallback_path),
+                "source": "matplotlib_fallback",
+            })
+
+    narrative = build_narrative(
+        convergence,
+        quality_flags,
+        metrics,
+        manifest.problem_type,
+    )
     return _response(ok_envelope(
-        "analyze_results", warnings=warnings,
-        source={"output_folder": str(Path(run_log_path).parent), "output_prefix": output_prefix, "run_id": run_id},
-        convergence=convergence, quality_flags=quality_flags, metrics=metrics,
-        plots=plots, narrative=narrative))
+        "analyze_results",
+        warnings=warnings,
+        source={
+            "run_directory": str(run_dir),
+            "output_prefix": manifest.output_prefix,
+            "run_id": manifest.run_id,
+            "manifest_hash": manifest.manifest_hash,
+        },
+        convergence=convergence,
+        quality_flags=quality_flags,
+        metrics=metrics,
+        plots=plots,
+        narrative=narrative,
+    ))
+
+
+def analyze_results_tool(
+    request: dict[str, Any] | AnalyzeResultsRequest,
+    *,
+    policy: TrustedAnalysisPolicy | None = None,
+) -> dict[str, Any]:
+    """Analyze only a verified successful RunManifest."""
+    try:
+        return _analyze_results_impl(request, policy=policy)
+    except Exception as exc:
+        logger.exception("analyze_results: unexpected public-boundary failure")
+        return _response(error_envelope(
+            "analyze_results",
+            [FieldError(
+                "<root>",
+                "internal_error",
+                "Analysis failed unexpectedly; inspect local logs.",
+                retryable=True,
+            )],
+            stage="internal",
+        ))
 
 
 def main() -> int:
     from fenitop.tools.cli import run_cli
-    return run_cli(analyze_results_tool, "Analyze a completed fenitop run and summarize the results.")
+
+    return run_cli(
+        analyze_results_tool,
+        "Analyze a completed fenitop run and summarize the results.",
+        tool_name="analyze_results",
+    )
 
 
 if __name__ == "__main__":

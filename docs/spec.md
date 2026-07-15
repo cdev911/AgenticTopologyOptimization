@@ -9,32 +9,33 @@ Last updated: 2026-07-26
 
 ## 0. Current Status (read this first; update it last, every session)
 
-- **Stage**: Tool Hardening implementation; TH-0 through TH-4 are complete and TH-5 is next.
+- **Stage**: Tool Hardening implementation; TH-0 through TH-6 are complete and TH-7 is next.
   Agentic work remains deliberately gated on the full Stage TH gate (§11).
 - **As of**: 2026-07-26.
-- **Just finished**: TH-4 contained execution. Contract `3.0.0` (config schema
-  remains `1.1`) gives every public solve a fresh, exclusively created run
-  directory under a trusted root; safe identifiers; canonical request hashing and
-  idempotent replay; an atomic one-solve capacity lock; and a durable lifecycle
-  record covering `queued | running | succeeded | failed | timed_out | cancelled |
-  orphaned`. The numerical solve runs serially in a separate process group with a
-  fixed working directory, captured streams, a credential-scrubbed environment,
-  timeout/cancel TERM→KILL escalation, and parent-side crash/signal translation.
-  Disk admission, symlink/path containment, incomplete partial artifacts, explicit
-  MPI rejection, stale-job recovery, and setup-failure lock release are tested.
-  Refreshed child-RSS/wall/output calibration remains beneath the existing
-  conservative estimator. All 95 pinned tests and 54 subtests pass.
+- **Just finished**: combined TH-5+TH-6 total transports and manifest-driven
+  analysis. Contract `4.0.0` (config schema remains `1.1`) adds a canonical,
+  durable `RunManifest` with normalized config, hashes, runtime/evidence/lifecycle/
+  numerical state, and relative complete artifact records with size and SHA-256.
+  Tool 3 accepts only that manifest and verifies the durable copy plus every
+  artifact before reading bounded JSON/NPZ data. Summary/history/grid facts must
+  agree; analysis reports constraints, continuation/cap/move/plateau/oscillation,
+  named checkerboard/connectivity methods, and per-load/spring support
+  connectivity. Every direct boundary catches unexpected exceptions without
+  returning tracebacks; CLI stdout is one JSON object with stable exit codes; and
+  a real stdio MCP validate→run→analyze flow passes with solver progress enabled.
+  Refreshed manifest-inclusive resource measurements remain conservative. The
+  single combined regression passes all 103 tests and 99 subtests.
 - **Architecture decisions updated** (§3, §6, §6a): deterministic orchestration
   replaces the three-agent tool-calling pipeline; solver execution stays in the
   same image/container but moves to a child process without the API key;
   clarification is allowed for incomplete/ambiguous requests without adding a
   pre-run confirmation gate; and `gpt-5.6-terra` replaces the old
   `gpt-4.1-mini` default.
-- **Next action**: Combined Stage TH-5+TH-6 (§11 and
-  `docs/tool-hardening-plan.md` §4) — finalize the manifest/analysis contract first,
-  then validate that exact contract across total direct, CLI, and MCP boundaries.
-  Use focused tests during implementation and one full numerical/transport/
-  composition regression at the combined gate. Do not start `agentic/` yet.
+- **Next action**: Stage TH-7 documentation/final gate (§11 and
+  `docs/tool-hardening-plan.md` §4). Audit capability/physics/lifecycle/artifact/
+  error documentation and the failure matrix, reusing the combined regression
+  because no executable change is planned. Do not start `agentic/` until that
+  review explicitly closes Stage TH.
 - **If you're an AI assistant picking this up cold**: read this whole file before
   doing anything, then summarize your understanding of current state + proposed
   next step back to the user before acting. See `CLAUDE.md`/`AGENTS.md` at the
@@ -166,11 +167,11 @@ checkpoint, after the Stage TH tool gate passes — not just the folder shell.
 Source of truth: `fenitop/tools/contracts.py`,
 `fenitop/tools/config_models.py`, and the three tool implementations.
 
-- Public contract version is `3.0.0`; agent-safe config schema is `1.1`. Every
+- Public contract version is `4.0.0`; agent-safe config schema is `1.1`. Every
   request and response is a strict Pydantic model with unknown fields forbidden
   and structured issue records.
 - The LLM-visible inputs are exactly `validate_config(config)`,
-  `run_topopt(config)`, and `analyze_results(run_topopt_envelope)`.
+  `run_topopt(config)`, and `analyze_results(run_manifest)`.
   `AgentSafeConfig` describes physics only. `TrustedValidationPolicy`,
   `TrustedRunPolicy`, and `TrustedAnalysisPolicy` are Python/application-owned and
   are not exported in the MCP schema.
@@ -198,10 +199,11 @@ Source of truth: `fenitop/tools/contracts.py`,
   fields/metrics/gradients/updates, density bounds, and explicit optimizer status.
   Iteration zero and every update are evaluated states. Final metrics/artifacts
   share one state and include grayness, binarization, beta, and continuation.
-- `analyze_results_tool` accepts the typed Tool 2 envelope and recovers the
-  normalized config from it; legacy caller-supplied folder/prefix mode is absent
-  from the public request. Every artifact path is resolved and must remain beneath
-  application-owned allowed roots, including through symlinks.
+- A successful `run_topopt_tool` response includes a canonical `RunManifest`;
+  `analyze_results_tool` accepts only that manifest. It recovers normalized config
+  and analysis evidence without duplicated caller fields. Its relative artifact
+  inventory is checked for trusted-root containment, symlinks, existence,
+  completeness, size, and SHA-256 before any content is parsed.
 - Real MCP input and output schemas are hash-snapshotted. Because pinned MCP 1.28.1
   generated the outer function argument model with extra fields ignored, server
   registration explicitly switches that generated model to `extra="forbid"` and
@@ -215,7 +217,8 @@ consistency, and lossy Tool 2→Tool 3 composition. TH-1 removed executable stri
 and public execution controls, added typed direct composition, and contained Tool
 3 reads; TH-2 completed semantic/resource validation; TH-3 completed numerical
 and evaluated-state correctness; TH-4 added process/filesystem/lifecycle
-containment. The remaining findings are assigned to TH-5 and TH-6.
+containment; TH-5 and TH-6 closed total-boundary, transport, manifest, and
+composition gaps. TH-7 is the remaining documentation/final review.
 
 The detailed remediation source is `docs/tool-hardening-plan.md`. TH-1 implements
 the capability split and typed-envelope portions of the first two boundary
@@ -341,17 +344,19 @@ Existing (unittest-based, already in place):
   injection, configured/passive initialization, final-grid metric consistency,
   cleanup, config-hash guards, artifact consistency, isolated worker execution,
   credential scrubbing, path/idempotency/capacity behavior, and real process-group
-  timeout/cancellation/crash recovery.
+  timeout/cancellation/crash recovery, checksum-verified Tool 2→Tool 3
+  composition, CLI JSON purity, and actual stdio MCP composition.
 - Test entry point: `docker compose run --rm -T fenitop python -m unittest discover -v`.
   `tests/__init__.py` makes nested discovery reliable; zero collection exits 5.
-  Current result: all 95 tests and 54 subtests pass with no expected failures.
+  Current result: all 103 tests and 99 subtests pass with no expected failures
+  (`docker compose run --rm -T fenitop pytest -q`, combined TH-5+TH-6 gate).
 
 Remaining additions for agent-workflow compatibility:
-- **Tool-hardening suite (blocks agent work)**: contract/schema, path/security,
-  geometry/numerics/fault injection, and subprocess lifecycle coverage are in
-  place. TH-5/TH-6 still add generated adversarial JSON, CLI stdout, actual MCP
-  stdio, complete artifact integrity, and manifest-driven Tool 2→Tool 3
-  composition. Full matrix: `docs/tool-hardening-plan.md` §5–§6.
+- **Tool-hardening suite (blocks agent work)**: contract/schema, generated
+  adversarial JSON, path/security, geometry/numerics/fault injection, subprocess
+  lifecycle, CLI stdout, actual MCP stdio, artifact integrity, and
+  manifest-driven Tool 2→Tool 3 composition are implemented. TH-7 performs the
+  final documented failure-matrix/capability review.
 - **Measured resource calibration**: completed in TH-2 and frozen in
   `tests/fixtures/resource_calibration.json`; refresh deliberately if the runtime,
   estimator, solver profiles, or output state model changes.
@@ -379,6 +384,19 @@ Flagged during initial planning (2026-07-25), not yet actioned:
 
 Reverse-chronological. Each entry: date, decision, why, status.
 
+- **2026-07-26** — Combined TH-5+TH-6 advances the public contract to `4.0.0`
+  while retaining config schema `1.1`. Successful Tool 2 results contain a
+  canonical/durable `RunManifest`; relative artifacts carry size, completeness,
+  and SHA-256 evidence. Tool 3 accepts only that manifest, verifies it and every
+  artifact, parses bounded non-pickle data, cross-checks final facts, and reports
+  explicit constraints plus versioned mesh/filter-aware heuristics. All direct
+  tools are total, public tracebacks are replaced by local debug references,
+  solver prints no longer touch transport stdout, CLI behavior/exit codes are
+  tested, and real stdio MCP composition survives an active solve. Reason: freeze
+  one trustworthy payload across direct, CLI, and MCP surfaces and make analysis
+  reject stale, corrupt, incomplete, or reconstructed evidence. Status:
+  implemented; all 103 tests and 99 subtests pass, including both real numerical
+  modes and one stdio MCP validate→run→analyze flow.
 - **2026-07-26** — Implement TH-5 and TH-6 as one combined checkpoint while
   retaining both sets of exit criteria. Build the final manifest-driven Tool 2→Tool
   3 contract before freezing CLI/MCP schemas and transport fixtures; use focused
@@ -387,8 +405,8 @@ Reverse-chronological. Each entry: date, decision, why, status.
   documentation/final review, but reuse that full regression if no executable code
   changes afterward. Reason: TH-6 necessarily changes the schemas and payloads
   TH-5 must transport, so separate checkpoints would duplicate fixtures, schema
-  snapshots, and full solver runs without reducing risk. Status: decided; combined
-  implementation is next.
+  snapshots, and full solver runs without reducing risk. Status: implemented as
+  the contract `4.0.0` checkpoint.
 - **2026-07-26** — TH-4 advances the public contract to `3.0.0` while retaining
   config schema `1.1`. The application allocates immutable per-run directories and
   owns safe IDs, request hashes, idempotency, disk admission, and a single active
@@ -397,7 +415,7 @@ Reverse-chronological. Each entry: date, decision, why, status.
   artifacts, and restart orphan recovery. A duplicate idempotency key replays the
   matching state/result and conflicts on changed request content. Reason: Python
   exception handling in the API-bearing parent cannot contain native PETSc/MPI
-  failure or make concurrent retries safe. Status: implemented and verified by 94
+  failure or make concurrent retries safe. Status: implemented and verified by 95
   tests and 54 subtests, including real timeout/cancel/signal cases.
 - **2026-07-26** — TH-3 advances the public contract to `2.0.0` while retaining
   config schema `1.1`. A topology state is public only after filter, projection,
@@ -500,10 +518,10 @@ Reverse-chronological. Each entry: date, decision, why, status.
 
 ## 10. Open Questions / Next Checkpoint
 
-The hardening architecture and order are decided. The next checkpoint combines
-TH-5 total boundaries/transports with TH-6 manifest-driven analysis. TH-6's final
-payload is implemented before TH-5 freezes transport/schema tests. Items
-intentionally resolved by measurement/implementation rather than guessed now:
+The hardening architecture and order are decided. The next checkpoint is TH-7
+documentation and final gate review; the combined TH-5+TH-6 regression is reused
+unless that review changes executable code. Items intentionally resolved by
+measurement/implementation rather than guessed now:
 
 - The trusted iterative compliance and direct mechanism PETSc profiles passed
   TH-3 convergence/residual checks and finite differences and TH-4 isolated-worker
@@ -544,10 +562,10 @@ index; check items here only when the corresponding plan exit gate passes.
       untrusted deletion/overwrite; idempotent job lifecycle; child solver process
       without API key; timeout/cancel/crash/orphan handling; atomic manifests;
       serial-only agent surface.
-- [ ] **TH-5 Total boundaries/transports** — no public exceptions for JSON-shaped
+- [x] **TH-5 Total boundaries/transports** — no public exceptions for JSON-shaped
       input; structured error codes/retryability; tracebacks local only; stderr
       progress and exactly-one-JSON stdout; real CLI and MCP framing tests.
-- [ ] **TH-6 Manifest-driven analysis** — self-contained verified RunManifest;
+- [x] **TH-6 Manifest-driven analysis** — self-contained verified RunManifest;
       Tool 3 direct handoff without duplicate config/path; reject incomplete/corrupt
       runs; constraint/convergence/continuation diagnostics; calibrated,
       mesh-aware quality heuristics and deterministic narrative.

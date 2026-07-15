@@ -1,6 +1,6 @@
 {
   "baseline_schema_version": "1",
-  "tool_contract_version": "3.0.0",
+  "tool_contract_version": "4.0.0",
   "execution_scope": "serial",
   "characterized_from_commit": "de06b50b99334f9631be3ca0cf11d5260c004dca",
   "runtime": {
@@ -21,6 +21,10 @@
       "stop_reason": "max_iterations_reached",
       "final_beta": 1.0,
       "continuation_completed": false,
+      "analysis": {
+        "volume_satisfied": true,
+        "compliance_bound_satisfied": null
+      },
       "metrics": {
         "final_compliance": 0.15606970814531007,
         "final_volume": 0.40000693256281866,
@@ -40,6 +44,10 @@
       "stop_reason": "max_iterations_reached",
       "final_beta": 1.0,
       "continuation_completed": false,
+      "analysis": {
+        "volume_satisfied": false,
+        "compliance_bound_satisfied": true
+      },
       "metrics": {
         "final_compliance": 0.4973817681142362,
         "final_volume": 0.27727411618464265,

@@ -145,6 +145,18 @@ class NumericalFailureEnvelopeTests(unittest.TestCase):
         self.assertEqual(result["stage"], "numerical")
         self.assertEqual(result["error"]["code"], "mma_singular_subproblem")
 
+    def test_unexpected_solver_exception_is_sanitized(self):
+        result = self._run_with_failure(
+            "fenitop.topopt.topopt",
+            RuntimeError("private injected solver details"),
+        )
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["stage"], "solve")
+        self.assertEqual(result["errors"][0]["code"], "unexpected_solver_error")
+        serialized = json.dumps(result)
+        self.assertNotIn("private injected solver details", serialized)
+        self.assertNotIn("Traceback", serialized)
+
 
 class DirectionalSensitivityTests(unittest.TestCase):
     """Compare filtered/projected analytical gradients to central differences."""
