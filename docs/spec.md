@@ -9,23 +9,24 @@ Last updated: 2026-07-26
 
 ## 0. Current Status (read this first; update it last, every session)
 
-- **Stage**: Stage 0 model environment/secrets complete. Deterministic agentic
-  Stage 1 is now unblocked.
+- **Stage**: Stage 1 deterministic agentic build in progress.
 - **As of**: 2026-07-26.
-- **Just finished**: Stage 0 bookkeeping and learning documentation. The README
-  now contains the fresh-clone Docker/CrewAI recipe, separate Git/build-context/
-  runtime secret boundaries, version and API checks, billed smoke/golden commands,
-  common failure interpretation, and the tested Pydantic/Rich rollback recipe.
-  The committed `.env.example` is blank; the real `.env` remains ignored by Git
-  and excluded from Docker builds.
+- **Just finished**: `agentic/interpreter.py` and versioned prompt
+  `intent-system-v1`. The CrewAI/OpenAI adapter performs interpretation only,
+  uses low reasoning effort with no hidden provider retries, owns a two-attempt
+  application retry bound, validates all returned data against the strict intent
+  schema, and sanitizes terminal transport errors. Mocked tests and billed live
+  checks cover `ready | needs_clarification | unsupported`; the clean rebuilt
+  image packages the prompt, `pip check` is clean, and all 123 tests pass.
 - **Architecture decisions updated** (§3, §6, §6a): deterministic orchestration
   replaces the three-agent tool-calling pipeline; solver execution stays in the
   same image/container but moves to a child process without the API key;
   clarification is allowed for incomplete/ambiguous requests without adding a
   pre-run confirmation gate; and `gpt-5.6-terra` replaces the old
   `gpt-4.1-mini` default.
-- **Next action**: begin Stage 1 (§11) with `agentic/intent.py` and its tests, then
-  implement the interpreter and deterministic orchestrator in checklist order.
+- **Next action**: design and implement the deterministic intent-to-tool-config
+  compiler, including the versioned defaults ledger and the required user-visible
+  notice for every omitted value selected by application code.
 - **If you're an AI assistant picking this up cold**: read this whole file before
   doing anything, then summarize your understanding of current state + proposed
   next step back to the user before acting. See `CLAUDE.md`/`AGENTS.md` at the
@@ -85,9 +86,10 @@ describes the whole picture rather than being edited twice.
   framework-agnostic operations (`validate_config`, `run_topopt`,
   `analyze_results`). The contract is typed, failure-contained, numerically
   explicit, and ready for a CrewAI adapter.
-- **Brain** — `agentic/` (new, not yet created — see Decision Log 2026-07-25). The
-  natural-language interpretation and optional result-explanation layer. It does
-  not decide whether validation/run/analysis happen or hand those deterministic
+- **Brain** — `agentic/` (Stage 1 in progress). The strict intent and
+  natural-language interpretation layers are implemented; deterministic
+  compilation/orchestration and optional result explanation remain. It does not
+  decide whether validation/run/analysis happen or hand those deterministic
   transitions from one LLM agent to another.
 - **Orchestrator** — planned deterministic state machine in `agentic/` (CrewAI Flow
   where useful, plain typed Python for domain state). It owns:
@@ -131,28 +133,30 @@ Practical implications, not yet done:
 ```
 fenitop/                  # domain library: solver + tools/
   tools/                  # hardened validate/run/analyze tool layer
+agentic/
+  intent.py               # strict semantic intent and interpretation outcomes
+  interpreter.py          # bounded LLM-backed interpretation only
+  prompts/                # versioned interpretation capability prompt
 config/                   # example configs (beam_2d, mechanism_2d)
 scripts/                  # example CLI entry points (config-driven + legacy hardcoded)
-tests/                    # unittest-based, split dolfinx-free vs Docker-only
+tests/
+  agentic/                # deterministic intent tests; flow tests follow
+                         # plus existing dolfinx-free and Docker-only tool tests
 results/                  # gitignored solver outputs
 docs/spec.md              # this file
 docs/tool-reference.md    # final tool capabilities, contracts, and operations
 ```
 
-### Planned addition (not yet created)
+### Remaining planned additions
 ```
 agentic/
-  intent.py                # typed ProblemIntent and ready/clarify/unsupported result
-  interpreter.py           # LLM-backed natural-language interpretation only
   orchestrator.py          # deterministic state machine / CrewAI Flow
   explainer.py             # optional LLM explanation over deterministic analysis
-  llm.py                   # env-driven, pinned model/provider selection
-  prompts/                 # versioned interpretation/explanation prompts
 tests/agentic/             # mocked-LLM + deterministic-flow integration tests
 ```
 
-Nothing under "Planned addition" exists yet. We create it deliberately after the
-Stage 0 environment/model checkpoint—not just as a folder shell.
+`agentic/` was created only after the Stage 0 environment/model checkpoint passed.
+New modules are added in checklist order rather than as empty shells.
 
 ## 5. Tool Contract (the "hands" API)
 
@@ -292,6 +296,17 @@ Solver idempotency/resource limits are tool policy, not LLM-cost policy.
   This supersedes the earlier “fully autonomous with accepted
   semantically-wrong-but-valid risk” posture. Clarification is required-input
   collection, not a confirm-every-run human gate.
+- **Intent versus defaults**: `ProblemIntent` requires problem-defining physics
+  (problem type, rectangular 2D geometry, material, supports, external loads,
+  target volume, and mechanism fields when applicable). Mesh divisions/cell type,
+  filter radius, and iteration limit are optional user preferences. The
+  deterministic compiler—not the LLM—will supply versioned defaults for omitted
+  preferences and optimizer/tolerance/continuation details.
+- **Visible defaults without a confirmation gate**: before validation/run, the
+  workflow must show every omitted preference, the deterministic value applied,
+  and why. User-facing wording should make the authority accurate: “The compiler
+  applied these defaults. Tell me if you want changes; otherwise I’ll proceed.”
+  This is an editable transparency notice, not a pause or approval requirement.
 - **Execution authority**: application code owns run IDs, filesystem roots, solver
   profiles, timeout/cancellation, idempotency, and resource ceilings. These are not
   LLM tools/arguments. The worker process never receives the API key (§3, §5).
@@ -330,9 +345,10 @@ Existing (unittest-based, already in place):
   composition, CLI JSON purity, and actual stdio MCP composition.
 - Test entry point: `docker compose run --rm -T fenitop python -m unittest discover -v`.
   `tests/__init__.py` makes nested discovery reliable; zero collection exits 5.
-  Current result: all 107 tests pass with no expected failures
-  (`docker compose run --rm -T fenitop python -m unittest discover -v`, 18.706
-  seconds at the final tool checkpoint).
+  Current result: all 123 tests plus 103 subtests pass with no expected failures:
+  107 hardened-tool tests plus 7 strict-intent and 9 interpreter tests
+  (`docker compose run --rm -T fenitop pytest -q`, 32.87 seconds at the
+  interpreter checkpoint).
 
 Remaining additions for agent-workflow compatibility:
 - **Hardened-tool suite (passed)**: contract/schema, generated
@@ -388,6 +404,27 @@ Final tool review findings (2026-07-26):
 
 Reverse-chronological. Each entry: date, decision, why, status.
 
+- **2026-07-26** — Implement the Stage 1 interpretation boundary as a small
+  CrewAI-backed adapter rather than an autonomous tool-using agent. Pin low
+  reasoning effort, disable provider retries, permit two application-owned
+  attempts, validate every outcome with `InterpretationEnvelope`, and expose only
+  sanitized failure metadata. The versioned prompt is the capability contract and
+  explicitly encodes bounds as `[[x_min,y_min],[x_max,y_max]]`. A transport-only
+  schema adapter normalizes Pydantic fixed tuples and recursive objects for
+  OpenAI's strict-schema subset without weakening the semantic model. Reason:
+  language interpretation needs an LLM, while retry authority, validation, and
+  side effects stay deterministic and testable. Status: mocked tests and billed
+  live ready/clarification/unsupported checks pass; clean-image full suite is 123
+  passing tests plus 103 passing subtests.
+- **2026-07-26** — Define the first Stage 1 semantic boundary. A `ready`
+  `ProblemIntent` contains problem-defining physics while mesh divisions/cell type,
+  filter radius, and iteration limit remain optional preferences. Application code
+  supplies omitted numerical defaults, reports each applied value and reason to
+  the user, and proceeds without a confirmation gate unless the user asks for a
+  change. Reason: do not burden natural-language users with solver tuning, do not
+  misattribute deterministic choices to the model, and keep all assumptions
+  inspectable. Status: `agentic/intent.py` implemented; rebuilt image and all 114
+  tests pass. Compiler/default disclosure remains part of the orchestrator work.
 - **2026-07-26** — Close Stage 0 with a documented, Docker-only learning recipe.
   Keep `.env` outside both Git history and the Docker build context, inject it only
   into the parent at runtime, and document verification, billed model checks, and
@@ -440,12 +477,12 @@ Reverse-chronological. Each entry: date, decision, why, status.
 - **2026-07-26** — Free-text remains the only UI input, with
   `ready | needs_clarification | unsupported` interpretation. Clarification for
   missing/ambiguous physics is allowed and required; there is still no confirmation
-  gate for a ready request. Status: decided, not implemented.
+  gate for a ready request. Status: interpretation implemented; conversational
+  resume and UI remain.
 - **2026-07-26** — Replace the fixed `gpt-4.1-mini` default with current-generation
   `gpt-5.6-terra`, environment-configurable and recorded/pinned for demo
   reproducibility. Reliability is prioritized over minimizing token price for this
-  personal project. Status: decided, not implemented; verify with golden scenarios
-  before prompt freeze.
+  personal project. Status: implemented and verified with golden scenarios.
 - **2026-07-25** — Streamlit input is free-text chat only (no structured form, no
   JSON-paste hybrid) — matches §1's vision and the tool layer's existing
   natural-language design intent. Status: input-shape decision retained; its
@@ -489,8 +526,9 @@ by measurement/implementation rather than guessed now:
   snapshot. That exact ID and the rest of the recorded Stage 0 configuration in
   §6 are the reproducibility baseline.
 
-Prompt wording is deliberately deferred until Stage 1; prompts must document the
-final contract in `docs/tool-reference.md`.
+The v1 interpreter prompt is now versioned in
+`agentic/prompts/intent_system_v1.txt`; changes to supported physics must remain
+aligned with the final contract in `docs/tool-reference.md`.
 
 ## 11. Implementation Checklist
 
@@ -511,11 +549,11 @@ Completed tool capabilities and their verification commands are maintained in
 - [x] Verify outbound API access and run a throwaway structured-output smoke test.
 - [x] Run golden intent scenarios and record/pin the final model ID/config (§6).
 
-**Stage 1 — deterministic `agentic/` build** (next):
+**Stage 1 — deterministic `agentic/` build** (in progress):
 
-- [ ] `intent.py` — typed `ProblemIntent` and
+- [x] `intent.py` — typed `ProblemIntent` and
       `ready | needs_clarification | unsupported`.
-- [ ] `interpreter.py` and prompts — LLM interpretation only; structured output,
+- [x] `interpreter.py` and prompts — LLM interpretation only; structured output,
       bounded retries, capability-aware clarification.
 - [ ] `orchestrator.py` — deterministic typed state machine/CrewAI Flow; exact
       compile→validate→worker→analyze handoffs and idempotent resume.
