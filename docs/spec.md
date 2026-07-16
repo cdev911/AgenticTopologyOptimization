@@ -9,24 +9,23 @@ Last updated: 2026-07-26
 
 ## 0. Current Status (read this first; update it last, every session)
 
-- **Stage**: Hardened tool layer complete. The next checkpoint is Stage 0 model
-  environment/secrets before deterministic agentic implementation.
+- **Stage**: Stage 0 model environment/secrets complete. Deterministic agentic
+  Stage 1 is now unblocked.
 - **As of**: 2026-07-26.
-- **Just finished**: post-hardening documentation cleanup. The obsolete workstream
-  plan and phase-by-phase history were removed; the final contract remains in
-  `docs/tool-reference.md`, the current architecture/decisions remain here, and
-  README contains the runnable public view. Generated Python caches were cleared
-  and local `.env` files are excluded from Git and Docker build contexts.
+- **Just finished**: Stage 0 bookkeeping and learning documentation. The README
+  now contains the fresh-clone Docker/CrewAI recipe, separate Git/build-context/
+  runtime secret boundaries, version and API checks, billed smoke/golden commands,
+  common failure interpretation, and the tested Pydantic/Rich rollback recipe.
+  The committed `.env.example` is blank; the real `.env` remains ignored by Git
+  and excluded from Docker builds.
 - **Architecture decisions updated** (§3, §6, §6a): deterministic orchestration
   replaces the three-agent tool-calling pipeline; solver execution stays in the
   same image/container but moves to a child process without the API key;
   clarification is allowed for incomplete/ambiguous requests without adding a
   pre-run confirmation gate; and `gpt-5.6-terra` replaces the old
   `gpt-4.1-mini` default.
-- **Next action**: Stage 0 (§11): add `.env.example`, pin and integrate the exact
-  CrewAI/OpenAI environment, prove parent API access and worker secret scrubbing,
-  then run golden intent/model checks. Do not create `agentic/` until the Stage 0
-  items that block it pass.
+- **Next action**: begin Stage 1 (§11) with `agentic/intent.py` and its tests, then
+  implement the interpreter and deterministic orchestrator in checklist order.
 - **If you're an AI assistant picking this up cold**: read this whole file before
   doing anything, then summarize your understanding of current state + proposed
   next step back to the user before acting. See `CLAUDE.md`/`AGENTS.md` at the
@@ -114,10 +113,13 @@ but `run_topopt` does not advertise MPI until run IDs, output ownership, and
 rank-zero response behavior have an MPI-specific implementation and test.
 
 Practical implications, not yet done:
-- Add `crewai` to `pyproject.toml` and the `Dockerfile`; one image rebuild needed
-  after that (code changes after this don't need rebuilds — `docker-compose.yml`
-  already bind-mounts the repo).
-- Verify the container has outbound internet access to reach api.openai.com.
+- CrewAI `1.15.6` is pinned in `pyproject.toml` and the complete closure is pinned
+  in `requirements/runtime.lock`; the image was rebuilt successfully.
+- The container reaches api.openai.com through CrewAI, and
+  `scripts/stage0_model_smoke.py` proves a billed, schema-constrained Terra call.
+  Terra rejects an explicit `temperature=0`, so its default temperature is left
+  unset; with `response_format` CrewAI `1.15.6` returns the validated Pydantic
+  instance directly.
 - `OPENAI_API_KEY` is supplied to the container via `docker-compose.yml`'s
   `env_file:` pointing at an untracked `.env` file — never baked into the image or
   committed. Local `.env` files are excluded from Git and Docker build contexts.
@@ -242,10 +244,12 @@ Why:
   intelligence/cost candidate rather than the flagship/highest-cost choice. The
   model will be set through `OPENAI_MODEL`, recorded in each workflow trace, and
   changed only through config — never hard-wired throughout prompts/tasks.
-- Before the first real agent stage, run the same golden intent/config scenarios
-  against the selected model and one cheaper current alternative. If the exact
-  provider snapshot/alias needed for reproducibility differs from
-  `gpt-5.6-terra`, update this section and §9 rather than silently changing it.
+- The Stage 0 golden intent gate passed on both the selected model and cheaper
+  current alternative. The final recorded configuration is OpenAI
+  `gpt-5.6-terra` through CrewAI `1.15.6`, low reasoning effort, temperature
+  unset, and strict Pydantic structured output. The public model catalog exposes
+  the `gpt-5.6-terra` ID without a distinct dated snapshot, so that ID is the
+  recorded pin. `gpt-5.6-luna` also passed but remains only a lower-cost comparison.
 - Local LLM (Ollama) was considered and deliberately deferred, not rejected — small
   local models are meaningfully less reliable at strict JSON-schema tool-calling and
   multi-step self-correction, which would shift effort into prompt-engineering
@@ -254,8 +258,9 @@ Why:
 
 Budget is no longer the architecture driver, but operational bounds still matter:
 pin exact CrewAI/model configuration once implemented; cap interpretation retries;
-use structured outputs and low/non-creative settings for intent extraction; log
-token usage; and never let an LLM retry an expensive solver side effect directly.
+use structured outputs and low reasoning effort for intent extraction (Terra does
+not accept `temperature=0`, so temperature remains unset); log token usage; and
+never let an LLM retry an expensive solver side effect directly.
 Solver idempotency/resource limits are tool policy, not LLM-cost policy.
 
 ## 6a. Agentic Layer Design: Agents, Tasks, Process
@@ -383,6 +388,31 @@ Final tool review findings (2026-07-26):
 
 Reverse-chronological. Each entry: date, decision, why, status.
 
+- **2026-07-26** — Close Stage 0 with a documented, Docker-only learning recipe.
+  Keep `.env` outside both Git history and the Docker build context, inject it only
+  into the parent at runtime, and document verification, billed model checks, and
+  dependency rollback in README. Reason: make the checkpoint reproducible and
+  explain the security/runtime boundaries before agentic code is added. Status:
+  done.
+- **2026-07-26** — Complete Stage 0 and retain `gpt-5.6-terra` as the default.
+  The reproducible golden gate in `scripts/stage0_golden_intents.py` evaluated
+  supported-ready, ambiguous/needs-clarification, and unsupported requests.
+  Terra and the cheaper Luna alternative both matched all expected statuses;
+  Terra remains selected because this project prioritizes interpretation
+  reliability over minimum token price. Final configuration: CrewAI `1.15.6`,
+  OpenAI provider, model `gpt-5.6-terra`, low reasoning effort, temperature unset,
+  strict Pydantic output. Status: done; Stage 1 unblocked.
+- **2026-07-26** — Pin CrewAI `1.15.6` in the Docker runtime only. To satisfy its
+  published dependency bounds, move Pydantic `2.13.4` → `2.12.5`,
+  pydantic-core `2.46.4` → `2.41.5`, and Rich `15.0.0` → `14.2.0`; regenerate the
+  full lock and accept the compatibility change only with the complete hardened
+  suite passing. Rollback recipe if later checks fail: remove CrewAI from
+  `pyproject.toml`, restore those three original pins, regenerate
+  `requirements/runtime.lock`, rebuild, and rerun all 107 tests. Reason: isolate
+  the learning framework in the reproducible project image without changing the
+  Mac's global Python environment. Status: installed; all 107 tests pass. A live
+  `gpt-5.6-terra` structured-output call passes with low reasoning effort,
+  temperature unset, and a Pydantic instance returned directly by CrewAI.
 - **2026-07-26** — Remove the completed tool-hardening workstream plan and
   phase-by-phase history. Preserve the final contract in `docs/tool-reference.md`
   and keep one consolidated completion decision here. Reason: completed
@@ -446,9 +476,8 @@ Reverse-chronological. Each entry: date, decision, why, status.
 
 ## 10. Open Questions / Next Checkpoint
 
-The next checkpoint is Stage 0 model environment and secrets, followed by
-deterministic agentic Stage 1. Items intentionally resolved by
-measurement/implementation rather than guessed now:
+The next checkpoint is deterministic agentic Stage 1. Items intentionally resolved
+by measurement/implementation rather than guessed now:
 
 - The trusted iterative compliance and direct mechanism PETSc profiles pass
   convergence/residual checks, finite differences, and isolated-worker
@@ -456,8 +485,9 @@ measurement/implementation rather than guessed now:
 - Component-wise/roller supports and nonzero prescribed displacement are explicitly
   rejected in agent-safe v1. A future implementation must add correct
   lifting/subspace behavior and tests before changing that capability.
-- The exact immutable OpenAI model snapshot/alias after golden intent tests; the
-  current default decision is `gpt-5.6-terra` (§6).
+- The public catalog currently exposes `gpt-5.6-terra` without a distinct dated
+  snapshot. That exact ID and the rest of the recorded Stage 0 configuration in
+  §6 are the reproducibility baseline.
 
 Prompt wording is deliberately deferred until Stage 1; prompts must document the
 final contract in `docs/tool-reference.md`.
@@ -467,22 +497,21 @@ final contract in `docs/tool-reference.md`.
 Completed tool capabilities and their verification commands are maintained in
 `docs/tool-reference.md` and README. This checklist tracks only remaining work.
 
-**Stage 0 — model environment & secrets** (next; Stage 1 remains blocked until the
-required environment and golden-model checks pass):
+**Stage 0 — model environment & secrets** (complete):
 
-- [ ] Create/configure the OpenAI API account and generate an API key; cost alerts
+- [x] Create/configure the OpenAI API account and generate an API key; cost alerts
       or prepaid limits are optional personal-account policy, not architecture.
 - [x] Exclude local `.env` files from Git and Docker build contexts.
-- [ ] Create an untracked `.env` and committed `.env.example` containing
+- [x] Create an untracked `.env` and committed `.env.example` containing
       `OPENAI_API_KEY=` and `OPENAI_MODEL=gpt-5.6-terra`.
-- [ ] Add/pin CrewAI only after its exact deterministic Flow/tool API is verified
+- [x] Add/pin CrewAI only after its exact deterministic Flow/tool API is verified
       against the pinned Pydantic/runtime stack; rebuild the image once.
-- [ ] Wire `.env` into the parent application process and prove the solver worker
+- [x] Wire `.env` into the parent application process and prove the solver worker
       environment does not inherit `OPENAI_API_KEY`.
-- [ ] Verify outbound API access and run a throwaway structured-output smoke test.
-- [ ] Run golden intent scenarios and record/pin the final model ID/config (§6).
+- [x] Verify outbound API access and run a throwaway structured-output smoke test.
+- [x] Run golden intent scenarios and record/pin the final model ID/config (§6).
 
-**Stage 1 — deterministic `agentic/` build** (blocked on Stage 0):
+**Stage 1 — deterministic `agentic/` build** (next):
 
 - [ ] `intent.py` — typed `ProblemIntent` and
       `ready | needs_clarification | unsupported`.
