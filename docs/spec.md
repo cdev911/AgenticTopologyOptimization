@@ -11,22 +11,22 @@ Last updated: 2026-07-26
 
 - **Stage**: Stage 1 deterministic agentic build in progress.
 - **As of**: 2026-07-26.
-- **Just finished**: `agentic/interpreter.py` and versioned prompt
-  `intent-system-v1`. The CrewAI/OpenAI adapter performs interpretation only,
-  uses low reasoning effort with no hidden provider retries, owns a two-attempt
-  application retry bound, validates all returned data against the strict intent
-  schema, and sanitizes terminal transport errors. Mocked tests and billed live
-  checks cover `ready | needs_clarification | unsupported`; the clean rebuilt
-  image packages the prompt, `pip check` is clean, and all 123 tests pass.
+- **Just finished**: `agentic/compiler.py`, the deterministic
+  `ProblemIntent → AgentSafeConfig` boundary. Its versioned defaults profile
+  derives near-square, roughly 2,500-element meshes (50×50 for a square), derives
+  the filter from element size, applies the approved problem-specific numerical
+  profile, and returns both the exact config and a complete user-visible defaults
+  ledger. A real 60×20 compiled cantilever passes mesh-backed validation; all 129
+  tests plus 103 subtests pass.
 - **Architecture decisions updated** (§3, §6, §6a): deterministic orchestration
   replaces the three-agent tool-calling pipeline; solver execution stays in the
   same image/container but moves to a child process without the API key;
   clarification is allowed for incomplete/ambiguous requests without adding a
   pre-run confirmation gate; and `gpt-5.6-terra` replaces the old
   `gpt-4.1-mini` default.
-- **Next action**: design and implement the deterministic intent-to-tool-config
-  compiler, including the versioned defaults ledger and the required user-visible
-  notice for every omitted value selected by application code.
+- **Next action**: implement the typed deterministic orchestrator around the
+  completed interpret→compile boundary, starting with clarification/unsupported
+  state and exact validation handoff before adding run/analyze side effects.
 - **If you're an AI assistant picking this up cold**: read this whole file before
   doing anything, then summarize your understanding of current state + proposed
   next step back to the user before acting. See `CLAUDE.md`/`AGENTS.md` at the
@@ -136,6 +136,7 @@ fenitop/                  # domain library: solver + tools/
 agentic/
   intent.py               # strict semantic intent and interpretation outcomes
   interpreter.py          # bounded LLM-backed interpretation only
+  compiler.py             # deterministic intent→config and defaults ledger
   prompts/                # versioned interpretation capability prompt
 config/                   # example configs (beam_2d, mechanism_2d)
 scripts/                  # example CLI entry points (config-driven + legacy hardcoded)
@@ -345,10 +346,10 @@ Existing (unittest-based, already in place):
   composition, CLI JSON purity, and actual stdio MCP composition.
 - Test entry point: `docker compose run --rm -T fenitop python -m unittest discover -v`.
   `tests/__init__.py` makes nested discovery reliable; zero collection exits 5.
-  Current result: all 123 tests plus 103 subtests pass with no expected failures:
-  107 hardened-tool tests plus 7 strict-intent and 9 interpreter tests
-  (`docker compose run --rm -T fenitop pytest -q`, 32.87 seconds at the
-  interpreter checkpoint).
+  Current result: all 129 tests plus 103 subtests pass with no expected failures:
+  107 hardened-tool tests plus 7 strict-intent, 9 interpreter, and 6 compiler
+  tests (`docker compose run --rm -T fenitop pytest -q`, 33.49 seconds at the
+  compiler checkpoint).
 
 Remaining additions for agent-workflow compatibility:
 - **Hardened-tool suite (passed)**: contract/schema, generated
@@ -404,6 +405,21 @@ Final tool review findings (2026-07-26):
 
 Reverse-chronological. Each entry: date, decision, why, status.
 
+- **2026-07-26** — Pin deterministic compiler defaults as
+  `agentic-defaults-v1`. For omitted mesh divisions, target
+  `h=sqrt(domain area)/50` and round each axis count, giving 50×50 for a square,
+  roughly 2,500 cells for ordinary rectangles, and near-square element edges.
+  Preserve at least two cells across extreme short axes and refine the long axis;
+  trusted resource validation, not the mesh formula, rejects excessive work.
+  Default filter radius is 1.5 times the larger element edge. Retain the approved
+  compliance/mechanism iteration, optimizer, tolerance, continuation, move, and
+  fixed plane-strain profiles. Return every compiler-selected value and reason in
+  a typed ledger and explicit editable notice before proceeding without a
+  confirmation gate. Reason: mesh resolution must follow geometry rather than
+  distort elements or silently assume a fixed aspect ratio, while default
+  authority remains deterministic and visible. Status: implemented; a compiled
+  60×20 cantilever passes real mesh-backed validation and the full 129-test suite
+  passes.
 - **2026-07-26** — Implement the Stage 1 interpretation boundary as a small
   CrewAI-backed adapter rather than an autonomous tool-using agent. Pin low
   reasoning effort, disable provider retries, permit two application-owned
@@ -555,6 +571,8 @@ Completed tool capabilities and their verification commands are maintained in
       `ready | needs_clarification | unsupported`.
 - [x] `interpreter.py` and prompts — LLM interpretation only; structured output,
       bounded retries, capability-aware clarification.
+- [x] `compiler.py` — deterministic intent-to-config mapping, geometry-derived
+      near-square mesh/filter defaults, and complete user-visible defaults ledger.
 - [ ] `orchestrator.py` — deterministic typed state machine/CrewAI Flow; exact
       compile→validate→worker→analyze handoffs and idempotent resume.
 - [ ] Optional `explainer.py` — explains Tool 3 evidence without changing facts.
