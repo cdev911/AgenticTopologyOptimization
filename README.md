@@ -237,6 +237,21 @@ the explicit user notice that the values were not provided and were selected by
 the deterministic compiler; the user may request changes, otherwise execution can
 continue without a confirmation gate.
 
+The first `agentic/orchestrator.py` slice is a typed deterministic state machine
+through validation. It returns one of four explicit states:
+`awaiting_clarification`, `unsupported`, `validation_failed`, or `validated`.
+Clarification and unsupported outcomes cannot compile or validate. A clarification
+resume persists the original request, the exact missing fields/questions, and the
+user's answer before asking the interpreter again; it does not depend on hidden
+model memory.
+
+For a ready intent, the orchestrator emits the defaults notice before invoking the
+validator, then passes a `ValidateConfigRequest` containing the exact compiled
+Pydantic config. Its callback and persisted event trace expose stage facts without
+chain-of-thought. The current slice deliberately stops at `validated`: worker
+launch, idempotent job resume, manifest handoff, and analysis are the next
+orchestration slice.
+
 ## Agent-tool layer
 
 Beyond the example scripts, `fenitop/tools/` exposes the config-driven workflow as three composable tools for an agent (or any script) to call, each usable as a plain Python function, a `--input`/`--output` JSON CLI, or an MCP tool — one implementation behind all three. Logs and solver progress stay on stderr or in captured run files; CLI stdout is exactly one JSON response and real stdio MCP composition is tested.
@@ -375,8 +390,8 @@ cancellation/signal recovery, generated malformed inputs, corrupt artifacts,
 calibrated heuristics, CLI purity, and real MCP composition. Focused development
 commands are listed in the [tool reference](docs/tool-reference.md); the full
 command above remains the checkpoint gate. All 107 tests pass in the pinned image.
-The Stage 1 intent, interpreter, and compiler additions bring the current
-checkpoint to 129 passing tests plus 103 passing subtests.
+The Stage 1 interpretation-through-validation additions bring the current
+checkpoint to 134 passing tests plus 103 passing subtests.
 
 ## Repository layout
 
