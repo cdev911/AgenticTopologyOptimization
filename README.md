@@ -63,7 +63,8 @@ docker compose build
 ```
 
 This installs the complete pinned dependency closure from
-`requirements/runtime.lock`, including CrewAI, inside `fenitop:local`. Rebuild
+`requirements/runtime.lock`, including CrewAI and Streamlit, inside
+`fenitop:local`. Rebuild
 after changing `pyproject.toml`, the lock file, Dockerfile, or base-image digest.
 Ordinary source changes are visible immediately through the repository bind mount.
 
@@ -76,6 +77,35 @@ docker compose run --rm -T fenitop python -c \
 ```
 
 Expected Stage 0 pins are CrewAI `1.15.6` and Pydantic `2.12.5`.
+
+### Run the chat UI
+
+Start the Streamlit service in the same pinned Docker environment:
+
+```bash
+docker compose up ui
+```
+
+Then open <http://localhost:8501>. Stop it with `Ctrl-C`, or use
+`docker compose stop ui` if it was started in the background.
+
+The only problem-definition input is chat. The UI preserves clarification context,
+shows every compiler-selected default before automatically continuing, and exposes
+an inspectable deterministic event/evidence trace. Solver work runs in a background
+thread that launches the existing credential-scrubbed child process, so Streamlit
+can poll lifecycle progress and offer cancellation without blocking the page.
+
+Streamlit reruns keep the typed workflow and job future in session state. The
+orchestrator also derives a stable application-owned idempotency key, so rerunning
+the page cannot turn the same validated request into a second solve. Cancellation
+uses the same derived run identity under the fixed `results/` root; neither paths
+nor execution-policy values are accepted from the browser.
+
+Streamlit is pinned at `1.60.0`. Adding it caused the compatible dependency solver
+to select PyArrow `24.0.0` instead of `25.0.0`; the image was rebuilt and the full
+test suite was rerun after regenerating the lock file. This is why dependency
+changes should be treated as runtime changes, even when application code does not
+import the transitive package directly.
 
 ### Verify the model environment
 

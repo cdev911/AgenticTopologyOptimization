@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated, Callable, Literal, Protocol, Sequence, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -21,7 +22,11 @@ from fenitop.tools.contracts import (
     TrustedRunPolicy,
 )
 from fenitop.tools.analyze_results import analyze_results_tool
-from fenitop.tools.lifecycle import canonical_json_hash
+from fenitop.tools.lifecycle import (
+    canonical_json_hash,
+    idempotency_hash,
+    request_cancellation,
+)
 from fenitop.tools.run_topopt import run_topopt_tool
 from fenitop.tools.validate_config import validate_config_tool
 
@@ -120,6 +125,11 @@ class WorkflowEvent(StrictWorkflowModel):
         "explained",
     ]
     message: str
+
+
+class ExecutionIdentity(StrictWorkflowModel):
+    idempotency_key: str
+    run_id: str
 
 
 class AwaitingClarification(StrictWorkflowModel):
@@ -353,6 +363,27 @@ class DeterministicOrchestrator:
             explanation=explanation,
             events=tuple(events),
         )
+
+    def execution_identity(self, state: ValidatedWorkflow) -> ExecutionIdentity:
+        """Expose the application-derived identity needed for safe cancellation."""
+        key = self._idempotency_key(state)
+        key_hash = idempotency_hash(key)
+        if key_hash is None:
+            raise AssertionError("workflow idempotency key must hash")
+        prefix = (
+            "compliance_2d"
+            if state.compilation.config.opt.problem_type == "minimize_compliance"
+            else "mechanism_2d"
+        )
+        return ExecutionIdentity(
+            idempotency_key=key,
+            run_id=f"{prefix}_{key_hash[:16]}",
+        )
+
+    def request_cancel(self, state: ValidatedWorkflow) -> bool:
+        """Request cancellation under the fixed trusted results root."""
+        identity = self.execution_identity(state)
+        return request_cancellation(Path("results"), identity.run_id)
 
     def _analyze(
         self,

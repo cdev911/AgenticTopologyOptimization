@@ -13,3 +13,18 @@ services:
       OMP_NUM_THREADS: 1
     stdin_open: true
     tty: true
+
+  ui:
+    build: .
+    image: fenitop:local
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    env_file:
+      - .env
+    environment:
+      PYTHONPATH: /workspace:/usr/local/dolfinx-real/lib/python3.12/dist-packages:/usr/local/dolfinx-complex/lib/python3.12/dist-packages
+      OMP_NUM_THREADS: 1
+    command: ["streamlit", "run", "streamlit_app.py"]
+    ports:
+      - "8501:8501"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from agentic.compiler import compile_intent
 from agentic.explainer import (
@@ -453,6 +454,32 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(len(explainer.analyses), 1)
         self.assertIs(refreshed, explained)
         self.assertEqual(explained.events[-1].stage, "explained")
+
+    def test_execution_identity_and_cancellation_use_trusted_derived_run_id(self):
+        orchestrator = DeterministicOrchestrator(
+            FakeInterpreter([ready_result()]),
+            validator=RecordingValidator(),
+        )
+        validated = orchestrator.start("stable request")
+        identity = orchestrator.execution_identity(validated)
+
+        self.assertTrue(identity.idempotency_key.startswith("agentic-workflow-v1:"))
+        self.assertRegex(
+            identity.run_id,
+            r"^compliance_2d_[0-9a-f]{16}$",
+        )
+        with mock.patch(
+            "agentic.orchestrator.request_cancellation",
+            return_value=True,
+        ) as cancel:
+            accepted = orchestrator.request_cancel(validated)
+
+        self.assertTrue(accepted)
+        cancel.assert_called_once_with(
+            mock.ANY,
+            identity.run_id,
+        )
+        self.assertEqual(str(cancel.call_args.args[0]), "results")
 
     def test_explain_requires_configured_explainer(self):
         orchestrator = DeterministicOrchestrator(
