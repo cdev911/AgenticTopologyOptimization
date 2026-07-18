@@ -9,24 +9,23 @@ Last updated: 2026-07-26
 
 ## 0. Current Status (read this first; update it last, every session)
 
-- **Stage**: Stage 1 deterministic agentic build in progress.
+- **Stage**: Stage 1 deterministic agentic workflow complete; Stage 2 UI unblocked.
 - **As of**: 2026-07-26.
-- **Just finished**: deterministic orchestration through run and analysis.
-  Application state and run-tool policy provide two idempotency layers; successful
-  `RunManifest` objects pass directly into typed analysis; run and analysis
-  failures remain distinct; analysis retry cannot rerun the solver. The committed
-  no-API harness completes a real 8×4 contained solve/analysis, and a fresh-process
-  repeat returns the same run ID with `idempotent_replay=true`. All 139 tests plus
-  103 subtests pass.
+- **Just finished**: optional fact-preserving result explanation. Deterministic
+  code turns Tool 3 evidence into immutable required/supporting fact IDs; the LLM
+  may organize IDs under allowed headings but cannot author prose or values;
+  deterministic code validates completeness and renders original cited facts. A
+  live Terra check organized the replayed real harness evidence successfully. All
+  148 tests plus 103 subtests pass.
 - **Architecture decisions updated** (§3, §6, §6a): deterministic orchestration
   replaces the three-agent tool-calling pipeline; solver execution stays in the
   same image/container but moves to a child process without the API key;
   clarification is allowed for incomplete/ambiguous requests without adding a
   pre-run confirmation gate; and `gpt-5.6-terra` replaces the old
   `gpt-4.1-mini` default.
-- **Next action**: decide whether to add the optional fact-preserving LLM result
-  explainer or move directly to the thin Streamlit UI over the now-complete
-  deterministic workflow.
+- **Next action**: begin Stage 2 with a thin Streamlit chat UI over persisted typed
+  workflow state, preserving clarification context, default/evidence events, and
+  no-duplicate-solve behavior across Streamlit reruns.
 - **If you're an AI assistant picking this up cold**: read this whole file before
   doing anything, then summarize your understanding of current state + proposed
   next step back to the user before acting. See `CLAUDE.md`/`AGENTS.md` at the
@@ -86,13 +85,11 @@ describes the whole picture rather than being edited twice.
   framework-agnostic operations (`validate_config`, `run_topopt`,
   `analyze_results`). The contract is typed, failure-contained, numerically
   explicit, and ready for a CrewAI adapter.
-- **Brain** — `agentic/` (Stage 1 in progress). The strict intent and
-  natural-language interpretation layers are implemented; deterministic
-  compilation/orchestration and optional result explanation remain. It does not
-  decide whether validation/run/analysis happen or hand those deterministic
-  transitions from one LLM agent to another.
-- **Orchestrator** — planned deterministic state machine in `agentic/` (CrewAI Flow
-  where useful, plain typed Python for domain state). It owns:
+- **Brain** — `agentic/` (Stage 1 complete). Strict interpretation and constrained
+  evidence organization are the only LLM roles; deterministic code owns
+  compilation, transitions, side effects, and factual rendering.
+- **Orchestrator** — implemented deterministic state machine in `agentic/`, with
+  plain typed Python as authoritative domain state. It owns:
   `interpret → clarify-or-compile → validate → launch worker → analyze → explain`.
   Exact Pydantic objects/manifests move between stages; no LLM retypes a normalized
   config, output path, or run envelope.
@@ -114,7 +111,7 @@ Agent workflow v1 is serial. Existing legacy scripts may still demonstrate MPI,
 but `run_topopt` does not advertise MPI until run IDs, output ownership, and
 rank-zero response behavior have an MPI-specific implementation and test.
 
-Practical implications, not yet done:
+Operational implementation:
 - CrewAI `1.15.6` is pinned in `pyproject.toml` and the complete closure is pinned
   in `requirements/runtime.lock`; the image was rebuilt successfully.
 - The container reaches api.openai.com through CrewAI, and
@@ -138,23 +135,21 @@ agentic/
   interpreter.py          # bounded LLM-backed interpretation only
   compiler.py             # deterministic intent→config and defaults ledger
   orchestrator.py         # typed interpret→compile→validate→run→analyze state
-  prompts/                # versioned interpretation capability prompt
+  explainer.py            # constrained evidence-ID planner and renderer
+  prompts/                # versioned interpretation and explainer prompts
 config/                   # example configs (beam_2d, mechanism_2d)
 scripts/                  # example CLI entry points (config-driven + legacy hardcoded)
 tests/
-  agentic/                # deterministic intent tests; flow tests follow
+  agentic/                # deterministic full-workflow and LLM-boundary tests
                          # plus existing dolfinx-free and Docker-only tool tests
 results/                  # gitignored solver outputs
 docs/spec.md              # this file
 docs/tool-reference.md    # final tool capabilities, contracts, and operations
 ```
 
-### Remaining planned additions
+### Remaining planned addition
 ```
-agentic/
-  orchestrator.py          # deterministic state machine / CrewAI Flow
-  explainer.py             # optional LLM explanation over deterministic analysis
-tests/agentic/             # mocked-LLM + deterministic-flow integration tests
+streamlit_app.py           # thin Stage 2 chat UI over typed workflow state
 ```
 
 `agentic/` was created only after the Stage 0 environment/model checkpoint passed.
@@ -347,10 +342,10 @@ Existing (unittest-based, already in place):
   composition, CLI JSON purity, and actual stdio MCP composition.
 - Test entry point: `docker compose run --rm -T fenitop python -m unittest discover -v`.
   `tests/__init__.py` makes nested discovery reliable; zero collection exits 5.
-  Current result: all 139 tests plus 103 subtests pass with no expected failures:
-  107 hardened-tool tests plus 7 strict-intent, 9 interpreter, 6 compiler, and 10
-  full deterministic-orchestrator tests
-  (`docker compose run --rm -T fenitop pytest -q`, 32.86 seconds).
+  Current result: all 148 tests plus 103 subtests pass with no expected failures:
+  107 hardened-tool tests plus 7 strict-intent, 9 interpreter, 6 compiler, 12
+  full deterministic-orchestrator, and 7 fact-preserving explainer tests
+  (`docker compose run --rm -T fenitop pytest -q`, 33.41 seconds).
 
 Remaining additions for agent-workflow compatibility:
 - **Hardened-tool suite (passed)**: contract/schema, generated
@@ -406,6 +401,16 @@ Final tool review findings (2026-07-26):
 
 Reverse-chronological. Each entry: date, decision, why, status.
 
+- **2026-07-26** — Implement the optional explainer as a constrained evidence-ID
+  planner, not a prose generator. Deterministic code extracts immutable facts from
+  successful Tool 3 evidence, marks outcome/convergence/metrics/constraints/
+  quality facts required, omits the run directory, validates the model's section
+  plan for known unique IDs and completeness, and renders original fact text with
+  citations. The LLM can order and select supporting facts only. Reason:
+  “fact-preserving” must be enforced structurally; a prompt that merely asks free
+  prose not to hallucinate cannot guarantee it. Status: implemented and integrated
+  as an idempotent optional final state; a billed Terra check passes and the full
+  148-test suite passes. Stage 1 complete.
 - **2026-07-26** — Complete the deterministic run/analyze transitions with two
   idempotency layers. Cache a typed run response within the orchestrator process,
   and give `TrustedRunPolicy` a stable `agentic-workflow-v1` key derived from the
@@ -588,7 +593,7 @@ Completed tool capabilities and their verification commands are maintained in
 - [x] Verify outbound API access and run a throwaway structured-output smoke test.
 - [x] Run golden intent scenarios and record/pin the final model ID/config (§6).
 
-**Stage 1 — deterministic `agentic/` build** (in progress):
+**Stage 1 — deterministic `agentic/` build** (complete):
 
 - [x] `intent.py` — typed `ProblemIntent` and
       `ready | needs_clarification | unsupported`.
@@ -600,12 +605,12 @@ Completed tool capabilities and their verification commands are maintained in
       states, contextual resume, ordered event trace, and exact validator handoff.
 - [x] `orchestrator.py` — deterministic typed state machine; exact
       validated→worker→analyze handoffs and idempotent job resume.
-- [ ] Optional `explainer.py` — explains Tool 3 evidence without changing facts.
+- [x] Optional `explainer.py` — explains Tool 3 evidence without changing facts.
 - [x] `tests/agentic/` — canned interpreter outputs, clarification/resume,
       unsupported case, no duplicate solve, and full mocked-LLM flow.
 - [x] Verify via a plain harness before touching Streamlit.
 
-**Stage 2 — Streamlit UI** (blocked on Stage 1):
+**Stage 2 — Streamlit UI** (unblocked):
 
 - [ ] Single free-text chat input; clarification stays in chat; no form/JSON escape
       hatch and no confirmation gate for `ready`.

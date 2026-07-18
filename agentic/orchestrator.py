@@ -7,6 +7,7 @@ from typing import Annotated, Callable, Literal, Protocol, Sequence, Union
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agentic.compiler import CompilationResult, compile_intent
+from agentic.explainer import ExplanationResult
 from agentic.intent import (
     InterpretationResult,
     ProblemIntent,
@@ -52,6 +53,10 @@ class Analyzer(Protocol):
     def __call__(
         self, request: AnalyzeResultsRequest
     ) -> dict | AnalyzeResultsResponse: ...
+
+
+class Explainer(Protocol):
+    def explain(self, analysis: AnalyzeResultsResponse) -> ExplanationResult: ...
 
 
 class StrictWorkflowModel(BaseModel):
@@ -112,6 +117,7 @@ class WorkflowEvent(StrictWorkflowModel):
         "run_succeeded",
         "analysis_failed",
         "completed",
+        "explained",
     ]
     message: str
 
@@ -180,6 +186,18 @@ class CompletedWorkflow(StrictWorkflowModel):
     events: tuple[WorkflowEvent, ...]
 
 
+class ExplainedWorkflow(StrictWorkflowModel):
+    status: Literal["explained"] = "explained"
+    conversation: ConversationContext
+    compilation: CompilationResult
+    validation: ValidateConfigResponse
+    idempotency_key: str
+    run: RunTopoptResponse
+    analysis: AnalyzeResultsResponse
+    explanation: ExplanationResult
+    events: tuple[WorkflowEvent, ...]
+
+
 WorkflowOutcome = Annotated[
     Union[
         AwaitingClarification,
@@ -189,6 +207,7 @@ WorkflowOutcome = Annotated[
         RunFailedWorkflow,
         AnalysisFailedWorkflow,
         CompletedWorkflow,
+        ExplainedWorkflow,
     ],
     Field(discriminator="status"),
 ]
@@ -205,6 +224,7 @@ class DeterministicOrchestrator:
         validator: Validator = validate_config_tool,
         runner: Runner = run_topopt_tool,
         analyzer: Analyzer = analyze_results_tool,
+        explainer: Explainer | None = None,
         event_callback: Callable[[WorkflowEvent], None] | None = None,
     ):
         self._interpreter = interpreter
@@ -212,6 +232,7 @@ class DeterministicOrchestrator:
         self._validator = validator
         self._runner = runner
         self._analyzer = analyzer
+        self._explainer = explainer
         self._event_callback = event_callback
         self._run_cache: dict[str, RunTopoptResponse] = {}
 
@@ -303,6 +324,34 @@ class DeterministicOrchestrator:
             idempotency_key=idempotency_key,
             run=run,
             prior_events=events,
+        )
+
+    def explain(
+        self,
+        state: CompletedWorkflow | ExplainedWorkflow,
+    ) -> ExplainedWorkflow:
+        """Optionally organize immutable analysis evidence for presentation."""
+        if isinstance(state, ExplainedWorkflow):
+            return state
+        if self._explainer is None:
+            raise RuntimeError("No result explainer is configured.")
+        explanation = self._explainer.explain(state.analysis)
+        events = list(state.events)
+        self._emit(
+            events,
+            "explained",
+            "The LLM organized immutable evidence IDs; deterministic code "
+            "rendered their original facts.",
+        )
+        return ExplainedWorkflow(
+            conversation=state.conversation,
+            compilation=state.compilation,
+            validation=state.validation,
+            idempotency_key=state.idempotency_key,
+            run=state.run,
+            analysis=state.analysis,
+            explanation=explanation,
+            events=tuple(events),
         )
 
     def _analyze(
