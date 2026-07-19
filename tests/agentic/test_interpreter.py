@@ -11,6 +11,7 @@ from agentic.interpreter import (
     InterpretationError,
     InterpreterConfig,
     OpenAIInterpretationEnvelope,
+    PROMPT_VERSION,
     build_crewai_llm,
     config_from_environment,
     load_system_prompt,
@@ -169,10 +170,13 @@ class InterpreterTests(unittest.TestCase):
     def test_prompt_documents_capability_and_default_authority(self):
         prompt = load_system_prompt()
 
+        self.assertEqual(PROMPT_VERSION, "intent-system-v2")
         self.assertIn("needs_clarification", prompt)
         self.assertIn("component-wise or roller supports", prompt)
         self.assertIn("Deterministic", prompt)
         self.assertIn("mesh.divisions", prompt)
+        self.assertIn("centered 10% of the right edge", prompt)
+        self.assertIn("center_fraction=0.5", prompt)
         self.assertIn("Never add paths", prompt)
 
     def test_environment_and_crewai_configuration_are_pinned(self):

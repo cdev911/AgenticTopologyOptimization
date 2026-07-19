@@ -8,17 +8,18 @@ Last updated: 2026-07-26
 ## 0. Current Status
 
 - **Release**: v1 complete and release-ready.
-- **Verification**: 151 tests plus 103 numerical subtests pass in the pinned Docker
+- **Verification**: 159 tests plus 103 numerical subtests pass in the pinned Docker
   image. Compose config, dependency checks, Streamlit health, the no-credit
   idempotent harness, and documentation links have also passed.
 - **Scope**: personal learning/demo workflow, not engineering design software or a
   hosted multi-user service.
-- **Just finished**: release cleanup. Documentation was consolidated around the
-  final architecture, superseded implementation chronology was removed, upstream
-  FEniTop GPL-3.0 attribution/citation was restored, and release metadata was
-  aligned.
-- **Next action**: no planned v1 work. Select and specify a post-v1 objective before
-  changing physics or workflow authority.
+- **Just finished**: relative boundary-segment intent and verified UI plot
+  presentation. Interpreter prompt v2 represents edge fractions semantically;
+  deterministic compilation maps them through domain bounds. Analysis now creates
+  a mechanism-objective plot when applicable, and Streamlit displays/downloads
+  known PNG roles only when they remain inside the analyzed run directory.
+- **Next action**: run the corrected example through the live UI. No other planned
+  v1 work.
 
 ## 1. Product
 
@@ -45,7 +46,8 @@ Supported agent-safe physics:
 - isotropic single-material compliance or compliant-mechanism optimization;
 - full-vector zero clamps;
 - distributed boundary traction and body force;
-- volume fraction and declarative 2D selection regions; and
+- volume fraction and declarative 2D selection regions;
+- relative centered/spanned rectangle-edge segments for tractions; and
 - explicit compliant-mechanism input/output springs.
 
 Not supported in v1:
@@ -112,6 +114,7 @@ The recorded v1 configuration is:
 
 - CrewAI `1.15.6`
 - OpenAI `gpt-5.6-terra`
+- interpreter prompt `intent-system-v2`
 - low reasoning effort
 - temperature unset
 - strict Pydantic structured output
@@ -151,6 +154,14 @@ tests, and explicit user decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-26 — Relative edge segments and result gallery**: represent relative
+  traction spans as typed `edge`, `center_fraction`, and `span_fraction` intent;
+  deterministically compile them through domain bounds into the existing region
+  DSL. Display only known analysis PNG roles that resolve inside the verified run
+  directory, with downloads; add signed mechanism-objective history while treating
+  compliance as the objective for compliance minimization. Reason: models should
+  interpret percentage language but not own geometry arithmetic or filesystem
+  presentation authority.
 - **2026-07-26 — Release cleanup**: consolidate documentation around the shipped
   v1 architecture, remove superseded implementation/production planning, and add
   the upstream GPL-3.0 license, authors, and paper citation. Reason: a release
@@ -189,3 +200,5 @@ None for v1. Post-v1 objectives must be selected before implementation.
 - [x] Stage 3 — release narrative, scenarios, limits, rationale, and commands.
 - [x] Release cleanup — compact docs, upstream attribution/license, metadata,
       verification, and clean tracked tree.
+- [x] Post-release fix — deterministic relative edge segments and verified final
+      design/objective plot gallery.

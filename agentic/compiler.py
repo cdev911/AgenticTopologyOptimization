@@ -80,6 +80,43 @@ def _record(
     return value
 
 
+def _compile_traction_region(traction, bounds) -> dict:
+    """Convert semantic relative edge segments into absolute region geometry."""
+    if traction.region is not None:
+        return traction.region
+
+    segment = traction.edge_segment
+    if segment is None:
+        raise AssertionError("traction location was validated by the intent model")
+    (x0, y0), (x1, y1) = bounds
+    if segment.edge in ("left", "right"):
+        plane_axis = "x"
+        plane_value = x0 if segment.edge == "left" else x1
+        range_axis = "y"
+        edge_min, edge_max = y0, y1
+    else:
+        plane_axis = "y"
+        plane_value = y0 if segment.edge == "bottom" else y1
+        range_axis = "x"
+        edge_min, edge_max = x0, x1
+
+    edge_length = float(edge_max - edge_min)
+    center = float(edge_min) + float(segment.center_fraction) * edge_length
+    half_span = float(segment.span_fraction) * edge_length / 2.0
+    return {
+        "op": "and",
+        "regions": [
+            {"op": "plane", "axis": plane_axis, "value": plane_value},
+            {
+                "op": "range",
+                "axis": range_axis,
+                "min": float(f"{center - half_span:.12g}"),
+                "max": float(f"{center + half_span:.12g}"),
+            },
+        ],
+    }
+
+
 def format_defaults_notice(
     profile: str,
     defaults: list[AppliedDefault] | tuple[AppliedDefault, ...],
@@ -227,7 +264,10 @@ def compile_intent(intent: ProblemIntent) -> CompilationResult:
             for support in intent.supports
         ],
         "traction_bcs": [
-            {"locator": traction.region, "value": traction.vector}
+            {
+                "locator": _compile_traction_region(traction, bounds),
+                "value": traction.vector,
+            }
             for traction in intent.tractions
         ],
         "body_force": intent.body_force,

@@ -71,6 +71,40 @@ class IntentResultTests(unittest.TestCase):
         self.assertEqual(result.intent.mesh.divisions, (40, 16))
         self.assertEqual(result.intent.optimization.filter_radius, 0.3)
 
+    def test_relative_edge_segment_is_semantic_and_must_fit_on_edge(self):
+        payload = ready_compliance()
+        payload["intent"]["tractions"][0].pop("region")
+        payload["intent"]["tractions"][0]["edge_segment"] = {
+            "edge": "right",
+            "center_fraction": 0.5,
+            "span_fraction": 0.1,
+        }
+
+        result = RESULT_ADAPTER.validate_python(payload)
+
+        segment = result.intent.tractions[0].edge_segment
+        self.assertEqual(segment.edge, "right")
+        self.assertEqual(segment.center_fraction, 0.5)
+        self.assertEqual(segment.span_fraction, 0.1)
+
+        payload["intent"]["tractions"][0]["edge_segment"] = {
+            "edge": "right",
+            "center_fraction": 0.05,
+            "span_fraction": 0.2,
+        }
+        with self.assertRaises(ValidationError):
+            RESULT_ADAPTER.validate_python(payload)
+
+    def test_traction_requires_exactly_one_location_representation(self):
+        payload = ready_compliance()
+        payload["intent"]["tractions"][0]["edge_segment"] = {
+            "edge": "right",
+            "center_fraction": 0.5,
+            "span_fraction": 0.1,
+        }
+        with self.assertRaises(ValidationError):
+            RESULT_ADAPTER.validate_python(payload)
+
     def test_mechanism_requires_its_problem_defining_fields(self):
         payload = ready_compliance()
         payload["intent"]["problem_type"] = "compliant_mechanism"
