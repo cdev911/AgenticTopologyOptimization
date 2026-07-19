@@ -5,9 +5,25 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fenitop"
 version = "0.1.0"
-description = "FEniCSx-based topology optimization"
+description = "LLM-guided, deterministic topology optimization with FEniCSx"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
+license = "GPL-3.0-only"
+authors = [
+  {name = "Chaitanya Dev"},
+]
+keywords = [
+  "topology-optimization",
+  "fenicsx",
+  "agentic-workflow",
+  "crewai",
+  "streamlit",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering",
+]
 dependencies = [
   "numpy==2.4.6",
   "scipy==1.17.1",
@@ -18,6 +34,11 @@ dependencies = [
   "crewai==1.15.6",
   "streamlit==1.60.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/cdev911/AgenticTopologyOptimization"
+Repository = "https://github.com/cdev911/AgenticTopologyOptimization"
+"Original FEniTop" = "https://github.com/missionlab/fenitop"
 
 [project.scripts]
 fenitop-validate-config = "fenitop.tools.validate_config:main"

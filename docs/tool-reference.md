@@ -1,4 +1,4 @@
-# Hardened Tool Reference
+# Tool Contract Reference
 
 This is the human-readable reference for the agent-facing tool contract. The
 machine sources of truth are `fenitop/tools/contracts.py`,
@@ -61,8 +61,9 @@ directional displacements at matched output nodes. Consequently, region width,
 mesh resolution, stiffness, load, and Young's modulus are coupled. Validation
 checks the matched node counts and rejects an extreme
 `stiffness / young_modulus` ratio, but it cannot infer the user's intended
-physical spring assembly. The future intent compiler must preserve this meaning
-and expose the geometry report rather than pretending the value is a
+physical spring assembly. The implemented intent compiler preserves this meaning,
+and the workflow exposes
+the geometry report rather than pretending the value is a
 mesh-independent total spring constant.
 
 The region DSL supports `plane`, `range`, `circle`, `all`, `none`, `and`, `or`,
@@ -255,9 +256,9 @@ docker compose run --rm -T fenitop python -m unittest discover -v
 The root `tests/__init__.py` is intentional; it prevents nested tests from being
 silently skipped by unittest discovery.
 
-## 7. Event trace for the future agentic layer
+## 7. Event trace
 
-The UI/orchestrator should expose an inspectable event/evidence trace:
+The UI/orchestrator exposes this inspectable event/evidence trace:
 
 ```text
 user request

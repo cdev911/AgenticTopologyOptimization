@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this derivative, cite this software and the original FEniTop paper."
+title: "Agentic Topology Optimization"
+type: software
+version: 0.1.0
+date-released: 2026-07-26
+authors:
+  - family-names: "Dev"
+    given-names: "Chaitanya"
+repository-code: "https://github.com/cdev911/AgenticTopologyOptimization"
+license: GPL-3.0-only
+references:
+  - type: article
+    title: "FEniTop: a simple FEniCSx implementation for 2D and 3D topology optimization supporting parallel computing"
+    authors:
+      - family-names: "Jia"
+        given-names: "Yingqi"
+      - family-names: "Wang"
+        given-names: "Chao"
+      - family-names: "Zhang"
+        given-names: "Xiaojia Shelly"
+    journal: "Structural and Multidisciplinary Optimization"
+    volume: 67
+    issue: 140
+    year: 2024
+    doi: "10.1007/s00158-024-03818-7"
