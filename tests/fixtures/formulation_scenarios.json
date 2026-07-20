@@ -1,0 +1,89 @@
+{
+  "version": "formulation-evals-v1",
+  "scenarios": [
+    {
+      "id": "disordered_cantilever_over_two_turns",
+      "purpose": "Accumulate geometry, support, objective, material, and load when the user supplies them in a natural order over multiple turns.",
+      "turns": [
+        "I need something like a cantilever, ten long and half as tall. Fix its left side and keep roughly one third of the material.",
+        "Put the lower-left corner at the origin. Minimize compliance with E 10 and nu 0.3. Push downward with traction [0,-1] over the middle ten percent of the right edge."
+      ],
+      "expected_final_status": "ready_for_review",
+      "required_behaviors": [
+        "retain facts from turn one",
+        "ask for missing material and precise load",
+        "interpret half as tall as height five",
+        "do not start a solver"
+      ]
+    },
+    {
+      "id": "correction_overrides_prior_dimension",
+      "purpose": "Honor a correction without losing unrelated confirmed facts.",
+      "turns": [
+        "Use a 10 by 5 rectangular compliance domain at the origin, E 100, nu 0.3, left edge fixed, downward traction [0,-1] on the right, and 40 percent material.",
+        "Actually make it 12 long; keep everything else."
+      ],
+      "expected_final_status": "ready_for_review",
+      "required_behaviors": [
+        "replace only the upper x bound",
+        "retain material support load and volume fraction",
+        "record the correction provenance"
+      ]
+    },
+    {
+      "id": "point_load_requires_supported_reformulation",
+      "purpose": "Negotiate a common engineering request that is outside the exact load semantics but has a supported distributed approximation.",
+      "turns": [
+        "Make a lightweight 8 by 4 cantilever and put a 100 N point load at the middle of the free edge."
+      ],
+      "expected_final_status": "gathering",
+      "required_behaviors": [
+        "explain that point loads are unsupported",
+        "offer a centered distributed traction segment",
+        "ask for segment width and traction magnitude semantics",
+        "do not silently reinterpret total force as traction"
+      ]
+    },
+    {
+      "id": "unsupported_3d_can_be_reformulated",
+      "purpose": "Allow the conversation to continue after explaining an unsupported feature.",
+      "turns": [
+        "Optimize a three-dimensional mounting bracket.",
+        "Use a 2D rectangular plane-strain demonstration instead."
+      ],
+      "expected_final_status": "gathering",
+      "required_behaviors": [
+        "identify 3D as unsupported on turn one",
+        "accept the supported reformulation on turn two",
+        "ask for the remaining 2D problem facts"
+      ]
+    },
+    {
+      "id": "conflicting_geometry_needs_resolution",
+      "purpose": "Detect rather than guess when dimensions conflict within the conversation.",
+      "turns": [
+        "The plate is 10 by 5.",
+        "The right edge is at x=12 and the left edge is at x=0."
+      ],
+      "expected_final_status": "gathering",
+      "required_behaviors": [
+        "identify the conflicting width",
+        "ask whether width 10 or right coordinate 12 is authoritative",
+        "keep nonconflicting facts"
+      ]
+    },
+    {
+      "id": "optional_mesh_preference_in_casual_language",
+      "purpose": "Retain an explicit numerical preference without relying on a narrow regular expression.",
+      "turns": [
+        "Use whatever physics we already discussed, but make the grid about 60 cells along the long side and 30 along the short side."
+      ],
+      "expected_final_status": "gathering",
+      "required_behaviors": [
+        "record mesh divisions as an explicit preference",
+        "cite the current user turn as provenance",
+        "do not invent missing physics"
+      ]
+    }
+  ]
+}
