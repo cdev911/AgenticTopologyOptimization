@@ -95,6 +95,14 @@ class IntentResultTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             RESULT_ADAPTER.validate_python(payload)
 
+        payload["intent"]["tractions"][0]["edge_segment"] = {
+            "edge": "right",
+            "center_fraction": 0.5,
+            "span_fraction": 1.0,
+        }
+        result = RESULT_ADAPTER.validate_python(payload)
+        self.assertEqual(result.intent.tractions[0].edge_segment.span_fraction, 1.0)
+
     def test_traction_requires_exactly_one_location_representation(self):
         payload = ready_compliance()
         payload["intent"]["tractions"][0]["edge_segment"] = {
@@ -102,6 +110,16 @@ class IntentResultTests(unittest.TestCase):
             "center_fraction": 0.5,
             "span_fraction": 0.1,
         }
+        with self.assertRaises(ValidationError):
+            RESULT_ADAPTER.validate_python(payload)
+
+        payload["intent"]["tractions"][0]["region"] = {"op": "none"}
+        result = RESULT_ADAPTER.validate_python(payload)
+        self.assertIsNone(result.intent.tractions[0].region)
+        self.assertIsNotNone(result.intent.tractions[0].edge_segment)
+
+        payload = ready_compliance()
+        payload["intent"]["tractions"][0]["region"] = {"op": "none"}
         with self.assertRaises(ValidationError):
             RESULT_ADAPTER.validate_python(payload)
 

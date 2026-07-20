@@ -32,6 +32,7 @@ FiniteNumber = Annotated[
 PositiveFiniteNumber = Annotated[FiniteNumber, Field(gt=0)]
 OpenFraction = Annotated[FiniteNumber, Field(gt=0, lt=1)]
 ClosedFraction = Annotated[FiniteNumber, Field(ge=0, le=1)]
+PositiveClosedFraction = Annotated[FiniteNumber, Field(gt=0, le=1)]
 PositiveInt = Annotated[StrictInt, Field(gt=0)]
 Vector2D = tuple[FiniteNumber, FiniteNumber]
 Point2D = tuple[FiniteNumber, FiniteNumber]
@@ -85,7 +86,7 @@ class EdgeSegmentIntent(StrictIntentModel):
 
     edge: Literal["left", "right", "bottom", "top"]
     center_fraction: ClosedFraction
-    span_fraction: OpenFraction
+    span_fraction: PositiveClosedFraction
 
     @model_validator(mode="after")
     def _segment_stays_on_edge(self):
@@ -113,9 +114,19 @@ class TractionIntent(StrictIntentModel):
 
     @model_validator(mode="after")
     def _exactly_one_location(self):
-        if (self.region is None) == (self.edge_segment is None):
+        region_is_unused = (
+            self.region is None
+            or getattr(self.region, "op", None) == "none"
+        )
+        if self.edge_segment is not None:
+            if not region_is_unused:
+                raise ValueError(
+                    "region must be null/none when edge_segment locates the traction."
+                )
+            self.region = None
+        elif region_is_unused:
             raise ValueError(
-                "exactly one of region or edge_segment must locate the traction."
+                "a non-empty region or edge_segment must locate the traction."
             )
         return self
 

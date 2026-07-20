@@ -8,18 +8,18 @@ Last updated: 2026-07-26
 ## 0. Current Status
 
 - **Release**: v1 complete and release-ready.
-- **Verification**: 159 tests plus 103 numerical subtests pass in the pinned Docker
+- **Verification**: 160 tests plus 103 numerical subtests pass in the pinned Docker
   image. Compose config, dependency checks, Streamlit health, the no-credit
   idempotent harness, and documentation links have also passed.
 - **Scope**: personal learning/demo workflow, not engineering design software or a
   hosted multi-user service.
-- **Just finished**: relative boundary-segment intent and verified UI plot
-  presentation. Interpreter prompt v2 represents edge fractions semantically;
-  deterministic compilation maps them through domain bounds. Analysis now creates
-  a mechanism-objective plot when applicable, and Streamlit displays/downloads
-  known PNG roles only when they remain inside the analyzed run directory.
-- **Next action**: run the corrected example through the live UI. No other planned
-  v1 work.
+- **Just finished**: live structured-output regression fix. Strict OpenAI output
+  may fill an unused generic region with the DSL `none` sentinel, and may represent
+  a whole edge as a relative segment with `span_fraction=1.0`. Intent validation
+  now normalizes only that sentinel combination, accepts spans through 100%, and
+  still rejects a real region combined with an edge segment. Both exact reported
+  conversations pass live Terra interpretation and real mesh validation.
+- **Next action**: restart/reset the UI and retry. No other planned v1 work.
 
 ## 1. Product
 
@@ -154,6 +154,13 @@ tests, and explicit user decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-26 — Normalize strict-output edge sentinels**: accept `region=none` as
+  the unused nullable sentinel only when a valid `edge_segment` is present, and
+  allow `span_fraction=1.0` for a whole edge. Reject a standalone `none` region and
+  any real region combined with an edge segment. Reason: strict structured output
+  can materialize nullable union alternatives, while semantic authority still
+  requires one effective traction location. Both reported prompts now pass billed
+  live interpretation plus deterministic mesh validation.
 - **2026-07-26 — Relative edge segments and result gallery**: represent relative
   traction spans as typed `edge`, `center_fraction`, and `span_fraction` intent;
   deterministically compile them through domain bounds into the existing region
@@ -202,3 +209,5 @@ None for v1. Post-v1 objectives must be selected before implementation.
       verification, and clean tracked tree.
 - [x] Post-release fix — deterministic relative edge segments and verified final
       design/objective plot gallery.
+- [x] Live regression — nullable `none` sentinel normalization and whole-edge
+      100% spans.

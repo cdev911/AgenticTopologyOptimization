@@ -131,6 +131,34 @@ class CompilerTests(unittest.TestCase):
         )
         self.assertGreater(traction_record["count"], 0)
 
+    def test_whole_edge_segment_compiles_to_full_boundary(self):
+        data = compliance_data(bounds=((0, 0), (10, 4)))
+        data["tractions"] = [
+            {
+                "region": {"op": "none"},
+                "edge_segment": {
+                    "edge": "right",
+                    "center_fraction": 0.5,
+                    "span_fraction": 1.0,
+                },
+                "vector": [0, -1],
+            }
+        ]
+
+        result = compile_intent(ComplianceProblemIntent.model_validate(data))
+        validation = validate_config_tool({"config": result.config})
+
+        self.assertEqual(validation["status"], "ok", validation["errors"])
+        traction_record = next(
+            item
+            for item in validation["geometry_report"]["entities"]
+            if item["path"] == "config.fem.traction_bcs[0].locator"
+        )
+        self.assertEqual(
+            traction_record["count"],
+            result.config.mesh.divisions[1],
+        )
+
     def test_compliance_mapping_and_default_notice_are_explicit(self):
         result = compile_intent(
             ComplianceProblemIntent.model_validate(compliance_data())
