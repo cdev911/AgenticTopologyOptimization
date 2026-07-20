@@ -77,6 +77,30 @@ class NumericalFailureEnvelopeTests(unittest.TestCase):
         self.assertEqual(result["stage"], "numerical")
         self.assertEqual(result["error"]["component"], "density_filter_forward")
 
+    def test_filter_roundoff_is_clipped_but_real_bounds_errors_still_fail(self):
+        from fenitop.numerics import (
+            FILTER_DENSITY_ROUNDOFF_TOLERANCE,
+            NumericalError,
+            clamp_density_roundoff,
+        )
+
+        values = np.array([-5e-6, 0.4, 1.0 + 5e-6])
+        clamp_density_roundoff(
+            "filtered density",
+            values,
+            component="density_filter_forward",
+            tolerance=FILTER_DENSITY_ROUNDOFF_TOLERANCE,
+        )
+        np.testing.assert_array_equal(values, np.array([0.0, 0.4, 1.0]))
+
+        with self.assertRaises(NumericalError):
+            clamp_density_roundoff(
+                "filtered density",
+                np.array([-2e-5, 0.5]),
+                component="density_filter_forward",
+                tolerance=FILTER_DENSITY_ROUNDOFF_TOLERANCE,
+            )
+
     def test_optimizer_nonfinite_failure_is_typed(self):
         from fenitop.numerics import NumericalError, NumericalFailure
 

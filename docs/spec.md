@@ -8,18 +8,22 @@ Last updated: 2026-07-26
 ## 0. Current Status
 
 - **Release**: v1 complete and release-ready.
-- **Verification**: 160 tests plus 103 numerical subtests pass in the pinned Docker
+- **Verification**: 168 tests plus 103 numerical subtests pass in the pinned Docker
   image. Compose config, dependency checks, Streamlit health, the no-credit
   idempotent harness, and documentation links have also passed.
 - **Scope**: personal learning/demo workflow, not engineering design software or a
   hosted multi-user service.
-- **Just finished**: live structured-output regression fix. Strict OpenAI output
-  may fill an unused generic region with the DSL `none` sentinel, and may represent
-  a whole edge as a relative segment with `span_fraction=1.0`. Intent validation
-  now normalizes only that sentinel combination, accepts spans through 100%, and
-  still rejects a real region combined with an edge segment. Both exact reported
-  conversations pass live Terra interpretation and real mesh validation.
-- **Next action**: restart/reset the UI and retry. No other planned v1 work.
+- **Just finished**: repaired the reported prompt/run failure and added a mandatory
+  pre-run approval gate. Optional tuning hallucinated by structured model output is
+  discarded unless explicit user text provides provenance; validation now returns
+  `awaiting_run_approval`, and only an explicit deterministic approval transition
+  can create an executable state. Small filtered-density roundoff is checked,
+  clipped to the physical interval, and distinguished from genuine bound errors.
+  The exact whole-edge prompt passes live Terra interpretation and mesh validation
+  without launching a run; the exact previously failing numerical configuration
+  now converges.
+- **Next action**: restart the UI, submit a request, review the proposal, and reply
+  `yes` only when the parameters are acceptable.
 
 ## 1. Product
 
@@ -27,7 +31,7 @@ The product is the full plain-language workflow:
 
 ```text
 interpret → clarify | unsupported | compile
-          → validate → run → analyze → explain
+          → validate → await approval → run → analyze → explain
 ```
 
 Users describe a rectangular 2D topology-optimization problem in chat. The system
@@ -80,7 +84,7 @@ contract. They do not expand the agent-safe surface.
 ## 4. Deterministic Defaults
 
 `agentic-defaults-v1` owns omitted numerical preferences and shows every selected
-value and reason before execution continues.
+value and reason before requesting execution approval.
 
 For an omitted mesh:
 
@@ -103,6 +107,12 @@ element edge. Resource validation remains authoritative.
 - The solver worker receives no `OPENAI_*` variables.
 - In-process and durable idempotency prevent duplicate solves across UI reruns and
   process restarts.
+- A validated proposal is not executable. Only the application-owned
+  `approve()` transition, triggered by an unambiguous user green light, creates a
+  runnable workflow state.
+- Optional model-produced mesh/filter/iteration values are reset unless a
+  deterministic text check finds that the user explicitly requested that class of
+  preference.
 - Successful solver evidence is immutable; deterministic derived plots are not
   added to the original manifest.
 - SHA-256 protects local evidence consistency, not authenticity against an actor
@@ -114,7 +124,7 @@ The recorded v1 configuration is:
 
 - CrewAI `1.15.6`
 - OpenAI `gpt-5.6-terra`
-- interpreter prompt `intent-system-v2`
+- interpreter prompt `intent-system-v3`
 - low reasoning effort
 - temperature unset
 - strict Pydantic structured output
@@ -154,6 +164,16 @@ tests, and explicit user decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-26 — Explicit approval, optional-value provenance, and filter
+  roundoff**: stop every validated request in an `awaiting_run_approval` state;
+  recognize only unambiguous whole-message approval; reinterpret changes and
+  require fresh approval. Strip model-produced mesh, cell, filter, and iteration
+  preferences unless the user text explicitly mentions them. After a converged
+  filter solve, accept at most `1e-5` density roundoff, clip it to `[0,1]`, and
+  continue rejecting larger violations. Reason: an expensive solve requires a
+  user green light, strict schema shape does not prove optional-value provenance,
+  and a `-4.83e-7` discretization undershoot is not a physical density failure.
+  This supersedes the earlier no-confirmation decision.
 - **2026-07-26 — Normalize strict-output edge sentinels**: accept `region=none` as
   the unused nullable sentinel only when a valid `edge_segment` is present, and
   allow `span_fraction=1.0` for a whole edge. Reject a standalone `none` region and
@@ -184,8 +204,9 @@ Reverse chronological; final decisions only.
   tool pipeline with typed application-owned transitions. Reason: fixed tool
   handoffs and expensive side effects do not require model judgment.
 - **2026-07-26 — Visible geometry-derived defaults**: derive near-square meshes
-  around 2,500 cells, disclose every compiler choice, and proceed without a
-  confirmation gate. Reason: reduce user tuning while keeping assumptions visible.
+  around 2,500 cells and disclose every compiler choice. The original decision to
+  proceed without confirmation was superseded by the explicit-approval decision
+  above.
 - **2026-07-26 — Contained execution**: use one pinned Docker image but launch each
   solve in a credential-free child process. Reason: Python exceptions cannot
   contain native PETSc/MPI failures.
@@ -211,3 +232,5 @@ None for v1. Post-v1 objectives must be selected before implementation.
       design/objective plot gallery.
 - [x] Live regression — nullable `none` sentinel normalization and whole-edge
       100% spans.
+- [x] Post-release safety fix — explicit pre-run approval, optional-preference
+      provenance, and filtered-density roundoff handling.

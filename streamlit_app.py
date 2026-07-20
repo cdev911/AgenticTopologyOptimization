@@ -9,9 +9,14 @@ import streamlit as st
 
 from agentic.explainer import ExplanationError, FactPreservingExplainer
 from agentic.interpreter import IntentInterpreter, InterpretationError
+from agentic.approval import (
+    classify_run_approval,
+    format_run_approval_request,
+)
 from agentic.orchestrator import (
     AnalysisFailedWorkflow,
     AwaitingClarification,
+    AwaitingRunApproval,
     CompletedWorkflow,
     DeterministicOrchestrator,
     ExplainedWorkflow,
@@ -59,7 +64,8 @@ def _initialize_session() -> None:
                 "content": (
                     "Describe a supported rectangular 2D topology-optimization "
                     "problem in plain language. I will ask for missing physics, "
-                    "show any deterministic defaults, and then proceed."
+                    "show the validated parameters, and wait for your approval "
+                    "before starting the solver."
                 ),
             }
         ]
@@ -105,9 +111,11 @@ def _handle_outcome(outcome) -> None:
             "The interpreted request did not pass deterministic validation:\n\n"
             + issues,
         )
-    elif isinstance(outcome, ValidatedWorkflow):
-        _append("assistant", outcome.compilation.defaults_notice)
-        _submit_job(outcome)
+    elif isinstance(outcome, AwaitingRunApproval):
+        _append(
+            "assistant",
+            format_run_approval_request(outcome.compilation, outcome.validation),
+        )
 
 
 def _handle_user_message(message: str) -> None:
@@ -118,6 +126,26 @@ def _handle_user_message(message: str) -> None:
         with st.spinner("Interpreting and validating the request…"):
             if isinstance(prior, AwaitingClarification):
                 outcome = orchestrator.resume(prior, message)
+            elif isinstance(prior, AwaitingRunApproval):
+                decision = classify_run_approval(message)
+                if decision == "approve":
+                    validated = orchestrator.approve(prior)
+                    st.session_state.outcome = validated
+                    _append(
+                        "assistant",
+                        "Approved. I am starting the solver run now.",
+                    )
+                    _submit_job(validated)
+                    return
+                if decision == "reject":
+                    _append(
+                        "assistant",
+                        "The run remains stopped. Describe any parameter changes "
+                        "when you are ready, or reply **yes** to approve the "
+                        "current proposal.",
+                    )
+                    return
+                outcome = orchestrator.revise(prior, message)
             else:
                 outcome = orchestrator.start(message)
         _handle_outcome(outcome)
@@ -327,7 +355,11 @@ job_running = (
 placeholder = (
     "Answer the clarification question"
     if isinstance(st.session_state.outcome, AwaitingClarification)
-    else "Describe a rectangular 2D design problem"
+    else (
+        "Reply yes to start, no to stop, or describe changes"
+        if isinstance(st.session_state.outcome, AwaitingRunApproval)
+        else "Describe a rectangular 2D design problem"
+    )
 )
 user_message = st.chat_input(placeholder, disabled=job_running)
 if user_message:

@@ -130,8 +130,8 @@ def format_defaults_notice(
         f"- {item.path} = {item.value!r} — {item.reason}" for item in defaults
     )
     lines.append(
-        "Tell me if you want to change any of them; otherwise the workflow will "
-        "proceed."
+        "Review these choices before approving the run. You can request changes "
+        "instead of approving."
     )
     return "\n".join(lines)
 

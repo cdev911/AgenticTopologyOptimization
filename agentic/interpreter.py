@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
@@ -16,7 +17,7 @@ from pydantic import ValidationError
 
 from agentic.intent import InterpretationEnvelope, InterpretationResult
 
-PROMPT_VERSION = "intent-system-v2"
+PROMPT_VERSION = "intent-system-v3"
 DEFAULT_MAX_ATTEMPTS = 2
 
 
@@ -59,7 +60,7 @@ class InterpreterConfig:
 def load_system_prompt() -> str:
     prompt = (
         files("agentic.prompts")
-        .joinpath("intent_system_v2.txt")
+        .joinpath("intent_system_v3.txt")
         .read_text(encoding="utf-8")
         .strip()
     )
@@ -182,7 +183,10 @@ class IntentInterpreter:
             try:
                 raw = self._llm.call(messages)
                 envelope = self._validate_envelope(raw)
-                return envelope.result
+                return _enforce_optional_preference_provenance(
+                    request,
+                    envelope.result,
+                )
             except Exception as exc:
                 last_error_type = type(exc).__name__
                 if attempt == self.config.max_attempts:
@@ -203,3 +207,87 @@ class IntentInterpreter:
             return InterpretationEnvelope.model_validate(raw)
         except ValidationError:
             raise
+
+
+_EXPLICIT_OPTIONAL_PATTERNS = {
+    "divisions": (
+        re.compile(
+            r"(?is)\b(?:mesh|resolution|divisions?|elements?|cells?)\b"
+            r"[^.\n]{0,50}\b\d+\s*(?:x|×|by|,)\s*\d+\b"
+        ),
+        re.compile(
+            r"(?is)\b\d+\s*(?:x|×|by|,)\s*\d+\b"
+            r"[^.\n]{0,30}\b(?:mesh|elements?|cells?|divisions?)\b"
+        ),
+        re.compile(r"(?is)\bnx\s*=\s*\d+[^.\n]{0,30}\bny\s*=\s*\d+"),
+    ),
+    "cell_type": (
+        re.compile(
+            r"(?i)\b(?:quadrilaterals?|quads?|triangular|triangles?)\b"
+        ),
+    ),
+    "filter_radius": (
+        re.compile(r"(?i)\bfilter[\s_-]*radius\b"),
+    ),
+    "max_iter": (
+        re.compile(
+            r"(?i)\b(?:max(?:imum)?[\s_-]*iterations?|iteration[\s_-]*limit|max_iter)\b"
+        ),
+        re.compile(r"(?i)\b\d+\s+iterations?\b"),
+    ),
+}
+
+
+def _mentions_explicit_preference(request: str, field: str) -> bool:
+    return any(
+        pattern.search(request)
+        for pattern in _EXPLICIT_OPTIONAL_PATTERNS[field]
+    )
+
+
+def _enforce_optional_preference_provenance(request, result):
+    """Discard optional tuning that is not traceable to explicit user text.
+
+    Strict structured output guarantees shape, not semantic provenance. A model
+    can still fill nullable preferences with plausible values. This deterministic
+    boundary prevents such values from bypassing the documented compiler defaults.
+    """
+    if result.status != "ready":
+        return result
+
+    intent = result.intent
+    mesh = intent.mesh.model_copy(
+        update={
+            "divisions": (
+                intent.mesh.divisions
+                if _mentions_explicit_preference(request, "divisions")
+                else None
+            ),
+            "cell_type": (
+                intent.mesh.cell_type
+                if _mentions_explicit_preference(request, "cell_type")
+                else None
+            ),
+        }
+    )
+    optimization = intent.optimization.model_copy(
+        update={
+            "filter_radius": (
+                intent.optimization.filter_radius
+                if _mentions_explicit_preference(request, "filter_radius")
+                else None
+            ),
+            "max_iter": (
+                intent.optimization.max_iter
+                if _mentions_explicit_preference(request, "max_iter")
+                else None
+            ),
+        }
+    )
+    return result.model_copy(
+        update={
+            "intent": intent.model_copy(
+                update={"mesh": mesh, "optimization": optimization}
+            )
+        }
+    )

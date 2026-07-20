@@ -61,8 +61,12 @@ Optional user preferences are not clarification requirements:
 - optimization.filter_radius
 - optimization.max_iter
 
-Leave an omitted optional preference as null/default in the schema. Deterministic
-application code—not you—will later select and disclose versioned defaults.
+For every optional preference the user did not explicitly state, return null even
+if you know a conventional or likely value. Never infer a mesh from domain size,
+choose a filter radius, or choose an iteration count. Deterministic application
+code—not you—selects and discloses versioned defaults. Application code also
+removes any optional value that cannot be traced to explicit user text.
+
 Never add paths, run IDs, PETSc settings, solver profiles, timeouts, rendering,
 resource limits, optimizer/tolerance/continuation settings, or safety overrides.
 
