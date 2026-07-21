@@ -6,9 +6,10 @@ an LLM to invent numerical facts.
 
 The project combines:
 
-- **CrewAI plus the OpenAI Responses API** for the places where language judgment
-  helps: conversational formulation, current v1 interpretation, and organizing
-  result evidence.
+- **The OpenAI Responses API plus CrewAI** for the places where language judgment
+  helps: live conversational formulation and constrained organization of result
+  evidence. The earlier one-shot CrewAI interpreter remains only for regression
+  checks and lower-level compatibility.
 - **Typed deterministic Python** for defaults, workflow transitions, validation,
   execution authority, and factual rendering.
 - **FEniTop/FEniCSx** for finite-element analysis and topology optimization.
@@ -31,8 +32,9 @@ Xiaojia Shelly Zhang. This repository is distributed under GPL-3.0; see
 In the web UI, a user describes a supported 2D structural problem in ordinary
 language. The workflow then:
 
-1. interprets the structural intent into a strict schema;
-2. asks focused questions if required physics is missing;
+1. develops the structural problem conversationally while retaining a visible
+   typed draft;
+2. asks focused questions when physics is missing, conflicting, or unsupported;
 3. applies and discloses deterministic numerical defaults;
 4. validates physics, geometry, mesh entities, and estimated resource use;
 5. shows the exact validated proposal and waits for explicit user approval;
@@ -49,11 +51,13 @@ reinterpreted, revalidated, and presented for fresh approval.
 
 ```mermaid
 flowchart LR
-    U[User chat] --> I[LLM intent interpreter]
-    I -->|missing physics| C[Clarification in chat]
+    U[User chat] --> I[LLM conversational formulator]
+    I -->|partial draft| C[Questions and visible facts]
     C --> I
-    I -->|unsupported| X[Capability explanation]
-    I -->|typed ready intent| D[Deterministic compiler]
+    I -->|capability limit| X[Explain and negotiate reformulation]
+    I -->|typed patch| S[Deterministic draft merge and readiness]
+    S -->|not ready| C
+    S -->|strict ready intent| D[Deterministic compiler]
     D --> V[Validate config]
     V --> Q[User approval gate]
     Q -->|request changes| I
@@ -70,11 +74,11 @@ expensive tools. The LLM never chooses output paths, PETSc settings, resource
 ceilings, run IDs, timeouts, or retry policy. It also never copies the normalized
 configuration or run manifest between stages.
 
-The workflow passes exact Pydantic objects through a deterministic state machine:
+The workflow passes exact Pydantic objects through deterministic state machines:
 
 ```text
-interpret → clarify | unsupported | compile
-          → validate → await approval → run → analyze → explain
+formulate ↔ gather/repair/reformulate → finalize strict intent
+          → compile → validate → await approval → run → analyze → explain
 ```
 
 This split makes the useful flexibility of language models visible while keeping
@@ -83,7 +87,8 @@ numerical and side-effect authority testable.
 ### Brain, hands, and interface
 
 - `agentic/` is the **brain boundary**. It contains typed intent models, the
-  CrewAI-backed interpreter, deterministic compiler/orchestrator, and constrained
+  Responses-backed conversation adapter, application-owned formulation draft,
+  legacy CrewAI interpreter, deterministic compiler/orchestrator, and constrained
   evidence explainer.
 - `fenitop/` is the **hands**. It knows nothing about CrewAI and exposes three
   framework-independent operations: `validate_config`, `run_topopt`, and
@@ -91,9 +96,14 @@ numerical and side-effect authority testable.
 - `streamlit_app.py` is a **thin interface**. It retains typed workflow/job state,
   renders public events and evidence, and does not become workflow authority.
 
-### Two LLM roles, both constrained
+### Language-model roles are constrained
 
-The intent interpreter returns exactly one schema-validated outcome:
+The live formulator returns a small schema-validated patch on each turn. It may
+interpret ordinary language, notice conflicts, propose visible assumptions, and
+ask focused questions. Deterministic code validates provenance and values, owns
+the canonical draft, and alone decides whether it can become a strict intent.
+
+The retained v1 interpreter returns exactly one schema-validated outcome:
 
 - `ready`
 - `needs_clarification`
@@ -122,13 +132,11 @@ creates immutable fact IDs; the LLM may only organize allowed IDs under allowed
 headings. Code then checks completeness and renders the original fact text. An
 unknown, duplicated, or omitted required fact makes the explanation fail closed.
 
-### Conversational formulation adapter ready; UI migration pending
+### Conversational formulation is the live UI path
 
-The released UI still uses the v1 one-shot interpreter. A post-v1 redesign is
-being built test-first so ordinary problem descriptions can be developed over
-several turns without weakening the solver boundary.
-
-The provider-independent core and live model adapter are now complete:
+The Streamlit UI now uses the provider-independent core and live Responses
+adapter so ordinary problem descriptions can be developed over several turns
+without weakening the solver boundary:
 
 - `ProblemDraft` retains partial facts, their source turn, a short modeling
   rationale, and whether each fact was explicit, derived, assumed, or confirmed.
@@ -152,14 +160,21 @@ The provider-independent core and live model adapter are now complete:
 - The strict API transport is 2,729 characters versus 235,234 for the v1 one-shot
   schema. Arbitrary field values travel as compact JSON strings and are decoded
   immediately through the existing deterministic field validators.
+- Streamlit stores the typed `FormulationSession` across reruns and shows accepted
+  facts, fact basis, missing information, assumptions, capability limits, and
+  deterministic conflicts. Exact provenance and revision history remain available
+  in an inspectable expander.
+- A ready formulation enters the orchestrator only through
+  `prepare_formulation()`. A requested change immediately invalidates the older
+  proposal before the new model call, so a failed revision cannot leave stale
+  parameters approvable.
 
 The versioned six-scenario billed evaluation covers disordered input, correction,
 unsupported-load negotiation, 3D reformulation, conflicting geometry, and casual
 mesh preferences. Sol/medium and Terra/medium both pass all six; Sol/medium is the
 quality-first default while Terra/medium is a measured lower-latency option.
 Responses are stored to support continuation under OpenAI's default response
-retention; the application draft remains the durable source of truth. The next
-slice is the Streamlit/orchestrator migration.
+retention; the application draft remains the durable source of truth.
 
 ### Execution boundary
 
@@ -229,8 +244,8 @@ docker compose stop ui
 
 ## Reproducible demo conversations
 
-These prompts exercise the three interpretation branches. Model wording may vary,
-but the typed status and side-effect behavior are the important result.
+These prompts exercise formulation, approval, and capability behavior. Model
+wording may vary, but typed draft state and side-effect behavior are authoritative.
 
 ### 1. Ready request with visible defaults
 
@@ -243,7 +258,8 @@ Use 40 percent material.
 
 Expected behavior:
 
-- status becomes `ready`;
+- formulation status becomes `ready_for_review`, followed by workflow status
+  `awaiting_run_approval`;
 - no clarification is required;
 - the UI explicitly says mesh, filter, iteration, and other numerical settings
   were not provided and were selected by the compiler;
@@ -267,12 +283,12 @@ Optimize a 10 by 4 beam. Fix the left side, put a load on the right, and use
 
 Expected behavior:
 
-- status becomes `needs_clarification`;
+- formulation status remains `gathering`;
 - no config is compiled and no solver starts;
 - the assistant asks for details such as material properties, precise load
   magnitude/direction, and any ambiguous problem definition; and
-- the next chat answer resumes the stored clarification context rather than
-  relying on hidden model memory.
+- the visible typed draft and provider continuation are both retained, while the
+  application draft remains authoritative.
 
 ### 3. Unsupported request stops safely
 
@@ -283,8 +299,10 @@ nonzero displacement.
 
 Expected behavior:
 
-- status becomes `unsupported`;
-- the UI identifies the capability mismatch; and
+- the UI identifies each capability mismatch and may offer a supported
+  reformulation;
+- status is `unsupported` when the problem cannot usefully continue, or
+  `gathering` while a supported reformulation is being negotiated; and
 - validation and solver execution are never called.
 
 ## No-credit deterministic harness
@@ -343,7 +361,7 @@ docker compose run --rm -T fenitop \
 Use `--scenarios <id> ...` to run a focused subset. The fixture and deterministic
 graders live under `tests/fixtures` and `scripts/formulation_live_eval.py`.
 
-## Supported v1 scope
+## Supported natural-language scope
 
 The natural-language workflow supports:
 
@@ -419,13 +437,15 @@ docker compose run --rm -T fenitop python -m pip check
 docker compose run --rm -T fenitop pytest -q
 ```
 
-Current checkpoint: **192 tests plus 109 numerical subtests pass**. The suite
+Current checkpoint: **202 tests plus 109 numerical subtests pass**. The suite
 includes schema and adversarial-input tests, real compliance/mechanism baselines,
 finite-difference sensitivities, geometry validation, resource calibration,
 process timeout/cancellation/crash behavior, secret scrubbing, path and
 idempotency cases, manifest integrity, CLI/MCP composition, mocked LLM workflow
 branches, conversational repair/continuation behavior, semantic partial-draft
-resolution, fact-preserving explanation checks, and Streamlit application tests.
+resolution, formulation-to-orchestrator handoff, stale-approval invalidation,
+visible assumption/capability/error states, fact-preserving explanation checks,
+and Streamlit application tests.
 
 The focused test tiers and exact tool contracts are documented in
 [`docs/tool-reference.md`](docs/tool-reference.md).
@@ -464,6 +484,9 @@ their outputs beneath `results/`.
 - **Make defaults visible and approval explicit.** A user should know which values
   they supplied, which values the application selected, and be able to change
   either before any expensive solve starts.
+- **A UI migration is a trust-boundary change.** Replacing a one-shot interpreter
+  requires a typed formulation-to-orchestrator handoff and immediate invalidation
+  of stale approval state when the user requests a change.
 - **Structured shape is not provenance.** Nullable model fields still need a
   deterministic check that an optional value was actually requested.
 - **Idempotency belongs below the UI.** Rerun-prone interfaces should display job

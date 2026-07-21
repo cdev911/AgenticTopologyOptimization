@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
+import json
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
 import streamlit as st
 
 from agentic.explainer import ExplanationError, FactPreservingExplainer
-from agentic.interpreter import IntentInterpreter, InterpretationError
 from agentic.approval import (
     classify_run_approval,
     format_run_approval_request,
+)
+from agentic.formulation import (
+    ConversationFormulator,
+    FormulationSession,
+    FormulationStep,
+)
+from agentic.formulation_openai import (
+    FormulationAPIError,
+    OpenAIResponsesFormulationAgent,
 )
 from agentic.orchestrator import (
     AnalysisFailedWorkflow,
@@ -43,14 +52,26 @@ def _executor() -> ThreadPoolExecutor:
 
 def _new_orchestrator() -> DeterministicOrchestrator:
     return DeterministicOrchestrator(
-        IntentInterpreter.from_environment(),
         explainer=FactPreservingExplainer.from_environment(),
+    )
+
+
+def _new_formulator() -> ConversationFormulator:
+    return ConversationFormulator(
+        OpenAIResponsesFormulationAgent.from_environment(),
+        max_repair_attempts=1,
     )
 
 
 def _initialize_session() -> None:
     if "orchestrator" not in st.session_state:
         st.session_state.orchestrator = _new_orchestrator()
+    if "formulator" not in st.session_state:
+        st.session_state.formulator = _new_formulator()
+    if "formulation_session" not in st.session_state:
+        st.session_state.formulation_session = FormulationSession()
+    if "formulation_step" not in st.session_state:
+        st.session_state.formulation_step = None
     if "outcome" not in st.session_state:
         st.session_state.outcome = None
     if "job_future" not in st.session_state:
@@ -108,7 +129,7 @@ def _handle_outcome(outcome) -> None:
         )
         _append(
             "assistant",
-            "The interpreted request did not pass deterministic validation:\n\n"
+            "The formulated request did not pass deterministic validation:\n\n"
             + issues,
         )
     elif isinstance(outcome, AwaitingRunApproval):
@@ -118,39 +139,88 @@ def _handle_outcome(outcome) -> None:
         )
 
 
+def _formulation_chat_message(step: FormulationStep) -> str:
+    sections = [step.turn.assistant_message]
+    if step.turn.questions:
+        questions = "\n".join(
+            f"- {question}" for question in step.turn.questions
+        )
+        sections.append("Questions to continue:\n\n" + questions)
+    if step.merge.issues:
+        issues = "\n".join(
+            f"- `{issue.path}`: {issue.message}"
+            for issue in step.merge.issues
+        )
+        sections.append(
+            "I could not safely apply part of that interpretation after the "
+            "bounded repair attempt. No run was prepared:\n\n" + issues
+        )
+    return "\n\n".join(sections)
+
+
+def _advance_formulation(message: str) -> None:
+    st.session_state.outcome = None
+    step = st.session_state.formulator.advance(
+        st.session_state.formulation_session,
+        message,
+    )
+    st.session_state.formulation_session = step.session
+    st.session_state.formulation_step = step
+    _append("assistant", _formulation_chat_message(step))
+    if step.intent is not None:
+        outcome = st.session_state.orchestrator.prepare_formulation(step)
+        _handle_outcome(outcome)
+
+
 def _handle_user_message(message: str) -> None:
     _append("user", message)
     prior = st.session_state.outcome
     orchestrator = st.session_state.orchestrator
     try:
-        with st.spinner("Interpreting and validating the request…"):
+        if isinstance(prior, AwaitingRunApproval):
+            decision = classify_run_approval(message)
+            if decision == "approve":
+                validated = orchestrator.approve(prior)
+                st.session_state.outcome = validated
+                _append(
+                    "assistant",
+                    "Approved. I am starting the solver run now.",
+                )
+                _submit_job(validated)
+                return
+            if decision == "reject":
+                _append(
+                    "assistant",
+                    "The run remains stopped. Describe any parameter changes "
+                    "when you are ready, or reply **yes** to approve the "
+                    "current proposal.",
+                )
+                return
+
+        with st.spinner("Understanding and checking the problem formulation…"):
             if isinstance(prior, AwaitingClarification):
+                # Compatibility for a session serialized by the former v1 UI.
                 outcome = orchestrator.resume(prior, message)
-            elif isinstance(prior, AwaitingRunApproval):
-                decision = classify_run_approval(message)
-                if decision == "approve":
-                    validated = orchestrator.approve(prior)
-                    st.session_state.outcome = validated
-                    _append(
-                        "assistant",
-                        "Approved. I am starting the solver run now.",
-                    )
-                    _submit_job(validated)
-                    return
-                if decision == "reject":
-                    _append(
-                        "assistant",
-                        "The run remains stopped. Describe any parameter changes "
-                        "when you are ready, or reply **yes** to approve the "
-                        "current proposal.",
-                    )
-                    return
-                outcome = orchestrator.revise(prior, message)
+                _handle_outcome(outcome)
             else:
-                outcome = orchestrator.start(message)
-        _handle_outcome(outcome)
-    except (InterpretationError, ValueError) as exc:
-        _append("assistant", f"I could not interpret that request: {exc}")
+                # This also handles requested changes to a proposal. Clearing the
+                # prior outcome first prevents a failed revision attempt from
+                # leaving the older proposal approvable.
+                _advance_formulation(message)
+    except FormulationAPIError as exc:
+        _append(
+            "assistant",
+            "I could not continue the problem conversation because the model "
+            "service did not return a usable formulation "
+            f"(`{exc.kind}` / `{exc.provider_error_type}`). No proposal was "
+            "prepared and no solver was started. You can retry that message.",
+        )
+    except ValueError as exc:
+        _append(
+            "assistant",
+            "I could not safely accept that formulation step: "
+            f"{exc} No solver was started.",
+        )
     except Exception:
         _append(
             "assistant",
@@ -269,11 +339,98 @@ def _render_results(outcome) -> None:
             )
 
 
+def _render_formulation() -> None:
+    session = st.session_state.formulation_session
+    step = st.session_state.formulation_step
+    if step is None and not session.draft.facts:
+        return
+
+    st.subheader("Current problem formulation")
+    st.caption(
+        "This application-owned draft—not provider conversation memory—is the "
+        "current source of truth."
+    )
+    st.markdown(
+        f"**Status:** `{session.status.replace('_', ' ')}`"
+    )
+
+    if session.draft.facts:
+        st.markdown("**Accepted facts**")
+        for fact in session.draft.facts:
+            value = json.dumps(
+                fact.value,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            st.write(f"`{fact.path}` = `{value}` — {fact.basis}")
+
+    assumptions = [
+        fact for fact in session.draft.facts if fact.basis == "assumption"
+    ]
+    if assumptions:
+        st.warning(
+            "These model-proposed assumptions still require your confirmation: "
+            + ", ".join(
+                f"{fact.path}={json.dumps(fact.value, ensure_ascii=False)}"
+                for fact in assumptions
+            )
+        )
+
+    if session.unsupported_features:
+        st.warning(
+            "Capability limits currently under discussion: "
+            + ", ".join(session.unsupported_features)
+        )
+
+    if step is not None:
+        if step.readiness.missing_fields:
+            st.info(
+                "Still needed before review: "
+                + ", ".join(step.readiness.missing_fields)
+            )
+        for error in step.readiness.semantic_errors:
+            st.error("Unresolved formulation conflict: " + error)
+        for issue in step.merge.issues:
+            st.error(
+                f"Rejected formulation update `{issue.path}`: {issue.message}"
+            )
+
+    with st.expander(
+        "Formulation provenance and revision history",
+        expanded=False,
+    ):
+        st.caption(
+            "Public source quotes and concise modeling rationales are shown; "
+            "private model reasoning is not retained or displayed."
+        )
+        st.json(
+            {
+                "facts": [
+                    fact.model_dump(mode="json")
+                    for fact in session.draft.facts
+                ],
+                "revisions": [
+                    revision.model_dump(mode="json")
+                    for revision in session.draft.revisions
+                ],
+            }
+        )
+
+
 def _reset() -> None:
     future = st.session_state.get("job_future")
     if future is not None and not future.done():
         return
-    for key in ("orchestrator", "outcome", "job_future", "job_state", "messages"):
+    for key in (
+        "orchestrator",
+        "formulator",
+        "formulation_session",
+        "formulation_step",
+        "outcome",
+        "job_future",
+        "job_state",
+        "messages",
+    ):
         st.session_state.pop(key, None)
     st.rerun()
 
@@ -282,8 +439,8 @@ _initialize_session()
 
 st.title("Agentic Topology Optimization")
 st.caption(
-    "LLM interpretation and evidence organization; deterministic compilation, "
-    "validation, solving, and analysis."
+    "Conversational LLM formulation and evidence organization; deterministic "
+    "draft acceptance, compilation, validation, approval, solving, and analysis."
 )
 
 with st.sidebar:
@@ -345,6 +502,7 @@ def _job_status() -> None:
 
 
 _job_status()
+_render_formulation()
 _render_results(st.session_state.outcome)
 _render_trace(st.session_state.outcome)
 
@@ -353,12 +511,21 @@ job_running = (
     and not st.session_state.job_future.done()
 )
 placeholder = (
-    "Answer the clarification question"
-    if isinstance(st.session_state.outcome, AwaitingClarification)
+    "Reply yes to start, no to stop, or describe changes"
+    if isinstance(st.session_state.outcome, AwaitingRunApproval)
     else (
-        "Reply yes to start, no to stop, or describe changes"
-        if isinstance(st.session_state.outcome, AwaitingRunApproval)
-        else "Describe a rectangular 2D design problem"
+        "Confirm or correct the visible assumptions"
+        if st.session_state.formulation_step is not None
+        and st.session_state.formulation_step.readiness.unconfirmed_fields
+        else (
+            "Describe a supported reformulation or add missing details"
+            if st.session_state.formulation_session.status == "unsupported"
+            else (
+                "Answer the formulation questions or add/correct details"
+                if st.session_state.formulation_step is not None
+                else "Describe a rectangular 2D design problem"
+            )
+        )
     )
 )
 user_message = st.chat_input(placeholder, disabled=job_running)

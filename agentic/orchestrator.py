@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agentic.compiler import CompilationResult, compile_intent
 from agentic.explainer import ExplanationResult
+from agentic.formulation import FormulationSession, FormulationStep
 from agentic.intent import (
     InterpretationResult,
     ProblemIntent,
@@ -107,10 +108,38 @@ class ConversationContext(StrictWorkflowModel):
             )
         return "\n\n".join(lines)
 
+    @classmethod
+    def from_formulation_session(
+        cls,
+        session: FormulationSession,
+    ) -> "ConversationContext":
+        """Build stable workflow identity from accepted conversational user turns."""
+        user_messages = [
+            message
+            for message in session.messages
+            if message.role == "user"
+        ]
+        if not user_messages:
+            raise ValueError(
+                "A formulated workflow requires at least one user message."
+            )
+        return cls(
+            original_request=user_messages[0].content,
+            clarifications=tuple(
+                ClarificationExchange(
+                    missing_fields=(),
+                    questions=("Conversational formulation follow-up.",),
+                    answer=message.content,
+                )
+                for message in user_messages[1:]
+            ),
+        )
+
 
 class WorkflowEvent(StrictWorkflowModel):
     sequence: int = Field(ge=1)
     stage: Literal[
+        "formulated",
         "interpreted",
         "clarification_requested",
         "unsupported",
@@ -239,7 +268,7 @@ class DeterministicOrchestrator:
 
     def __init__(
         self,
-        interpreter: Interpreter,
+        interpreter: Interpreter | None = None,
         *,
         compiler: Compiler = compile_intent,
         validator: Validator = validate_config_tool,
@@ -259,6 +288,31 @@ class DeterministicOrchestrator:
 
     def start(self, user_request: str) -> WorkflowOutcome:
         return self._advance(ConversationContext(original_request=user_request))
+
+    def prepare_formulation(
+        self,
+        step: FormulationStep,
+    ) -> AwaitingRunApproval | ValidationFailedWorkflow:
+        """Compile and validate only a deterministically ready formulation step."""
+        if step.session.status != "ready_for_review" or step.intent is None:
+            raise ValueError(
+                "Only a deterministically ready formulation can be prepared."
+            )
+        conversation = ConversationContext.from_formulation_session(
+            step.session
+        )
+        events: list[WorkflowEvent] = []
+        self._emit(
+            events,
+            "formulated",
+            "The conversational draft passed deterministic readiness and "
+            "strict intent validation.",
+        )
+        return self._compile_and_validate(
+            step.intent,
+            conversation=conversation,
+            events=events,
+        )
 
     def resume(
         self,
@@ -519,6 +573,11 @@ class DeterministicOrchestrator:
     ) -> WorkflowOutcome:
         events = list(prior_events)
 
+        if self._interpreter is None:
+            raise RuntimeError(
+                "No legacy intent interpreter is configured; use "
+                "prepare_formulation() with a ready conversational step."
+            )
         interpretation = self._interpreter.interpret(
             conversation.interpreter_request()
         )
@@ -550,7 +609,20 @@ class DeterministicOrchestrator:
                 events=tuple(events),
             )
 
-        compilation = self._compiler(interpretation.intent)
+        return self._compile_and_validate(
+            interpretation.intent,
+            conversation=conversation,
+            events=events,
+        )
+
+    def _compile_and_validate(
+        self,
+        intent: ProblemIntent,
+        *,
+        conversation: ConversationContext,
+        events: list[WorkflowEvent],
+    ) -> AwaitingRunApproval | ValidationFailedWorkflow:
+        compilation = self._compiler(intent)
         self._emit(events, "defaults_applied", compilation.defaults_notice)
 
         request = ValidateConfigRequest(config=compilation.config)
