@@ -8,6 +8,8 @@ from agentic.formulation import (
     ConversationFormulator,
     DraftNotReadyError,
     DraftUpdate,
+    FormulationAgentResponse,
+    FormulationModelState,
     FormulationSession,
     FormulationTurn,
     ProblemDraft,
@@ -119,6 +121,200 @@ class FormulationTests(unittest.TestCase):
         self.assertIn("external_load", readiness.missing_fields)
         with self.assertRaises(DraftNotReadyError):
             finalize_draft(result.draft)
+
+    def test_formulation_only_geometry_and_support_finalize_deterministically(self):
+        first_user = (
+            "Make it ten long and half as tall. Fix its left side and keep "
+            "roughly one third of the material."
+        )
+        first = merge_formulation_turn(
+            ProblemDraft(),
+            FormulationTurn(
+                assistant_message=(
+                    "I retained the dimensions and relative support without "
+                    "inventing an origin."
+                ),
+                updates=(
+                    update(
+                        "domain.width",
+                        10,
+                        "ten long and half as tall",
+                        basis="derived",
+                    ),
+                    update(
+                        "domain.height",
+                        5,
+                        "ten long and half as tall",
+                        basis="derived",
+                    ),
+                    update(
+                        "support_edges",
+                        ["left"],
+                        "Fix its left side",
+                        basis="derived",
+                    ),
+                    update(
+                        "volume_fraction",
+                        1 / 3,
+                        "roughly one third of the material",
+                        basis="derived",
+                    ),
+                ),
+            ),
+            user_message=first_user,
+            turn_number=1,
+        )
+
+        self.assertNotIn("domain.bounds", first.draft.values())
+        self.assertEqual(first.draft.fact("domain.width").value, 10)
+        self.assertEqual(first.draft.fact("domain.height").value, 5)
+        self.assertEqual(first.draft.fact("support_edges").value, ["left"])
+
+        second_user = (
+            "Put the lower-left corner at the origin. Minimize compliance "
+            "with E 10 and nu 0.3. Push downward with traction [0,-1] over "
+            "the middle ten percent of the right edge."
+        )
+        second = merge_formulation_turn(
+            first.draft,
+            FormulationTurn(
+                assistant_message="The previously partial geometry is complete.",
+                updates=(
+                    update(
+                        "problem_type",
+                        "minimize_compliance",
+                        "Minimize compliance",
+                    ),
+                    update(
+                        "domain.origin",
+                        [0, 0],
+                        "lower-left corner at the origin",
+                        basis="derived",
+                    ),
+                    update(
+                        "material.young_modulus",
+                        10,
+                        "E 10",
+                    ),
+                    update(
+                        "material.poisson_ratio",
+                        0.3,
+                        "nu 0.3",
+                    ),
+                    update(
+                        "tractions",
+                        RIGHT_TRACTION,
+                        (
+                            "traction [0,-1] over the middle ten percent "
+                            "of the right edge"
+                        ),
+                        basis="derived",
+                    ),
+                ),
+                declared_state="ready",
+            ),
+            user_message=second_user,
+            turn_number=2,
+        )
+
+        intent = finalize_draft(second.draft)
+
+        self.assertEqual(intent.domain.bounds, ((0, 0), (10, 5)))
+        self.assertEqual(
+            intent.supports[0].region.model_dump(mode="json"),
+            {
+                "op": "plane",
+                "axis": "x",
+                "value": 0,
+                "tol": 1e-8,
+            },
+        )
+        self.assertAlmostEqual(intent.volume_fraction, 1 / 3)
+
+    def test_long_short_mesh_preference_waits_for_geometry_then_maps_to_xy(self):
+        first_user = (
+            "Use 60 cells along the long side and 30 along the short side."
+        )
+        first = merge_formulation_turn(
+            ProblemDraft(),
+            FormulationTurn(
+                assistant_message=(
+                    "I retained the relative mesh preference until geometry "
+                    "is available."
+                ),
+                updates=(
+                    update(
+                        "mesh.long_short_divisions",
+                        [60, 30],
+                        (
+                            "60 cells along the long side and 30 along the "
+                            "short side"
+                        ),
+                    ),
+                ),
+            ),
+            user_message=first_user,
+            turn_number=1,
+        )
+        self.assertFalse(assess_draft(first.draft).ready)
+
+        complete_user = "Use the complete 10 by 5 compliance example."
+        complete = merge_formulation_turn(
+            first.draft,
+            complete_turn(complete_user),
+            user_message=complete_user,
+            turn_number=2,
+        )
+        intent = finalize_draft(complete.draft)
+
+        self.assertEqual(intent.mesh.divisions, (60, 30))
+        self.assertEqual(
+            complete.draft.fact("mesh.long_short_divisions").source_turn,
+            1,
+        )
+
+    def test_conflicting_complete_and_component_geometry_blocks_finalization(self):
+        user = "Use bounds 0,0 to 10,5 but make the width 12."
+        result = merge_formulation_turn(
+            ProblemDraft(),
+            FormulationTurn(
+                assistant_message="These geometry statements conflict.",
+                updates=(
+                    update(
+                        "domain.bounds",
+                        [[0, 0], [10, 5]],
+                        "bounds 0,0 to 10,5",
+                        basis="derived",
+                    ),
+                    update(
+                        "domain.origin",
+                        [0, 0],
+                        "bounds 0,0 to 10,5",
+                        basis="derived",
+                    ),
+                    update(
+                        "domain.width",
+                        12,
+                        "width 12",
+                    ),
+                    update(
+                        "domain.height",
+                        5,
+                        "bounds 0,0 to 10,5",
+                        basis="derived",
+                    ),
+                ),
+            ),
+            user_message=user,
+            turn_number=1,
+        )
+
+        readiness = assess_draft(result.draft)
+
+        self.assertIn(
+            "domain.bounds conflicts with domain.origin/width/height.",
+            readiness.semantic_errors,
+        )
 
     def test_model_assumption_is_visible_and_cannot_finalize_until_confirmed(self):
         first_user = "It is a cantilever."
@@ -373,7 +569,8 @@ class FormulationTests(unittest.TestCase):
         )
 
         repair = ConversationFormulator(
-            CannedFormulationAgent([invalid_turn])
+            CannedFormulationAgent([invalid_turn]),
+            max_repair_attempts=0,
         ).start("Use Poisson ratio 0.8.")
         unsupported = ConversationFormulator(
             CannedFormulationAgent([unsupported_turn])
@@ -387,6 +584,119 @@ class FormulationTests(unittest.TestCase):
             ("3D domain",),
         )
 
+        negotiable = ConversationFormulator(
+            CannedFormulationAgent(
+                [
+                    FormulationTurn(
+                        assistant_message=(
+                            "Point loads are unsupported, but we can use a "
+                            "distributed traction segment."
+                        ),
+                        questions=(
+                            "What segment width and traction magnitude should be used?",
+                        ),
+                        unsupported_features=("point load",),
+                    )
+                ]
+            )
+        ).start("Apply a point load at the free edge.")
+
+        self.assertEqual(negotiable.session.status, "gathering")
+        self.assertEqual(
+            negotiable.session.unsupported_features,
+            ("point load",),
+        )
+
+    def test_engine_repairs_rejected_patch_on_same_user_turn(self):
+        user = "Use Poisson ratio 0.3."
+        invalid = FormulationTurn(
+            assistant_message="I recorded the material value.",
+            updates=(
+                update(
+                    "material.poisson_ratio",
+                    0.8,
+                    "Poisson ratio 0.3",
+                ),
+            ),
+        )
+        corrected = FormulationTurn(
+            assistant_message="I recorded Poisson ratio 0.3.",
+            updates=(
+                update(
+                    "material.poisson_ratio",
+                    0.3,
+                    "Poisson ratio 0.3",
+                ),
+            ),
+        )
+        agent = CannedFormulationAgent([invalid, corrected])
+
+        result = ConversationFormulator(
+            agent,
+            max_repair_attempts=1,
+        ).start(user)
+
+        self.assertEqual(len(agent.requests), 2)
+        self.assertEqual(agent.requests[0].turn_number, 1)
+        self.assertIsNone(agent.requests[0].repair)
+        self.assertEqual(agent.requests[1].turn_number, 1)
+        self.assertEqual(agent.requests[1].repair.attempt, 2)
+        self.assertEqual(
+            agent.requests[1].repair.issues[0].code,
+            "invalid_value",
+        )
+        self.assertEqual(result.merge.issues, ())
+        self.assertEqual(
+            result.session.draft.fact("material.poisson_ratio").value,
+            0.3,
+        )
+        self.assertEqual(result.session.draft.turn_count, 1)
+        self.assertEqual(len(result.session.messages), 2)
+
+    def test_engine_carries_adapter_state_through_repair(self):
+        first_state = FormulationModelState(
+            adapter="test-adapter",
+            continuation_id="response-1",
+        )
+        repaired_state = FormulationModelState(
+            adapter="test-adapter",
+            continuation_id="response-2",
+        )
+        invalid = FormulationAgentResponse(
+            turn=FormulationTurn(
+                assistant_message="I encoded the value.",
+                updates=(
+                    update(
+                        "material.poisson_ratio",
+                        0.8,
+                        "Poisson ratio 0.3",
+                    ),
+                ),
+            ),
+            model_state=first_state,
+        )
+        corrected = FormulationAgentResponse(
+            turn=FormulationTurn(
+                assistant_message="I corrected the encoding.",
+                updates=(
+                    update(
+                        "material.poisson_ratio",
+                        0.3,
+                        "Poisson ratio 0.3",
+                    ),
+                ),
+            ),
+            model_state=repaired_state,
+        )
+        agent = CannedFormulationAgent([invalid, corrected])
+
+        result = ConversationFormulator(agent).start(
+            "Use Poisson ratio 0.3."
+        )
+
+        self.assertEqual(agent.requests[1].model_state, first_state)
+        self.assertEqual(result.session.model_state, repaired_state)
+
     def test_blank_turn_and_nonsequential_merge_are_rejected(self):
         formulator = ConversationFormulator(CannedFormulationAgent([]))
         with self.assertRaises(ValueError):
@@ -397,6 +707,11 @@ class FormulationTests(unittest.TestCase):
                 FormulationTurn(assistant_message="No changes."),
                 user_message="message",
                 turn_number=2,
+            )
+        with self.assertRaises(ValueError):
+            ConversationFormulator(
+                CannedFormulationAgent([]),
+                max_repair_attempts=3,
             )
 
 

@@ -18,7 +18,7 @@ class FormulationScenarioTests(unittest.TestCase):
         scenarios = payload["scenarios"]
         ids = [item["id"] for item in scenarios]
 
-        self.assertEqual(payload["version"], "formulation-evals-v1")
+        self.assertEqual(payload["version"], "formulation-evals-v2")
         self.assertEqual(len(ids), len(set(ids)))
         self.assertGreaterEqual(len(scenarios), 6)
         self.assertTrue(any(len(item["turns"]) > 1 for item in scenarios))

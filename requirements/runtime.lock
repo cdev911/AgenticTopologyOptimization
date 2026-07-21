@@ -257,6 +257,7 @@ onnxruntime==1.28.0
 openai==2.48.0
     # via
     #   crewai
+    #   fenitop (pyproject.toml)
     #   instructor
 openpyxl==3.1.5
     # via crewai
