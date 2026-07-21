@@ -13,16 +13,16 @@ Last updated: 2026-07-27
   image. Compose config, dependency checks, Streamlit health, the no-credit
   idempotent harness, and documentation links have also passed.
 - **Scope**: personal learning/demo workflow, not engineering design software or a
-  hosted multi-user service.
-- **Just implemented**: the model-independent conversational-formulation
-  foundation. A typed `ProblemDraft` now retains partial facts and revision
-  provenance across turns; a compact turn patch carries natural assistant text,
-  changed facts, and questions; deterministic code validates provenance and field
-  values, blocks unconfirmed assumptions, assesses readiness, and alone converts a
-  complete draft to the existing strict `ProblemIntent`. Six multi-turn evaluation
-  seeds cover disorder, correction, load negotiation, reformulation, conflict, and
-  casual numerical preferences. The new turn schema is 2,315 characters versus
-  235,234 for the current one-shot schema.
+  hosted multi-user service. This scope does not authorize intentionally weak or
+  toy implementations: functional quality and measured reliability are the
+  learning objective.
+- **Just implemented**: a durable `LEARNING.md` that reconstructs the project from
+  tool preparation through orchestration and the conversational redesign,
+  including failed approaches and real regression examples. The immediately
+  preceding code slice is the model-independent conversational-formulation
+  foundation: typed partial drafts, revision provenance, compact turn patches,
+  deterministic readiness/finalization, and six multi-turn evaluation seeds. Its
+  turn schema is 2,315 characters versus 235,234 for the current one-shot schema.
 - **Next action**: select and implement the live conversation adapter plus repair
   loop, then migrate the Streamlit entry path only after the multi-turn evals pass.
   The released UI still uses the v1 interpreter.
@@ -170,6 +170,16 @@ tests, and explicit user decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — Solve the real problem and preserve the learning**: “learning
+  project” describes the purpose and deployment scope, not a reason to keep the
+  implementation artificially simple. Choose frameworks, APIs, models, and
+  architecture by measured functional quality, reliability, safety, and
+  understandability. Keep a dedicated `LEARNING.md` beginning with agent-safe tool
+  preparation and continuing through orchestration, real failures, and design
+  changes. Reason: the useful learning is how a functioning system was reached,
+  including why simpler or earlier approaches failed; CrewAI and other components
+  are means to that outcome rather than goals that must be preserved at the
+  expense of it.
 - **2026-07-27 — Provider-independent formulation core first**: implement the
   partial draft, small turn-patch contract, provenance validation, revision
   history, deterministic readiness, strict finalization, and evaluation seeds
@@ -242,7 +252,8 @@ Reverse chronological; final decisions only.
 - Should conversational formulation continue through CrewAI's current
   Chat-Completions adapter with application-owned history, or use the OpenAI
   Responses API for native conversation state and persisted reasoning while
-  retaining CrewAI elsewhere in the learning architecture?
+  retaining CrewAI elsewhere? Select by the shared conversation evaluations, not
+  by a requirement to keep the architecture simple or framework-pure.
 - Which measured quality/cost point should be selected after representative
   conversation evals: Terra at medium/high reasoning, or Sol at medium reasoning?
 
@@ -262,6 +273,8 @@ Reverse chronological; final decisions only.
       provenance, and filtered-density roundoff handling.
 - [x] Post-v1 Phase 1 foundation — conversational typed draft, provenance-aware
       merge, revision history, readiness, strict final conversion, and eval seeds.
+- [x] Learning record — tool preparation, numerical containment, orchestration,
+      real regression lessons, and quality-first development principle.
 - [ ] Post-v1 live formulation — conversation-state adapter, structured repair
       feedback, and measured Terra/Sol comparison.
 - [ ] Post-v1 UI migration — conversational draft display, error-specific UX,
