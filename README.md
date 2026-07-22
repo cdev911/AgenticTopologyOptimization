@@ -361,6 +361,19 @@ docker compose run --rm -T fenitop \
 Use `--scenarios <id> ...` to run a focused subset. The fixture and deterministic
 graders live under `tests/fixtures` and `scripts/formulation_live_eval.py`.
 
+The boundary-condition redesign also has a no-credit, provider-independent
+53-case semantic corpus. It includes the supplied multi-turn failure, the two
+previously failing complete prompts, partial and corrected BCs, resultants,
+pressure, unit ambiguity, and unsupported support/load semantics:
+
+```bash
+docker compose run --rm -T fenitop \
+  pytest -q tests/agentic/test_bc_evaluation.py
+```
+
+This corpus currently defines and grades the target behavior; later BC work
+packages will connect the live formulator to it.
+
 ## Supported natural-language scope
 
 The natural-language workflow supports:
@@ -437,7 +450,7 @@ docker compose run --rm -T fenitop python -m pip check
 docker compose run --rm -T fenitop pytest -q
 ```
 
-Current checkpoint: **202 tests plus 109 numerical subtests pass**. The suite
+Current checkpoint: **213 tests plus 162 subtests pass**. The suite
 includes schema and adversarial-input tests, real compliance/mechanism baselines,
 finite-difference sensitivities, geometry validation, resource calibration,
 process timeout/cancellation/crash behavior, secret scrubbing, path and

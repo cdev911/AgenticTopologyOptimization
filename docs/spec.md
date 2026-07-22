@@ -9,7 +9,7 @@ Last updated: 2026-07-27
 
 - **Release**: v1 numerical/execution behavior remains complete, and the post-v1
   conversational Phase 1 is now the released Streamlit entry path.
-- **Verification**: 202 tests plus 109 numerical subtests pass in the pinned Docker
+- **Verification**: 213 tests plus 162 subtests pass in the pinned Docker
   image. Compose config, dependency checks, Streamlit health, the no-credit
   idempotent harness, and documentation links have also passed.
 - **Scope**: personal learning/demo workflow, not engineering design software or a
@@ -24,9 +24,20 @@ Last updated: 2026-07-27
   orchestrator's typed `prepare_formulation()` method. Requested changes revoke
   the prior approvable proposal before the new model call; explicit approval
   remains the only path to solver execution.
-- **Next action**: perform user-led live UI acceptance with varied natural problem
-  descriptions and turn every observed conversation or presentation failure into
-  a versioned evaluation and deterministic regression test before adding physics.
+- **Just planned**: the first user-led acceptance exposed boundary conditions as
+  the main formulation bottleneck. Section 8 now defines an authorized,
+  two-increment improvement: first make existing clamp/distributed-load physics
+  genuinely conversational and mesh-verifiable, then place roller/symmetry/pin
+  support physics behind a separate versioned contract gate.
+- **Just implemented**: BC Work Package 0 adds a provider-independent semantic
+  evaluation contract, deterministic grader, and 53-case versioned corpus. It
+  includes the supplied six-turn transcript, both previously failing complete
+  prompts, partial/multiple/corrected BCs, units, resultants, pressure, and
+  capability boundaries. This checkpoint does not change live formulation or
+  solver behavior.
+- **Next action**: implement BC Work Package 1: stable partial BC entities,
+  application-owned IDs, per-field provenance, and typed create/update/delete/
+  confirm patches, driven by the new corpus.
 
 ## 1. Product
 
@@ -188,23 +199,209 @@ approval invalidation on requested changes, visible draft/capability/error state
 fact preservation, and Streamlit behavior. `scripts/formulation_live_eval.py` is
 a separate billed gate and never starts the solver.
 
-## 8. Post-v1 Backlog
+## 8. Planned Boundary-Condition Formulation Upgrade
 
-No item below is authorized or designed yet:
+The conversational boundary-condition upgrade is authorized for implementation.
+It is split into two increments so that language/geometry reliability can be
+measured independently from new finite-element support physics.
 
-- optional recorded UI scenario for offline/live-demo reliability;
-- roller supports or nonzero prescribed displacement;
-- agent-safe 3D and MPI execution;
-- additional materials/physics; and
-- hosted or multi-user deployment.
+### 8.1 Required user experience
 
-Any physics addition requires a new versioned contract, prompt update, numerical
-tests, and explicit user decision.
+- A user may describe supports and loads in any logical order and refine them over
+  multiple turns. The UI assigns stable labels such as `S1` and `L1`, so “move L1
+  upward” changes that load rather than replacing every load.
+- Each BC retains partial facts independently: type, boundary edge, along-edge
+  location, extent, direction, quantity semantics, magnitude, units, and
+  provenance. A missing magnitude must not erase a known location.
+- Common spatial descriptions include whole edges; centered, upper/lower, or
+  left/right fractions; coordinate intervals; physical widths; distances from a
+  corner; and equivalent corrections. Ambiguous words such as “width” on a
+  vertical edge require clarification when context does not resolve them.
+- The conversation distinguishes traction, pressure, total resultant force, and
+  a mathematical point load. It never silently treats one as another.
+- Every proposed value absent from the user's description is stored as a typed
+  pending assumption with its derivation. The user can confirm it, change it, or
+  continue supplying facts. Formulation confirmation remains separate from the
+  final run approval.
+- Before approval, the UI presents human-readable BC cards and a deterministic
+  rectangle preview showing support segments, load segments/arrows, stable IDs,
+  requested versus mesh-resolved extents, and any load conversion.
+
+### 8.2 Conversational BC model
+
+`ProblemDraft` will keep ordinary scalar facts but replace the monolithic
+`supports`, `support_edges`, and `tractions` formulation paths with first-class
+BC entities:
+
+- application-owned stable IDs and BC kind;
+- field-level `explicit`, `derived`, `assumption`, or `confirmed` provenance;
+- typed create/update/delete/confirm operations instead of replacing a whole
+  list;
+- semantic rectangle-edge selectors that remain meaningful before geometry or
+  mesh divisions are complete; and
+- explicit incomplete, ambiguous, resolved, and confirmed states.
+
+The compact Responses transport will continue to carry JSON strings decoded by
+path-specific validators; the provider will not receive the recursive final
+solver schema. The application allocates IDs and rejects references to missing
+entities, conflicting updates, unsupported confirmation, and destructive
+whole-list replacement.
+
+### 8.3 Deterministic boundary and load resolution
+
+Boundary selection becomes a shared tool-layer operation rather than duplicated
+agent arithmetic:
+
+1. Preserve a requested continuous rectangle-edge segment as edge plus normalized
+   or coordinate interval.
+2. Enumerate and order the actual boundary facets on that edge.
+3. Select the contiguous facets whose midpoints fall in the requested interval.
+   If a positive interval contains no midpoint, select the single closest facet
+   and issue a visible resolution warning.
+4. Report the requested interval, resolved facet bounds, facet count, physical
+   boundary measure, centroid, outward normal, and resolution error.
+5. Use exactly the same resolver in validation and in `form_fem`; validation and
+   execution must never disagree about which facets carry a BC.
+
+The generic region DSL remains available for already-supported expert regions.
+First-class rectangle-edge selectors are preferred for conversational BCs because
+their discretization policy and evidence are explicit.
+
+Uniform loads will support two input quantity kinds:
+
+- an effective distributed traction vector; or
+- a desired total resultant vector distributed uniformly over the resolved
+  segment under the existing unit-thickness model.
+
+For a resultant, deterministic code calculates
+`traction = resultant / (resolved boundary measure × thickness)`. The geometry
+report records both values and recomputes the integrated resultant as a
+verification check. An exact point load remains unsupported; the workflow may
+offer a finite patch and a uniform resultant as an explicitly confirmed
+reformulation.
+
+A typed mechanical unit context will retain the user's original units and
+normalize supported length, force, and stress quantities into one solver unit
+system using a Docker-pinned `Pint` dependency. Missing units inferred from
+context—for example N, mm, and MPa—are assumptions, not silent conversions.
+Implicit thickness remains one length unit and must be stated when converting a
+total force.
+
+### 8.4 Required tool changes
+
+The existing three-tool boundary remains; no fourth LLM-callable preview tool is
+needed. `validate_config` will be extended so the UI and approval layer can use
+its authoritative evidence.
+
+- Add versioned, strict BC identifiers, rectangle-edge selectors, and uniform
+  traction/resultant load variants to `AgentSafeConfig`.
+- Add one shared mesh-aware boundary resolver used by `validate_config` and
+  `fenitop.fem`.
+- Extend each geometry entity record with measure, centroid, requested/resolved
+  extents, normal, resolution warning, effective traction, and integrated
+  resultant where applicable.
+- Continue rejecting empty selectors, overlapping distributed loads, loads erased
+  by void zones, and under-constrained models.
+- Add a calibrated plane-strain warning for Poisson ratios near `0.5`; do not
+  silently reject a value inside the existing mathematical range.
+- Target `AgentSafeConfig` schema `2.0` and tool contract `5.0.0` for the new
+  canonical BC representation. Keep a tested, deterministic `1.1` input migration
+  adapter for current full-vector clamp and traction fixtures; do not make the LLM
+  perform migration.
+
+### 8.5 Capability boundary and second increment
+
+| User phrase or model | First increment | Tool physics change |
+| --- | --- | --- |
+| Full edge or finite-segment clamp | Supported | Mesh-aware selector/evidence only |
+| Uniform traction on an edge segment | Supported | Selector/evidence extension |
+| Uniform total resultant over a finite segment | Supported after unit/distribution confirmation | New versioned load variant |
+| Normal pressure or tangential load on a named rectangle edge | Deterministically converted to a global vector | No new FEM physics |
+| Mathematical point load | Not represented directly; offer a finite loaded patch | Remains unsupported |
+| Roller or symmetry support | Recognized but not aliased to a clamp | Component-wise zero-DOF contract required |
+| True point-node pin | Recognized but not approximated by a clamped facet | Node selector plus component-aware validation required |
+| Nonzero prescribed displacement | Not part of this improvement | Remains backlog |
+
+After the first increment passes its gate, the second increment may version
+`DirichletBC` for zero-valued component constraints and boundary-node selectors.
+Implementation must use component subspaces in Dolfinx, populate the existing
+rigid-body rank calculation with the actual constrained components, detect
+duplicate/conflicting constrained DOFs, and add numerical pin/roller baselines.
+This is a physics-contract change and receives an explicit checkpoint before code
+changes; the formulator must already recognize these terms honestly even while
+the capability is gated.
+
+### 8.6 Work packages and gates
+
+0. **Corpus first** — turn the supplied cantilever transcript, both previously
+   failing complete prompts, and at least 50 boundary-language fixtures into
+   versioned expected semantic outcomes. Include multiple loads, corrections,
+   coordinate/fraction/physical spans, direction synonyms, pressure, resultant
+   force, unit ambiguity, point-load reformulation, roller/pin recognition, and
+   deliberate contradictions.
+1. **BC draft and patches** — implement stable entities, partial per-field
+   provenance, confirmation records, reference/correction operations, readiness,
+   migration from legacy list facts, and pure deterministic tests.
+2. **Units and semantic load model** — normalize dimensional quantities, retain
+   display units, represent traction versus resultant explicitly, and add
+   deterministic direction/pressure resolution without requiring solver-native
+   wording from the user.
+3. **Tool resolver and evidence** — add the shared facet resolver, versioned safe
+   schema, resultant normalization, enriched geometry report, near-incompressible
+   warning, and mesh/numerical tests.
+4. **Finalization and approval** — compile only complete, confirmed BC entities;
+   show requested/resolved selectors and conversions in the approval facts; keep
+   the existing separate green-light transition unchanged.
+5. **Prompt and live adapter** — teach the formulation role to extract semantic
+   BC facts, preserve uncertainty, ask the highest-information question, propose
+   recorded assumptions, and refer to stable IDs. Arithmetic, facet selection,
+   unit conversion, readiness, and side effects remain deterministic.
+6. **UI and preview** — replace raw BC paths with human cards, draw the
+   deterministic pre-run diagram from validated evidence, expose detailed
+   provenance in the existing expander, and support precise correction language.
+7. **First-increment release gate** — require the complete deterministic suite,
+   unchanged historical numerical baselines, exact resultant integration within
+   numerical tolerance, deterministic selector/error tests, and 100% passage of
+   the fixed billed BC conversation gate with zero silent semantic changes and
+   zero solver starts.
+8. **Component-support checkpoint and increment** — review first-increment
+   evidence, explicitly authorize the versioned roller/symmetry/pin contract,
+   implement it, and repeat schema, geometry, rigid-body, FEM, UI, and live gates.
+9. **Documentation and learning** — update `README.md` only for shipped behavior,
+   update `docs/tool-reference.md` with exact contracts and formulas, record real
+   failures and tradeoffs in `LEARNING.md`, refresh this spec, and commit at each
+   verified boundary.
+
+Remaining unplanned backlog: optional recorded offline UI scenarios, nonzero
+prescribed displacement, agent-safe 3D/MPI, additional materials/physics, and
+hosted or multi-user deployment. Each physics addition still requires a versioned
+contract, prompt update, numerical tests, and an explicit decision.
 
 ## 9. Decision Log
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — Grade BC meaning before changing the provider or solver**: add a
+  provider-independent `boundary-condition-evals-v1` contract and 53-case corpus
+  before integrating new live draft fields. Grade exact retained BC semantics,
+  coded clarifications/assumptions/capability limits, prohibited silent changes,
+  and absence of solver execution rather than assistant wording. Reason: the
+  corpus must drive the intermediate representation, and the supplied transcript
+  already proves that fluent prose can coexist with missing canonical load facts.
+- **2026-07-27 — Boundary conditions become first-class semantic entities with
+  mesh evidence**: implement stable per-BC identities, partial field provenance,
+  semantic edge selectors, typed load quantity semantics, unit-aware uniform
+  resultant conversion, and deterministic pre-run visualization. Move
+  rectangle-edge facet selection into one shared resolver used by both validation
+  and execution, and enrich `validate_config` evidence rather than adding a fourth
+  LLM-callable tool. Keep mathematical point loads unsupported and offer only an
+  explicitly confirmed finite-patch reformulation. Plan component-wise
+  roller/symmetry and point-node pin support as a second versioned increment with
+  a separate physics checkpoint. Reason: the live transcript showed that
+  monolithic load lists lose known partial facts, solver-native wording makes the
+  conversation repetitive, total-force conversion cannot be verified without
+  units and resolved boundary measure, and a syntactically valid selector can
+  still select different—or zero—mesh facets.
 - **2026-07-27 — The typed conversational draft is the live UI state**:
   Streamlit retains `FormulationSession`, renders accepted facts and unresolved
   items directly, and places detailed public provenance/revisions in an expander.
@@ -316,11 +513,11 @@ Reverse chronological; final decisions only.
 
 ## 10. Open Questions
 
-- No architecture question blocks live UI acceptance.
-- The provenance presentation decision is resolved: accepted facts, assumptions,
-  capability limits, conflicts, selected defaults, and the final approval question
-  are directly visible; exact source quotes and revision records are in an
-  inspectable expander.
+- No architecture question blocks the first BC increment.
+- The component-support checkpoint remains intentionally open until the first
+  increment's conversation, selection, and numerical evidence is reviewed. The
+  recommended next physics surface is zero-valued rollers/symmetry plus true
+  point-node pins; nonzero prescribed displacement remains out of scope.
 
 ## 11. Implementation Checklist
 
@@ -344,3 +541,22 @@ Reverse chronological; final decisions only.
       feedback, and measured Terra/Sol comparison.
 - [x] Post-v1 UI migration — conversational draft display, error-specific UX,
       final compile/validate handoff, and approval regression verification.
+- [x] BC improvement planning — language taxonomy, first-class draft design,
+      mesh-aware tool changes, unit/resultant semantics, preview, phased physics
+      expansion, and acceptance gates.
+- [x] BC Work Package 0 — 53-case versioned boundary-language corpus, strict
+      semantic observation contract, and deterministic safety grader.
+- [ ] BC Work Package 1 — stable partial BC entities, patches, provenance, and
+      confirmation.
+- [ ] BC Work Package 2 — typed unit context and semantic traction/resultant
+      resolution.
+- [ ] BC Work Package 3 — shared mesh boundary resolver, versioned tool contract,
+      enriched evidence, and numerical warnings.
+- [ ] BC Work Packages 4–6 — finalization/approval evidence, prompt adapter, and
+      human BC cards/preview.
+- [ ] BC Work Package 7 — complete deterministic, numerical, UI, and billed live
+      first-increment gate.
+- [ ] BC Work Package 8 — explicit component-support checkpoint and optional
+      roller/symmetry/point-pin implementation.
+- [ ] BC Work Package 9 — shipped-behavior documentation, learning record, and
+      release verification.

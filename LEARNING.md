@@ -541,7 +541,64 @@ The model itself remains covered by the separate billed formulation evaluation.
 This separation keeps ordinary regression tests fast and deterministic while
 retaining a real-model quality gate.
 
-## 16. How we will continue learning
+## 16. Boundary conditions are three coupled problems
+
+The first extended cantilever conversation showed that “understand the boundary
+condition” is not one task. It crosses three different interfaces:
+
+1. **Language semantics** — “tip load,” “middle of the right face,” “10 percent,”
+   “downward,” “total force,” “pressure,” “fixed,” “pinned,” and “roller” are not
+   interchangeable fields. They describe location, extent, direction, quantity
+   type, distribution, and constrained displacement components.
+2. **Continuum physics** — a total resultant is not a traction, a mathematical
+   point load is not a finite loaded patch, and a roller is not a full clamp. A
+   conversion needs the missing physical facts and explicit user agreement.
+3. **Mesh realization** — even a valid continuous interval can match zero facets
+   or resolve to a different physical length on a discrete mesh. The solver and
+   validator must use one selector implementation and show what was actually
+   selected.
+
+Our generic region DSL is a good safe execution language, but the monolithic
+`supports` and `tractions` formulation fields are a poor conversational memory.
+In the observed transcript the system knew the load edge, center, span, direction,
+and total magnitude at different times, yet none of those partial facts survived
+in the canonical draft because a complete traction object could not be formed.
+The assistant then repeated questions and proposed a numerical conversion only in
+prose, where it could not be confirmed reliably.
+
+The planned correction is to make each BC a stable, partially populated entity
+with field-level provenance. Semantic edge segments will remain continuous until
+a shared mesh resolver selects actual facets and reports their measure. Uniform
+resultant conversion will use that resolved measure and the declared
+unit-thickness model, then verify the integrated force. A deterministic diagram
+will show the interpretation before the separate run approval.
+
+This also clarified when a tool change is necessary. Better prompting is enough
+to recognize paraphrases, but it cannot create missing solver semantics.
+Segmented full clamps and uniform tractions already fit the physics; they need
+better selection and evidence. Rollers, symmetry constraints, and true
+point-node pins need component- or node-level Dirichlet support in the FEM
+contract and corresponding rigid-body/numerical tests. We must recognize those
+terms honestly before supporting them, and never approximate them as clamps
+without an explicit reformulation.
+
+Building the corpus before the runtime model exposed another useful boundary. A
+point described as “the center of the right edge” cannot honestly be stored as an
+absolute coordinate while domain bounds are still missing. The evaluation
+contract therefore permits a boundary point to retain `edge=right` plus a
+relative center until geometry is known. It also grades BC semantic state
+separately from whole-problem readiness: a boundary condition can be complete
+while material or optimization facts remain missing.
+
+The deterministic grader compares normalized BC entities and stable codes for
+clarifications, assumptions, and capability limits. It does not compare assistant
+sentences. This lets future prompts and models vary their wording while still
+failing on lost partial facts, invented units/directions/extents, silent
+point/resultant conversion, roller/pin-to-clamp substitution, unrelated BC
+overwrites, or any solver start. The initial version contains 53 cases, including
+the supplied six-turn transcript and both earlier complete-prompt failures.
+
+## 17. How we will continue learning
 
 We will use these rules for the remaining work:
 
@@ -560,7 +617,7 @@ We will use these rules for the remaining work:
 The next lesson should come from user-led live UI conversations and the failures
 they reveal—not from keeping the design artificially simple.
 
-## 17. Milestone trail
+## 18. Milestone trail
 
 This condensed trail connects the lessons above to the implementation order:
 
@@ -586,5 +643,10 @@ This condensed trail connects the lessons above to the implementation order:
 - **2026-07-27** — migrated Streamlit to the typed multi-turn formulation session,
   added the ready-step orchestrator bridge, visible draft/provenance/error states,
   stable user-turn workflow identity, and stale-approval invalidation.
-- **Next** — conduct live UI acceptance and convert real conversational or
-  presentation failures into versioned evaluations and regression tests.
+- **2026-07-27** — used the first extended live conversation to design the
+  first-class BC draft, mesh-aware selector evidence, unit/resultant semantics,
+  pre-run preview, and a separately gated component-support increment.
+- **2026-07-27** — added the provider-independent BC evaluation contract,
+  deterministic semantic/safety grader, and 53-case versioned corpus before
+  changing runtime behavior.
+- **Next** — implement stable partial BC entities and typed patch operations.
