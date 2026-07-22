@@ -371,8 +371,11 @@ docker compose run --rm -T fenitop \
   pytest -q tests/agentic/test_bc_evaluation.py
 ```
 
-This corpus currently defines and grades the target behavior; later BC work
-packages will connect the live formulator to it.
+The provider-independent Package 1 core now also stores partial BC entities with
+stable application-owned IDs, field-level provenance, revisions, pending
+confirmations, and typed create/update/delete/confirm patches. The current live
+OpenAI transport and solver finalization still use legacy BC facts until later
+work packages connect and validate the new path deliberately.
 
 ## Supported natural-language scope
 
@@ -450,7 +453,7 @@ docker compose run --rm -T fenitop python -m pip check
 docker compose run --rm -T fenitop pytest -q
 ```
 
-Current checkpoint: **213 tests plus 162 subtests pass**. The suite
+Current checkpoint: **229 tests plus 162 subtests pass**. The suite
 includes schema and adversarial-input tests, real compliance/mechanism baselines,
 finite-difference sensitivities, geometry validation, resource calibration,
 process timeout/cancellation/crash behavior, secret scrubbing, path and

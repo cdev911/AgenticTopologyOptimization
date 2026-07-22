@@ -598,6 +598,32 @@ point/resultant conversion, roller/pin-to-clamp substitution, unrelated BC
 overwrites, or any solver start. The initial version contains 53 cases, including
 the supplied six-turn transcript and both earlier complete-prompt failures.
 
+Implementing the partial draft showed why canonical BC IDs cannot come from the
+model. A model needs a temporary reference to group fields in one response, but
+the application allocates `S1`, `L1`, and later IDs monotonically. Deleting `L1`
+does not make that name available again; the next load is `L2`. This prevents a
+later correction or audit record from silently referring to a different physical
+condition.
+
+Confirmation is also a state operation, not another value update. It targets an
+existing assumption and preserves the exact value while changing its basis to
+confirmed. A bare “yes” is safe when one BC assumption is pending. When several
+are pending, the user must say “confirm all” or identify the intended fact. This
+avoids turning a vague acknowledgment into authority for several unrelated
+modeling choices.
+
+The field model distinguishes fractional span from physical offset and length.
+That distinction emerged while implementing readiness: “the centered 10%” and
+“start 1 mm from the corner and continue for 2 mm” cannot share one numeric field
+without losing dimensional meaning. Corpus-first development forced this issue
+to surface before unit conversion or mesh selection was implemented.
+
+Finally, migration is explicit and non-destructive. Existing `supports`,
+`support_edges`, and `tractions` can be copied into first-class BC state with
+their provenance, but current finalization still reads the legacy facts. Running
+both representations side by side for this checkpoint gives us tests for the new
+state without silently changing live or numerical behavior.
+
 ## 17. How we will continue learning
 
 We will use these rules for the remaining work:
@@ -649,4 +675,7 @@ This condensed trail connects the lessons above to the implementation order:
 - **2026-07-27** — added the provider-independent BC evaluation contract,
   deterministic semantic/safety grader, and 53-case versioned corpus before
   changing runtime behavior.
-- **Next** — implement stable partial BC entities and typed patch operations.
+- **2026-07-27** — implemented stable application-owned BC identities, partial
+  field facts, revisions, readiness, pending confirmations, typed patch
+  operations, and explicit legacy migration without switching the live path.
+- **Next** — implement typed units and semantic traction/resultant resolution.
