@@ -167,7 +167,7 @@ def _advance_formulation(message: str) -> None:
     st.session_state.formulation_session = step.session
     st.session_state.formulation_step = step
     _append("assistant", _formulation_chat_message(step))
-    if step.intent is not None:
+    if step.finalized_draft is not None:
         outcome = st.session_state.orchestrator.prepare_formulation(step)
         _handle_outcome(outcome)
 

@@ -2,7 +2,24 @@ from __future__ import annotations
 
 import unittest
 
-from agentic.compiler import DEFAULT_PROFILE_VERSION, compile_intent
+from agentic.boundary_draft import (
+    BOUNDARY_FIELDS,
+    BoundaryConditionDraft,
+    BoundaryDraftState,
+    BoundaryFieldFact,
+)
+from agentic.compiler import (
+    DEFAULT_PROFILE_VERSION,
+    FormulationFinalizationError,
+    compile_formulation_draft,
+    compile_intent,
+)
+from agentic.formulation import (
+    DRAFT_PATHS,
+    DraftFact,
+    ProblemDraft,
+    assess_draft,
+)
 from agentic.intent import (
     ComplianceProblemIntent,
     MechanismProblemIntent,
@@ -32,7 +49,174 @@ def compliance_data(bounds=((0, 0), (10, 10))):
     }
 
 
+def _draft_fact(path, value, *, basis="explicit"):
+    return DraftFact(
+        path=path,
+        value=value,
+        basis=basis,
+        source_turn=1,
+        source_quote="fixture",
+        rationale="Package 4 fixture.",
+    )
+
+
+def _condition(bc_id, kind, fields, *, assumed_field=None):
+    return BoundaryConditionDraft(
+        bc_id=bc_id,
+        kind=kind,
+        created_turn=1,
+        facts=tuple(
+            BoundaryFieldFact(
+                field=field,
+                value=value,
+                basis="assumption" if field == assumed_field else "explicit",
+                source_turn=1,
+                source_quote=None if field == assumed_field else "fixture",
+                rationale="Package 4 fixture.",
+            )
+            for field, value in sorted(
+                fields.items(), key=lambda item: BOUNDARY_FIELDS.index(item[0])
+            )
+        ),
+    )
+
+
+def first_class_draft(*, load_kind="resultant_vector", assumed_field=None):
+    ordinary = {
+        "problem_type": "minimize_compliance",
+        "domain.bounds": [[0, 0], [10, 4]],
+        "material.young_modulus": 100,
+        "material.poisson_ratio": 0.3,
+        "units.length": "m",
+        "units.force": "N",
+        "units.stress": "Pa",
+        "volume_fraction": 0.4,
+        "mesh.divisions": [10, 4],
+    }
+    support = _condition(
+        "S4",
+        "support",
+        {
+            "support.kind": "fixed_all",
+            "selector.kind": "centered_width",
+            "selector.edge": "left",
+            "selector.center": 0.5,
+            "selector.width": 2.0,
+        },
+    )
+    load = _condition(
+        "L7",
+        "load",
+        {
+            "load.kind": load_kind,
+            "load.vector": [0, -100] if load_kind.startswith("resultant") else [0, -2],
+            "load.distribution": "uniform",
+            "selector.kind": "distance_from_corner",
+            "selector.edge": "right",
+            "selector.from_corner": "lower_right",
+            "selector.offset": 0.5,
+            "selector.length": 1.0,
+        },
+        assumed_field=assumed_field,
+    )
+    return ProblemDraft(
+        facts=tuple(
+            _draft_fact(path, ordinary[path])
+            for path in DRAFT_PATHS
+            if path in ordinary
+        ),
+        boundary_state=BoundaryDraftState(
+            conditions=(support, load),
+            next_support_number=5,
+            next_load_number=8,
+        ),
+        turn_count=1,
+    )
+
+
 class CompilerTests(unittest.TestCase):
+    def test_first_class_resultant_compiles_stable_ids_units_and_selectors(self):
+        draft = first_class_draft()
+        self.assertTrue(assess_draft(draft).ready)
+
+        result = compile_formulation_draft(draft)
+
+        self.assertEqual(result.config.units.kind, "explicit")
+        self.assertEqual(
+            [item.bc_id for item in result.config.fem.boundary_conditions],
+            ["S4", "L7"],
+        )
+        support, load = result.config.fem.boundary_conditions
+        self.assertEqual(
+            support.selector.interval.model_dump(mode="json"),
+            {"kind": "coordinate", "start": 1.0, "end": 3.0},
+        )
+        self.assertEqual(load.kind, "uniform_resultant")
+        self.assertEqual(load.resultant, (0.0, -100.0))
+        self.assertEqual(
+            load.selector.interval.model_dump(mode="json"),
+            {"kind": "coordinate", "start": 0.5, "end": 1.5},
+        )
+
+        validation = validate_config_tool({"config": result.config})
+        self.assertEqual(validation["status"], "ok", validation["errors"])
+        evidence = next(
+            item
+            for item in validation["geometry_report"]["entities"]
+            if item["bc_id"] == "L7"
+        )
+        self.assertEqual(evidence["quantity_kind"], "resultant")
+        self.assertAlmostEqual(evidence["integrated_resultant"][1], -100.0)
+
+    def test_first_class_traction_is_normalized_to_context_stress_unit(self):
+        draft = first_class_draft(load_kind="traction_vector")
+        load = draft.boundary_state.condition("L7")
+        facts = tuple(
+            fact.model_copy(update={"value": "kPa"})
+            if fact.field == "load.unit"
+            else fact
+            for fact in load.facts
+        )
+        if not any(fact.field == "load.unit" for fact in facts):
+            facts = tuple(sorted(
+                (
+                    *facts,
+                    BoundaryFieldFact(
+                        field="load.unit",
+                        value="kPa",
+                        basis="explicit",
+                        source_turn=1,
+                        source_quote="fixture",
+                        rationale="Package 4 fixture.",
+                    ),
+                ),
+                key=lambda fact: BOUNDARY_FIELDS.index(fact.field),
+            ))
+        conditions = (
+            draft.boundary_state.conditions[0],
+            load.model_copy(update={"facts": facts}),
+        )
+        draft = draft.model_copy(update={
+            "boundary_state": draft.boundary_state.model_copy(
+                update={"conditions": conditions}
+            )
+        })
+
+        result = compile_formulation_draft(draft)
+        compiled_load = result.config.fem.boundary_conditions[1]
+
+        self.assertEqual(compiled_load.kind, "uniform_traction")
+        self.assertEqual(compiled_load.traction, (0.0, -2000.0))
+
+    def test_unconfirmed_first_class_bc_cannot_cross_finalization(self):
+        with self.assertRaisesRegex(
+            FormulationFinalizationError,
+            "not complete and confirmed",
+        ):
+            compile_formulation_draft(
+                first_class_draft(assumed_field="selector.length")
+            )
+
     def test_square_domain_defaults_to_50_by_50(self):
         result = compile_intent(
             ComplianceProblemIntent.model_validate(compliance_data())

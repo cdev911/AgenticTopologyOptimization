@@ -7,9 +7,13 @@ from typing import Annotated, Callable, Literal, Protocol, Sequence, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from agentic.compiler import CompilationResult, compile_intent
+from agentic.compiler import (
+    CompilationResult,
+    compile_formulation_draft,
+    compile_intent,
+)
 from agentic.explainer import ExplanationResult
-from agentic.formulation import FormulationSession, FormulationStep
+from agentic.formulation import FormulationSession, FormulationStep, ProblemDraft
 from agentic.intent import (
     InterpretationResult,
     ProblemIntent,
@@ -38,6 +42,10 @@ class Interpreter(Protocol):
 
 class Compiler(Protocol):
     def __call__(self, intent: ProblemIntent) -> CompilationResult: ...
+
+
+class FormulationCompiler(Protocol):
+    def __call__(self, draft: ProblemDraft) -> CompilationResult: ...
 
 
 class Validator(Protocol):
@@ -271,6 +279,7 @@ class DeterministicOrchestrator:
         interpreter: Interpreter | None = None,
         *,
         compiler: Compiler = compile_intent,
+        formulation_compiler: FormulationCompiler = compile_formulation_draft,
         validator: Validator = validate_config_tool,
         runner: Runner = run_topopt_tool,
         analyzer: Analyzer = analyze_results_tool,
@@ -279,6 +288,7 @@ class DeterministicOrchestrator:
     ):
         self._interpreter = interpreter
         self._compiler = compiler
+        self._formulation_compiler = formulation_compiler
         self._validator = validator
         self._runner = runner
         self._analyzer = analyzer
@@ -294,7 +304,10 @@ class DeterministicOrchestrator:
         step: FormulationStep,
     ) -> AwaitingRunApproval | ValidationFailedWorkflow:
         """Compile and validate only a deterministically ready formulation step."""
-        if step.session.status != "ready_for_review" or step.intent is None:
+        if (
+            step.session.status != "ready_for_review"
+            or step.finalized_draft is None
+        ):
             raise ValueError(
                 "Only a deterministically ready formulation can be prepared."
             )
@@ -306,10 +319,11 @@ class DeterministicOrchestrator:
             events,
             "formulated",
             "The conversational draft passed deterministic readiness and "
-            "strict intent validation.",
+            "typed formulation finalization.",
         )
-        return self._compile_and_validate(
-            step.intent,
+        compilation = self._formulation_compiler(step.finalized_draft)
+        return self._validate_compilation(
+            compilation,
             conversation=conversation,
             events=events,
         )
@@ -623,6 +637,19 @@ class DeterministicOrchestrator:
         events: list[WorkflowEvent],
     ) -> AwaitingRunApproval | ValidationFailedWorkflow:
         compilation = self._compiler(intent)
+        return self._validate_compilation(
+            compilation,
+            conversation=conversation,
+            events=events,
+        )
+
+    def _validate_compilation(
+        self,
+        compilation: CompilationResult,
+        *,
+        conversation: ConversationContext,
+        events: list[WorkflowEvent],
+    ) -> AwaitingRunApproval | ValidationFailedWorkflow:
         self._emit(events, "defaults_applied", compilation.defaults_notice)
 
         request = ValidateConfigRequest(config=compilation.config)

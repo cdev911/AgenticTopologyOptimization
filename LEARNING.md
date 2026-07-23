@@ -618,11 +618,11 @@ That distinction emerged while implementing readiness: “the centered 10%” an
 without losing dimensional meaning. Corpus-first development forced this issue
 to surface before unit conversion or mesh selection was implemented.
 
-Finally, migration is explicit and non-destructive. Existing `supports`,
-`support_edges`, and `tractions` can be copied into first-class BC state with
-their provenance, but current finalization still reads the legacy facts. Running
-both representations side by side for this checkpoint gives us tests for the new
-state without silently changing live or numerical behavior.
+At the Package 1 checkpoint, migration was explicit and non-destructive.
+Existing `supports`, `support_edges`, and `tractions` could be copied into
+first-class BC state with their provenance, while finalization still read the
+legacy facts. Running both representations side by side at that checkpoint gave
+us tests for the new state without silently changing live or numerical behavior.
 
 Package 2 made the distinction between unit syntax and physical meaning concrete.
 A library can prove that `kN` is a force and `MPa` is a stress, but it cannot
@@ -693,6 +693,43 @@ the strict `<0.5` range and added a visible warning from `0.49`, including the
 Lamé ratio, instead of silently rejecting the user's material or silently
 presenting a potentially over-stiff result.
 
+Package 4 exposed a less obvious migration trap: the old strict `ProblemIntent`
+cannot honestly represent the new finalization surface. A finite support segment
+does not fit its whole-region support abstraction, and a total resultant is
+explicitly not a traction. We considered reusing the legacy compiler with a
+temporary placeholder intent and replacing its BCs afterward. That would have
+produced the right final JSON in simple cases, but the intermediate audit object
+would state physics the user never requested. Instead, compilation now starts
+from a BC-independent typed problem definition and combines it with a separately
+finalized first-class BC list.
+
+Compatibility still belongs at a named boundary. Existing live prompts continue
+to emit legacy support/traction lists until the prompt package changes. When a
+draft has no first-class BC state, finalization migrates those lists once and
+then compiles the resulting stable entities. When first-class state exists, it is
+authoritative; stale list facts cannot overwrite a correction to `L1` or `S1`.
+This lets us ship and test the new deterministic authority before asking a model
+to produce it.
+
+Selector arithmetic also belongs in finalization, not in the model response.
+Centered fractions stay fractional, while centered physical widths and
+corner-offset lengths become coordinate intervals only after domain bounds are
+known. Finalization checks that a corner really lies on the named edge and that
+the resulting positive interval stays inside it. The mesh resolver then performs
+the distinct second mapping from continuous interval to actual facets. Keeping
+those two transformations separate preserves both requested and realized
+geometry.
+
+Approval became an evidence join keyed by stable BC ID. A config alone can show
+what was requested, but it cannot show which facets will carry the load. A
+geometry report alone can show selected facets, but without the config it loses
+the original selector and quantity semantics. The approval renderer now requires
+both successful objects, pairs them by ID, and fails closed if evidence is
+missing. For a resultant it shows the original force, effective traction, and
+reintegrated force together. This is a stronger review boundary than displaying
+a serialized input list, and it leaves the later explicit “yes” transition
+unchanged.
+
 ## 17. How we will continue learning
 
 We will use these rules for the remaining work:
@@ -755,5 +792,9 @@ This condensed trail connects the lessons above to the implementation order:
   1.1 migration, one validation/FEM facet resolver, enriched boundary evidence,
   verified resultant conversion, near-incompressibility warnings, and a
   traction/resultant numerical-equivalence gate.
-- **Next** — compile only complete confirmed first-class BCs into the 2.0 tool
-  contract and expose their evidence at approval.
+- **2026-07-27** — made complete confirmed first-class BCs authoritative at
+  finalization, compiled semantic selectors and explicit-unit
+  traction/resultants directly into schema 2.0, migrated legacy live facts once,
+  and joined requested/resolved boundary evidence in the unchanged approval gate.
+- **Next** — teach the live Responses prompt and compact adapter to create,
+  refine, and confirm first-class BC patches directly.

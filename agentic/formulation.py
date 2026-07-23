@@ -28,6 +28,7 @@ from agentic.boundary_draft import (
     BoundaryMergeResult,
     BoundaryPatch,
     BoundaryRevision,
+    assess_boundary_state,
     canonical_boundary_value,
     merge_boundary_patch,
 )
@@ -291,7 +292,7 @@ class DraftMergeResult(StrictFormulationModel):
 class DraftReadiness(StrictFormulationModel):
     ready: bool
     missing_fields: tuple[str, ...]
-    unconfirmed_fields: tuple[DraftPath, ...]
+    unconfirmed_fields: tuple[str, ...]
     semantic_errors: tuple[str, ...]
 
 
@@ -378,6 +379,7 @@ class FormulationStep(StrictFormulationModel):
     merge: DraftMergeResult
     readiness: DraftReadiness
     intent: ProblemIntent | None = None
+    finalized_draft: ProblemDraft | None = None
 
 
 class FormulationAgent(Protocol):
@@ -984,7 +986,27 @@ def assess_draft(draft: ProblemDraft) -> DraftReadiness:
     bounds, semantic_errors = _resolved_bounds(values)
     if bounds is None:
         missing.append("domain.bounds")
-    if "supports" not in values and "support_edges" not in values:
+    first_class = bool(draft.boundary_state.conditions)
+    if first_class:
+        boundary_readiness = assess_boundary_state(draft.boundary_state)
+        if not any(
+            item.kind == "support"
+            for item in draft.boundary_state.conditions
+        ):
+            missing.append("supports")
+        for condition in boundary_readiness.conditions:
+            missing.extend(
+                f"{condition.bc_id}.{field}"
+                for field in condition.missing_fields
+            )
+            semantic_errors.extend(
+                f"{condition.bc_id}: {message}"
+                for message in (
+                    *condition.semantic_errors,
+                    *condition.capability_limits,
+                )
+            )
+    elif "supports" not in values and "support_edges" not in values:
         missing.append("supports")
 
     problem_type = values.get("problem_type")
@@ -994,21 +1016,52 @@ def assess_draft(draft: ProblemDraft) -> DraftReadiness:
         )
 
     tractions = values.get("tractions", [])
+    boundary_loads = [
+        item
+        for item in draft.boundary_state.conditions
+        if item.kind == "load"
+    ]
     body_force = values.get("body_force", [0.0, 0.0])
     has_body_force = bool(
         isinstance(body_force, list)
         and len(body_force) == 2
         and any(float(component) != 0.0 for component in body_force)
     )
-    if not tractions and not has_body_force:
+    if not tractions and not boundary_loads and not has_body_force:
         missing.append("external_load")
 
-    unconfirmed = tuple(
+    unconfirmed = [
         fact.path for fact in draft.facts if fact.basis == "assumption"
-    )
+    ]
+    if first_class:
+        unconfirmed.extend(
+            f"{condition.bc_id}.{fact.field}"
+            for condition in draft.boundary_state.conditions
+            for fact in condition.facts
+            if fact.basis == "assumption"
+        )
+        if boundary_loads:
+            unit_readiness = assess_mechanical_units(draft)
+            missing.extend(unit_readiness.missing_fields)
+            unconfirmed.extend(unit_readiness.unconfirmed_fields)
+            semantic_errors.extend(unit_readiness.semantic_errors)
+            if unit_readiness.context is not None:
+                load_state = resolve_boundary_load_state(
+                    draft.boundary_state,
+                    unit_readiness.context,
+                )
+                for condition, resolution in zip(
+                    boundary_loads,
+                    load_state.loads,
+                    strict=True,
+                ):
+                    semantic_errors.extend(
+                        f"{condition.bc_id}.{issue.field}: {issue.message}"
+                        for issue in resolution.issues
+                    )
     _, mesh_errors = _resolved_mesh_divisions(values, bounds)
     semantic_errors.extend(mesh_errors)
-    if not missing and not unconfirmed:
+    if not first_class and not missing and not unconfirmed:
         try:
             _PROBLEM_ADAPTER.validate_python(
                 _intent_payload(draft, bounds=bounds)
@@ -1018,8 +1071,8 @@ def assess_draft(draft: ProblemDraft) -> DraftReadiness:
 
     return DraftReadiness(
         ready=not missing and not unconfirmed and not semantic_errors,
-        missing_fields=tuple(missing),
-        unconfirmed_fields=unconfirmed,
+        missing_fields=tuple(dict.fromkeys(missing)),
+        unconfirmed_fields=tuple(dict.fromkeys(unconfirmed)),
         semantic_errors=tuple(semantic_errors),
     )
 
@@ -1097,13 +1150,16 @@ class ConversationFormulator:
         readiness = assess_draft(merge.draft)
 
         intent = None
+        finalized_draft = None
         if merge.issues:
             status: SessionStatus = "repair_needed"
         elif turn.declared_state == "unsupported":
             status = "unsupported"
         elif readiness.ready:
             status = "ready_for_review"
-            intent = finalize_draft(merge.draft)
+            finalized_draft = merge.draft
+            if not merge.draft.boundary_state.conditions:
+                intent = finalize_draft(merge.draft)
         else:
             status = "gathering"
 
@@ -1134,4 +1190,5 @@ class ConversationFormulator:
             merge=merge,
             readiness=readiness,
             intent=intent,
+            finalized_draft=finalized_draft,
         )

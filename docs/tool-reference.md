@@ -93,7 +93,34 @@ validates it, allocates `S1…`/`L1…` in list order, wraps its regions as
 labels remain intentionally unspecified, so migration preserves existing
 traction behavior but cannot represent a total resultant.
 
-### 2.2 Shared facet resolution and total-force formula
+### 2.2 Conversational finalization into schema 2.0
+
+The application compiler has two typed front doors. Retained v1
+`ProblemIntent` inputs compile through the compatibility path. A ready
+conversational `ProblemDraft` compiles through the first-class path:
+
+1. validate ordinary domain, material, optimization, and mechanism facts;
+2. reject every incomplete, unsupported, or unconfirmed BC entity;
+3. require complete confirmed length/force/stress units for native boundary
+   loads;
+4. normalize traction inputs to the configured stress unit while retaining
+   total resultants as force vectors;
+5. convert semantic rectangle selectors into positive fraction or coordinate
+   intervals inside the named edge; and
+6. emit the original stable `S…`/`L…` IDs in canonical schema 2.0.
+
+Supported conversions are whole edge, centered fraction, fraction interval,
+coordinate interval, physical width about a fractional center, physical
+length/offset from a corner on the named edge, and expert region. Boundary
+points, unspecified extents, invalid corner/edge pairs, and intervals outside
+the edge fail before tool validation.
+
+During the staged adapter migration, a draft with no first-class BC state copies
+legacy support/traction facts into first-class entities exactly once at this
+boundary and uses `legacy_consistent` units. If first-class state exists, it is
+authoritative; stale legacy lists do not overwrite it.
+
+### 2.3 Shared facet resolution and total-force formula
 
 Validation and FEM execution call the same mesh resolver. For a rectangle-edge
 selector it orders actual edge facets, selects the contiguous facets whose
@@ -121,6 +148,18 @@ integrates the effective traction over the same resolved measure and thickness
 and reports the reconstructed resultant. Execution repeats the same conversion
 through the shared resolver and fails if that round trip is not numerically
 consistent.
+
+### 2.4 Approval evidence
+
+The approval renderer accepts only an `ok` validation response with a geometry
+report. For every stable BC ID it pairs the requested canonical selector with the
+mesh-resolved facet count, extent, measure, centroid, outward normal, and any
+resolution warning. Load rows additionally show quantity kind, input vector,
+effective traction, integrated resultant, explicit unit labels, and the
+one-length-unit thickness when available. Missing per-BC evidence fails closed.
+This presentation does not authorize execution; only the separate
+application-owned approval transition created by an unambiguous user green light
+does so.
 
 ## 3. Tool sequence and result envelopes
 

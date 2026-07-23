@@ -57,7 +57,7 @@ flowchart LR
     I -->|capability limit| X[Explain and negotiate reformulation]
     I -->|typed patch| S[Deterministic draft merge and readiness]
     S -->|not ready| C
-    S -->|strict ready intent| D[Deterministic compiler]
+    S -->|typed finalized draft| D[Deterministic compiler]
     D --> V[Validate config]
     V --> Q[User approval gate]
     Q -->|request changes| I
@@ -77,7 +77,7 @@ configuration or run manifest between stages.
 The workflow passes exact Pydantic objects through deterministic state machines:
 
 ```text
-formulate ↔ gather/repair/reformulate → finalize strict intent
+formulate ↔ gather/repair/reformulate → finalize typed problem and BC state
           → compile → validate → await approval → run → analyze → explain
 ```
 
@@ -101,7 +101,8 @@ numerical and side-effect authority testable.
 The live formulator returns a small schema-validated patch on each turn. It may
 interpret ordinary language, notice conflicts, propose visible assumptions, and
 ask focused questions. Deterministic code validates provenance and values, owns
-the canonical draft, and alone decides whether it can become a strict intent.
+the canonical draft, and alone decides whether it can cross the typed
+finalization boundary.
 
 The retained v1 interpreter returns exactly one schema-validated outcome:
 
@@ -149,10 +150,11 @@ without weakening the solver boundary:
   records corrections, gives rejected patches back to the model for one bounded
   repair attempt, identifies missing or unconfirmed facts, and alone decides
   whether the draft is ready.
-- Assumptions remain visible and cannot cross into strict `ProblemIntent` until the
-  user confirms them.
-- The final draft conversion reuses the existing strict intent, compiler,
-  validation, and approval path.
+- Assumptions remain visible and cannot cross typed finalization until the user
+  confirms them.
+- The finalized draft enters a deterministic compiler that validates ordinary
+  problem facts separately from complete, confirmed first-class BC entities,
+  then reuses the existing validation and approval path.
 - `OpenAIResponsesFormulationAgent` uses strict Pydantic output, medium reasoning,
   `previous_response_id`, and persisted all-turn reasoning. The canonical draft
   is included on every call, and an expired continuation triggers exactly one
@@ -371,11 +373,9 @@ docker compose run --rm -T fenitop \
   pytest -q tests/agentic/test_bc_evaluation.py
 ```
 
-The provider-independent Package 1 core now also stores partial BC entities with
+The provider-independent Package 1 core stores partial BC entities with
 stable application-owned IDs, field-level provenance, revisions, pending
-confirmations, and typed create/update/delete/confirm patches. The current live
-OpenAI transport and solver finalization still use legacy BC facts until later
-work packages connect and validate the new path deliberately.
+confirmations, and typed create/update/delete/confirm patches.
 
 The Package 2 core adds provenance-bearing `units.length`, `units.force`, and
 `units.stress` draft facts plus Docker-pinned dimensional normalization. It
@@ -384,7 +384,7 @@ directions, converts pressure and traction magnitudes to global traction vectors
 and keeps total resultants as forces. A resultant is explicitly marked deferred:
 it cannot become a traction until the Package 3 mesh resolver supplies the actual
 loaded-boundary measure. This core is deterministic and tested, but is not yet
-the live OpenAI/finalization path.
+the live OpenAI extraction path.
 
 Package 3 upgrades the prepared tool boundary to canonical
 `AgentSafeConfig 2.0` and tool contract `5.0.0`. Stable `S…`/`L…` boundary
@@ -393,8 +393,18 @@ uniform effective traction from uniform total resultant. One shared mesh resolve
 is used by both validation and FEM execution; its evidence includes requested and
 resolved extents, facet count, measure, centroid, normal, resolution error, and
 load conversion. Legacy 1.1 inputs are still accepted through deterministic
-migration, while successful validation returns canonical 2.0. This tool behavior
-is ready, but first-class conversational finalization remains Package 4.
+migration, while successful validation returns canonical 2.0.
+
+Package 4 makes complete, confirmed first-class BC entities authoritative at the
+formulation/compiler boundary. It deterministically converts fraction,
+coordinate, physical-width, and corner-offset selectors; normalizes explicit-unit
+tractions or preserves total resultants; and keeps stable `S…`/`L…` IDs in schema
+2.0. Legacy live conversations cross through one explicit migration at this
+boundary. Approval now fails closed without successful mesh evidence and shows
+requested selectors beside resolved facets, extents, measures, normals, load
+conversions, integrated resultants, units, thickness, and warnings. The separate
+user green-light transition is unchanged. Package 5 will teach the live OpenAI
+adapter to populate the first-class BC patch directly.
 
 ## Supported natural-language scope
 
@@ -420,8 +430,9 @@ This demo intentionally does not support:
 - 3D or non-rectangular geometry in the agent-safe workflow;
 - plane stress, nonlinear, dynamic, thermal, or multi-material physics;
 - roller/component-wise supports or nonzero prescribed displacement;
-- point loads, or total-force semantics through the current live conversational
-  finalizer (the lower-level 2.0 tool contract now supports a uniform resultant);
+- point loads, or total-force extraction through the current live OpenAI adapter
+  (first-class finalization and the 2.0 tool contract support a uniform
+  resultant);
 - user-provided code/lambdas in serialized regions;
 - parallel/MPI execution through `run_topopt`;
 - multiple simultaneous solves; or
@@ -473,7 +484,7 @@ docker compose run --rm -T fenitop python -m pip check
 docker compose run --rm -T fenitop pytest -q
 ```
 
-Current checkpoint: **266 tests plus 194 subtests pass**. The suite
+Current checkpoint: **271 tests plus 194 subtests pass**. The suite
 includes schema and adversarial-input tests, real compliance/mechanism baselines,
 finite-difference sensitivities, geometry validation, resource calibration,
 process timeout/cancellation/crash behavior, secret scrubbing, path and

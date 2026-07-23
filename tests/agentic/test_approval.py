@@ -65,8 +65,30 @@ class ApprovalTests(unittest.TestCase):
         self.assertIn("Mesh: 79 × 32", message)
         self.assertIn("Material: E=100", message)
         self.assertIn("Material fraction: 0.4", message)
+        self.assertIn(
+            "Boundary conditions (requested → mesh-resolved)",
+            message,
+        )
+        self.assertIn("S1 `fixed`: full-vector zero clamp", message)
+        self.assertIn("L1 `uniform_traction`: traction input=", message)
+        self.assertIn("requested selector=", message)
+        self.assertIn("resolved facets=32", message)
+        self.assertIn("integrated resultant=", message)
         self.assertIn("Do you approve these parameters", message)
         self.assertIn("Reply **yes** to start", message)
+
+    def test_approval_fails_closed_without_successful_geometry_evidence(self):
+        compilation = _compilation()
+        validation = ValidateConfigResponse.model_validate(
+            {
+                **validate_config_tool({"config": compilation.config}),
+                "status": "error",
+                "geometry_report": None,
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "successful mesh validation"):
+            format_run_approval_request(compilation, validation)
 
 
 if __name__ == "__main__":
