@@ -58,15 +58,26 @@ def format_run_approval_request(
     bounds = config.mesh.bounds
     divisions = config.mesh.divisions
     supports = [
-        item.marker.model_dump(mode="json")
-        for item in config.fem.dirichlet_bcs
+        {
+            "bc_id": item.bc_id,
+            "selector": item.selector.model_dump(mode="json"),
+        }
+        for item in config.fem.boundary_conditions
+        if item.kind == "fixed"
     ]
     tractions = [
         {
-            "region": item.locator.model_dump(mode="json"),
-            "vector": list(item.value),
+            "bc_id": item.bc_id,
+            "kind": item.kind,
+            "selector": item.selector.model_dump(mode="json"),
+            "vector": list(
+                item.traction
+                if item.kind == "uniform_traction"
+                else item.resultant
+            ),
         }
-        for item in config.fem.traction_bcs
+        for item in config.fem.boundary_conditions
+        if item.kind != "fixed"
     ]
     estimated = validation.estimated_cost
     cost_line = (

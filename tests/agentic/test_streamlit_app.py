@@ -475,7 +475,7 @@ class StreamlitAppTests(unittest.TestCase):
             compliance.write_bytes(png)
             analysis = AnalyzeResultsResponse.model_validate(
                 {
-                    "contract_version": "4.0.0",
+                    "contract_version": "5.0.0",
                     "tool": "analyze_results",
                     "status": "ok",
                     "warnings": [],

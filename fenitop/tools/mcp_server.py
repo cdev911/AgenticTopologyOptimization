@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
-from fenitop.tools.config_models import AgentSafeConfig
+from fenitop.tools.config_models import AgentSafeConfigInput
 from fenitop.tools.contracts import (
     AnalyzeResultsRequest,
     AnalyzeResultsResponse,
@@ -32,7 +32,7 @@ mcp = FastMCP("fenitop")
 
 
 @mcp.tool()
-def validate_config(config: AgentSafeConfig) -> ValidateConfigResponse:
+def validate_config(config: AgentSafeConfigInput) -> ValidateConfigResponse:
     """Pedantically validate a fenitop topology-optimization JSON config before running it.
 
     Runs structural checks (mesh/material/optimizer parameters, physical
@@ -51,7 +51,7 @@ def validate_config(config: AgentSafeConfig) -> ValidateConfigResponse:
 
 
 @mcp.tool()
-def run_topopt(config: AgentSafeConfig) -> RunTopoptResponse:
+def run_topopt(config: AgentSafeConfigInput) -> RunTopoptResponse:
     """Run a fenitop topology optimization from a config.
 
     Supports 2D "minimize compliance" and "compliant mechanism" problems.

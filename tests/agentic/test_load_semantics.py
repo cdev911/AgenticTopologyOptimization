@@ -29,6 +29,7 @@ from agentic.mechanical_units import (
     MechanicalUnitContext,
     normalize_scalar,
     normalize_vector,
+    resultant_to_traction,
 )
 
 
@@ -115,6 +116,20 @@ class MechanicalUnitTests(unittest.TestCase):
     def test_normalization_rejects_dimension_mismatch(self):
         with self.assertRaisesRegex(ValueError, "not a stress unit"):
             normalize_scalar(10, "N", "stress", self.context)
+
+    def test_resultant_conversion_respects_unit_scale_and_round_trips(self):
+        context = MechanicalUnitContext(
+            length_unit="cm",
+            force_unit="kN",
+            stress_unit="MPa",
+        )
+        traction, integrated = resultant_to_traction(
+            (0, -1),
+            boundary_measure=1,
+            context=context,
+        )
+        self.assertEqual(traction, (0.0, -10.0))
+        self.assertEqual(integrated, (0.0, -1.0))
 
 
 class MechanicalUnitDraftTests(unittest.TestCase):

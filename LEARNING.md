@@ -654,6 +654,45 @@ the one-length-unit thickness. Package 2 therefore marks it semantically ready
 but execution-deferred. Package 3 must provide the mesh-resolved measure and
 verify the integrated force before execution can become ready.
 
+Package 3 showed that “use the same selector” is stronger than “write the same
+selection logic twice.” Validation previously compiled a region and located
+facets in the tool layer, while FEM independently located them again. Even when
+both implementations looked equivalent, there was no structural guarantee that a
+future tolerance or discretization fix would reach both. The shared resolver now
+returns the exact facet indices and the evidence derived from them; validation
+and execution both call that one policy.
+
+Continuous intent and discrete realization must remain separate. A requested
+edge interval can be narrower than one facet and contain no facet midpoint. The
+old behavior rejected the load as matching zero facets, even though the user had
+described a valid positive segment. The new policy chooses the one closest facet
+and reports both extents plus the resolution error. This is not pretending the
+mesh exactly represents the request: the warning and evidence make the
+approximation reviewable before approval.
+
+Versioning also required separating compatibility from canonical meaning.
+Existing 1.1 configs contain unlabeled “consistent user units” and expert-region
+tractions. Inventing N, mm, and MPa during migration would create false physical
+facts. The migration therefore preserves an explicit `legacy_consistent`
+sentinel, assigns stable IDs in list order, and wraps old regions without changing
+their numerical meaning. Canonical 2.0 can express explicit mechanical units and
+total resultants, but a migrated unlabeled config cannot use resultant conversion.
+
+The resultant numerical gate compares two actual solves: one driven by an
+effective traction and one by the equivalent total force over the same resolved
+segment. Matching objective, compliance, and volume demonstrates more than a
+unit-function test—it verifies that schema, migration, resolver, compiler, FEM
+measure, and solver assembly agree end to end. The geometry report independently
+reintegrates the effective traction to the requested force, giving a second,
+cheaper check before execution.
+
+Finally, mathematical validity is not numerical reassurance. A Poisson ratio just
+below `0.5` is legal for the constitutive model, but low-order displacement
+elements in plane strain may lock as incompressibility is approached. We retained
+the strict `<0.5` range and added a visible warning from `0.49`, including the
+Lamé ratio, instead of silently rejecting the user's material or silently
+presenting a potentially over-stiff result.
+
 ## 17. How we will continue learning
 
 We will use these rules for the remaining work:
@@ -712,4 +751,9 @@ This condensed trail connects the lessons above to the implementation order:
   unit facts, retained display/normalized quantities, deterministic
   direction/pressure resolution, and explicit traction versus deferred-resultant
   state without switching the live finalizer.
-- **Next** — implement the shared mesh boundary resolver and evidence contract.
+- **2026-07-27** — versioned the safe config/tool contracts, added deterministic
+  1.1 migration, one validation/FEM facet resolver, enriched boundary evidence,
+  verified resultant conversion, near-incompressibility warnings, and a
+  traction/resultant numerical-equivalence gate.
+- **Next** — compile only complete confirmed first-class BCs into the 2.0 tool
+  contract and expose their evidence at approval.

@@ -20,6 +20,8 @@ def _materialize(value):
     if is_region_spec(value):
         return compile_region(value)
     if isinstance(value, dict):
+        if value.get("kind") in {"rectangle_edge", "expert_region"}:
+            return value
         return {key: _materialize(item) for key, item in value.items()}
     return value
 
@@ -86,6 +88,13 @@ def normalize_boundary_conditions(fem_config: Dict[str, Any], dim: int = 2):
         if isinstance(entry, dict):
             marker = entry.get("marker", entry.get("locator", legacy_disp_bc))
             value = entry.get("value", [0.0] * dim)
+            if "selector" in entry:
+                dirichlet_bcs.append({
+                    "bc_id": entry.get("bc_id"),
+                    "selector": entry["selector"],
+                    "value": value,
+                })
+                continue
         elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
             marker = entry[0]
             value = entry[1]
@@ -102,6 +111,14 @@ def normalize_boundary_conditions(fem_config: Dict[str, Any], dim: int = 2):
         if isinstance(entry, dict):
             value = entry.get("value", [0.0] * dim)
             locator = entry.get("locator", entry.get("marker", lambda x: False))
+            if "selector" in entry:
+                traction_bcs.append({
+                    "bc_id": entry.get("bc_id"),
+                    "quantity_kind": entry.get("quantity_kind", "traction"),
+                    "value": value,
+                    "selector": entry["selector"],
+                })
+                continue
         elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
             value, locator = entry[0], entry[1]
         else:
@@ -184,6 +201,9 @@ def build_fem_opt(config: Dict[str, Any], comm=None):
         "mesh_serial": mesh_serial,
         "young's modulus": fem_config.get("young's modulus", 100),
         "poisson's ratio": fem_config.get("poisson's ratio", 0.25),
+        "unit_context": fem_config.get(
+            "unit_context", {"kind": "legacy_consistent"}
+        ),
         "disp_bc": fem_config.get("disp_bc", lambda x: np.isclose(x[0], 0)),
         "dirichlet_bcs": dirichlet_bcs,
         "traction_bcs": traction_bcs,

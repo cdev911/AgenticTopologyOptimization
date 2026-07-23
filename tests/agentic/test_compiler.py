@@ -100,36 +100,36 @@ class CompilerTests(unittest.TestCase):
         ]
 
         result = compile_intent(ComplianceProblemIntent.model_validate(data))
-        locator = result.config.fem.traction_bcs[0].locator.model_dump(mode="json")
+        load = next(
+            bc
+            for bc in result.config.fem.boundary_conditions
+            if bc.kind == "uniform_traction"
+        )
+        selector = load.selector.model_dump(mode="json")
 
-        self.assertEqual(locator["op"], "and")
+        self.assertEqual(selector["kind"], "rectangle_edge")
         self.assertEqual(
-            locator["regions"],
-            [
-                {
-                    "op": "plane",
-                    "axis": "x",
-                    "value": 10,
-                    "tol": 1e-8,
+            selector,
+            {
+                "kind": "rectangle_edge",
+                "edge": "right",
+                "interval": {
+                    "kind": "fraction",
+                    "start": 0.45,
+                    "end": 0.55,
                 },
-                {
-                    "op": "range",
-                    "axis": "y",
-                    "min": 2.25,
-                    "max": 2.75,
-                    "min_inclusive": True,
-                    "max_inclusive": True,
-                },
-            ],
+            },
         )
         validation = validate_config_tool({"config": result.config})
         self.assertEqual(validation["status"], "ok", validation["errors"])
         traction_record = next(
             item
             for item in validation["geometry_report"]["entities"]
-            if item["path"] == "config.fem.traction_bcs[0].locator"
+            if item["bc_id"] == "L1"
         )
         self.assertGreater(traction_record["count"], 0)
+        self.assertEqual(traction_record["requested_extent"], [2.25, 2.75])
+        self.assertEqual(traction_record["outward_normal"], [1.0, 0.0])
 
     def test_whole_edge_segment_compiles_to_full_boundary(self):
         data = compliance_data(bounds=((0, 0), (10, 4)))
@@ -152,7 +152,7 @@ class CompilerTests(unittest.TestCase):
         traction_record = next(
             item
             for item in validation["geometry_report"]["entities"]
-            if item["path"] == "config.fem.traction_bcs[0].locator"
+            if item["bc_id"] == "L1"
         )
         self.assertEqual(
             traction_record["count"],

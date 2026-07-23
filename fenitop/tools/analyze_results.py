@@ -229,14 +229,50 @@ def _grid_region_connectivity(
         labels = sorted({int(value) for value in labeled[near] if value > 0})
         return matched, labels
 
+    def labels_near_selector(selector) -> tuple[int, list[int]]:
+        if selector["kind"] == "expert_region":
+            return labels_near(selector["region"])
+        (x0, y0), (x1, y1) = config["mesh"]["bounds"]
+        edge = selector["edge"]
+        interval = selector["interval"]
+        low, high = (
+            (y0, y1) if edge in {"left", "right"} else (x0, x1)
+        )
+        start, end = float(interval["start"]), float(interval["end"])
+        if interval["kind"] == "fraction":
+            start, end = (
+                low + start * (high - low),
+                low + end * (high - low),
+            )
+        if edge in {"left", "right"}:
+            edge_value = x0 if edge == "left" else x1
+            normal = np.abs(X - edge_value) <= 0.51 * x_spacing
+            along = (Y >= start) & (Y <= end)
+        else:
+            edge_value = y0 if edge == "bottom" else y1
+            normal = np.abs(Y - edge_value) <= 0.51 * y_spacing
+            along = (X >= start) & (X <= end)
+        mask = normal & along
+        matched = int(mask.sum())
+        if not matched:
+            return 0, []
+        near = binary_dilation(mask, iterations=dilation_cells)
+        labels = sorted({int(value) for value in labeled[near] if value > 0})
+        return matched, labels
+
     support_labels: set[int] = set()
-    for boundary in config["fem"]["dirichlet_bcs"]:
-        _, labels = labels_near(boundary["marker"])
+    boundaries = config["fem"]["boundary_conditions"]
+    for boundary in boundaries:
+        if boundary["kind"] != "fixed":
+            continue
+        _, labels = labels_near_selector(boundary["selector"])
         support_labels.update(labels)
 
     regions: list[tuple[str, int, dict[str, Any]]] = [
-        ("traction", index, boundary["locator"])
-        for index, boundary in enumerate(config["fem"]["traction_bcs"])
+        ("traction", index, boundary["selector"])
+        for index, boundary in enumerate(
+            bc for bc in boundaries if bc["kind"] != "fixed"
+        )
     ]
     if config["opt"]["problem_type"] == "compliant_mechanism":
         regions.extend([
@@ -247,7 +283,11 @@ def _grid_region_connectivity(
     records: list[dict[str, Any]] = []
     determinate: list[bool] = []
     for kind, index, spec in regions:
-        matched, nearby = labels_near(spec)
+        matched, nearby = (
+            labels_near(spec)
+            if kind == "spring"
+            else labels_near_selector(spec)
+        )
         connected = None if matched == 0 else bool(support_labels.intersection(nearby))
         if connected is not None:
             determinate.append(connected)
