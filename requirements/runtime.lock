@@ -112,6 +112,10 @@ filelock==3.32.0
     # via huggingface-hub
 flatbuffers==25.12.19
     # via onnxruntime
+flexcache==0.3
+    # via pint
+flexparser==0.4
+    # via pint
 fonttools==4.63.0
     # via matplotlib
 frozenlist==1.8.0
@@ -325,8 +329,11 @@ pillow==12.2.0
     #   pdfplumber
     #   pyvista
     #   streamlit
+pint==0.25.3
+    # via fenitop (pyproject.toml)
 platformdirs==4.11.0
     # via
+    #   pint
     #   pooch
     #   textual
 pooch==1.9.0
@@ -523,6 +530,8 @@ typing-extensions==4.16.0
     #   altair
     #   anyio
     #   chromadb
+    #   flexcache
+    #   flexparser
     #   grpcio
     #   huggingface-hub
     #   lance-namespace-urllib3-client
@@ -533,6 +542,7 @@ typing-extensions==4.16.0
     #   opentelemetry-exporter-otlp-proto-http
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
+    #   pint
     #   pydantic
     #   pydantic-core
     #   pyvista

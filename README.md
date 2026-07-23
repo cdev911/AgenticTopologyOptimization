@@ -157,7 +157,7 @@ without weakening the solver boundary:
   `previous_response_id`, and persisted all-turn reasoning. The canonical draft
   is included on every call, and an expired continuation triggers exactly one
   full-history recovery; generic provider retries remain disabled.
-- The strict API transport is 2,729 characters versus 235,234 for the v1 one-shot
+- The strict API transport is 2,823 characters versus 235,234 for the v1 one-shot
   schema. Arbitrary field values travel as compact JSON strings and are decoded
   immediately through the existing deterministic field validators.
 - Streamlit stores the typed `FormulationSession` across reruns and shows accepted
@@ -377,6 +377,15 @@ confirmations, and typed create/update/delete/confirm patches. The current live
 OpenAI transport and solver finalization still use legacy BC facts until later
 work packages connect and validate the new path deliberately.
 
+The Package 2 core adds provenance-bearing `units.length`, `units.force`, and
+`units.stress` draft facts plus Docker-pinned dimensional normalization. It
+retains the original display value/unit, resolves global and edge-local load
+directions, converts pressure and traction magnitudes to global traction vectors,
+and keeps total resultants as forces. A resultant is explicitly marked deferred:
+it cannot become a traction until the Package 3 mesh resolver supplies the actual
+loaded-boundary measure. This core is deterministic and tested, but is not yet
+the live OpenAI/finalization path.
+
 ## Supported natural-language scope
 
 The natural-language workflow supports:
@@ -453,7 +462,7 @@ docker compose run --rm -T fenitop python -m pip check
 docker compose run --rm -T fenitop pytest -q
 ```
 
-Current checkpoint: **229 tests plus 162 subtests pass**. The suite
+Current checkpoint: **254 tests plus 181 subtests pass**. The suite
 includes schema and adversarial-input tests, real compliance/mechanism baselines,
 finite-difference sensitivities, geometry validation, resource calibration,
 process timeout/cancellation/crash behavior, secret scrubbing, path and

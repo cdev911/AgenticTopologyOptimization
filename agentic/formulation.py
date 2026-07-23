@@ -47,6 +47,16 @@ from agentic.intent import (
     TractionIntent,
     Vector2D,
 )
+from agentic.load_semantics import (
+    BoundaryLoadState,
+    resolve_boundary_load_state,
+)
+from agentic.mechanical_units import (
+    ForceUnitName,
+    LengthUnitName,
+    MechanicalUnitContext,
+    StressUnitName,
+)
 
 
 DraftPath = Literal[
@@ -57,6 +67,9 @@ DraftPath = Literal[
     "domain.height",
     "material.young_modulus",
     "material.poisson_ratio",
+    "units.length",
+    "units.force",
+    "units.stress",
     "supports",
     "support_edges",
     "tractions",
@@ -88,6 +101,9 @@ DRAFT_PATHS: tuple[DraftPath, ...] = (
     "domain.height",
     "material.young_modulus",
     "material.poisson_ratio",
+    "units.length",
+    "units.force",
+    "units.stress",
     "supports",
     "support_edges",
     "tractions",
@@ -279,6 +295,25 @@ class DraftReadiness(StrictFormulationModel):
     semantic_errors: tuple[str, ...]
 
 
+class MechanicalUnitReadiness(StrictFormulationModel):
+    """Readiness of the optional Package 2 mechanical-unit subdraft."""
+
+    ready: bool
+    missing_fields: tuple[DraftPath, ...]
+    unconfirmed_fields: tuple[DraftPath, ...]
+    semantic_errors: tuple[str, ...]
+    context: MechanicalUnitContext | None = None
+
+
+class SemanticBoundaryReadiness(StrictFormulationModel):
+    """Package 2 view over unit facts and first-class boundary entities."""
+
+    semantic_ready: bool
+    execution_ready: bool
+    units: MechanicalUnitReadiness
+    boundary_loads: BoundaryLoadState | None = None
+
+
 class ConversationMessage(StrictFormulationModel):
     turn: int = Field(ge=1)
     role: Literal["user", "assistant"]
@@ -386,6 +421,9 @@ _FIELD_ADAPTERS: dict[DraftPath, TypeAdapter] = {
     "domain.height": TypeAdapter(PositiveFiniteNumber),
     "material.young_modulus": TypeAdapter(PositiveFiniteNumber),
     "material.poisson_ratio": TypeAdapter(PoissonRatio),
+    "units.length": TypeAdapter(LengthUnitName),
+    "units.force": TypeAdapter(ForceUnitName),
+    "units.stress": TypeAdapter(StressUnitName),
     "supports": TypeAdapter(SupportList),
     "support_edges": TypeAdapter(SupportEdges),
     "tractions": TypeAdapter(TractionList),
@@ -619,6 +657,74 @@ def _resolved_bounds(
             "domain.bounds conflicts with domain.origin/width/height."
         )
     return stored or derived, errors
+
+
+_MECHANICAL_UNIT_PATHS: tuple[DraftPath, ...] = (
+    "units.length",
+    "units.force",
+    "units.stress",
+)
+
+
+def assess_mechanical_units(draft: ProblemDraft) -> MechanicalUnitReadiness:
+    """Build a context only from complete, confirmed dimensional facts.
+
+    Unit facts are not required by the legacy live finalizer during the staged
+    migration.  Once any unit fact exists, however, this function reports the
+    complete and independently usable state of that unit subdraft.
+    """
+    facts = {
+        path: draft.fact(path)
+        for path in _MECHANICAL_UNIT_PATHS
+    }
+    missing = tuple(path for path, fact in facts.items() if fact is None)
+    unconfirmed = tuple(
+        path
+        for path, fact in facts.items()
+        if fact is not None and fact.basis == "assumption"
+    )
+    errors: list[str] = []
+    context = None
+    if not missing and not unconfirmed:
+        try:
+            context = MechanicalUnitContext(
+                length_unit=facts["units.length"].value,
+                force_unit=facts["units.force"].value,
+                stress_unit=facts["units.stress"].value,
+            )
+        except (ValidationError, ValueError) as exc:
+            errors.append(
+                _validation_message(exc)
+                if isinstance(exc, ValidationError)
+                else str(exc)
+            )
+    return MechanicalUnitReadiness(
+        ready=not missing and not unconfirmed and not errors,
+        missing_fields=missing,
+        unconfirmed_fields=unconfirmed,
+        semantic_errors=tuple(errors),
+        context=context,
+    )
+
+
+def assess_semantic_boundary_loads(
+    draft: ProblemDraft,
+) -> SemanticBoundaryReadiness:
+    """Resolve Package 2 state without changing current live finalization."""
+    units = assess_mechanical_units(draft)
+    if units.context is None:
+        return SemanticBoundaryReadiness(
+            semantic_ready=False,
+            execution_ready=False,
+            units=units,
+        )
+    loads = resolve_boundary_load_state(draft.boundary_state, units.context)
+    return SemanticBoundaryReadiness(
+        semantic_ready=loads.semantic_ready,
+        execution_ready=loads.execution_ready,
+        units=units,
+        boundary_loads=loads,
+    )
 
 
 def _support_for_edge(

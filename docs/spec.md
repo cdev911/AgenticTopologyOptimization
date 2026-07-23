@@ -9,7 +9,7 @@ Last updated: 2026-07-27
 
 - **Release**: v1 numerical/execution behavior remains complete, and the post-v1
   conversational Phase 1 is now the released Streamlit entry path.
-- **Verification**: 229 tests plus 162 subtests pass in the pinned Docker
+- **Verification**: 254 tests plus 181 subtests pass in the pinned Docker
   image. Compose config, dependency checks, Streamlit health, the no-credit
   idempotent harness, and documentation links have also passed.
 - **Scope**: personal learning/demo workflow, not engineering design software or a
@@ -42,8 +42,16 @@ Last updated: 2026-07-27
   legacy list facts. `ProblemDraft` and `FormulationTurn` carry the new optional
   state/patch, but the current OpenAI transport and finalization path deliberately
   remain on legacy facts until later packages.
-- **Next action**: implement BC Work Package 2: typed mechanical unit context and
-  deterministic semantic traction/resultant/direction resolution.
+- **Just implemented**: BC Work Package 2 pins Pint 0.25.3 in Docker and adds
+  provenance-bearing length/force/stress unit facts, typed dimensional
+  normalization with retained display values, deterministic global/edge-local
+  direction and pressure resolution, and explicit traction versus total-resultant
+  state. Resultants normalize as force but remain execution-deferred until a
+  mesh-resolved boundary measure is available. Legacy live finalization and the
+  solver contract remain unchanged at this checkpoint.
+- **Next action**: implement BC Work Package 3: shared mesh boundary resolver,
+  versioned tool schema/evidence, resultant-to-traction conversion, and numerical
+  warnings.
 
 ## 1. Product
 
@@ -174,7 +182,7 @@ The live Streamlit formulation configuration is:
 - medium reasoning through `OPENAI_FORMULATION_REASONING_EFFORT`;
 - `reasoning.context=all_turns` and `previous_response_id`;
 - prompt `formulation-system-v1`;
-- strict `OpenAIFormulationTurn` output with a 2,729-character schema;
+- strict `OpenAIFormulationTurn` output with a 2,823-character schema;
 - SDK retries disabled, one application-owned deterministic patch repair, and one
   continuation-expiry full-history recovery; and
 - `store=true` for response continuation under provider retention, while the local
@@ -387,6 +395,20 @@ contract, prompt update, numerical tests, and an explicit decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — Unit normalization stops before mesh-dependent physics**: pin
+  Pint 0.25.3 in the Docker runtime and represent length, force, and stress as
+  provenance-bearing draft facts. Retain original display values/units beside
+  JSON-safe normalized values; do not pass Pint objects across application
+  boundaries. Treat effective traction/pressure as stress and total resultant as
+  force. Resolve unambiguous global and edge-normal directions deterministically,
+  but reject directions without a sign or named edge. A normalized resultant is
+  semantically ready and execution-deferred until the shared mesh resolver
+  supplies boundary measure; only Package 3 may compute
+  `traction = resultant / (measure × one-length-unit thickness)`. Keep legacy
+  finalization authoritative for this checkpoint. Reason: dimensional validity
+  does not identify load meaning, inferred units need the existing confirmation
+  contract, and using a requested span before facet resolution could apply the
+  wrong total force.
 - **2026-07-27 — BC identity and confirmation are application-owned state**:
   allocate monotonic support/load IDs in deterministic merge code from
   turn-local create references; never accept model-selected canonical IDs and
@@ -568,7 +590,7 @@ Reverse chronological; final decisions only.
 - [x] BC Work Package 1 — stable partial BC entities, monotonic application IDs,
       per-field provenance/revisions, typed create/update/delete/confirm patches,
       readiness, pending confirmations, and explicit legacy migration.
-- [ ] BC Work Package 2 — typed unit context and semantic traction/resultant
+- [x] BC Work Package 2 — typed unit context and semantic traction/resultant
       resolution.
 - [ ] BC Work Package 3 — shared mesh boundary resolver, versioned tool contract,
       enriched evidence, and numerical warnings.
