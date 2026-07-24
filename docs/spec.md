@@ -9,7 +9,7 @@ Last updated: 2026-07-27
 
 - **Release**: v1 numerical/execution behavior remains complete, and the post-v1
   conversational Phase 1 is now the released Streamlit entry path.
-- **Verification**: 275 tests plus 194 subtests pass in the pinned Docker
+- **Verification**: 280 tests plus 194 subtests pass in the pinned Docker
   image. Compose config, dependency checks, Streamlit health, the no-credit
   idempotent harness, and documentation links have also passed.
 - **Scope**: personal learning/demo workflow, not engineering design software or a
@@ -74,8 +74,15 @@ Last updated: 2026-07-27
   highest-information questions; and recognizes gated supports honestly.
   Deterministic code migrates a legacy browser-session draft before its first v2
   turn. The v3 Sol/medium live gate passes 6/6 with zero solver starts.
-- **Next action**: implement BC Work Package 6: human-readable BC cards,
-  deterministic requested/resolved rectangle preview, and precise correction UX.
+- **Just implemented**: BC Work Package 6 adds provider-independent partial and
+  validated BC cards, stable-ID correction guidance, human-readable approval
+  rows, complete BC provenance/revisions in the existing expander, and a
+  deterministic SVG rectangle driven only by successful validation evidence.
+  Requested extents are dashed, resolved supports/loads are solid, load arrows
+  use effective traction, and cards expose mesh extent/measure, conversions,
+  integrated resultants, thickness, units, and warnings.
+- **Next action**: execute BC Work Package 7: the complete deterministic,
+  numerical, UI, and billed first-increment release gate.
 
 ## 1. Product
 
@@ -427,6 +434,20 @@ contract, prompt update, numerical tests, and an explicit decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — Pre-run BC presentation is a pure evidence view**: render
+  partial first-class BCs as stable-ID cards with retained semantic facts,
+  missing fields, pending confirmations, capability limits, and direct
+  “Change S1/L1 …” guidance. After validation, replace raw selector rows with
+  human-readable cards and draw a deterministic SVG rectangle from the compiled
+  config joined to `GeometryReport` by BC ID. Show requested continuous spans
+  separately from resolved mesh spans, use effective traction only for arrow
+  direction, expose conversions and integrated resultants in text, and retain
+  exact field provenance/revisions in the existing expander. Fail closed when
+  successful per-BC geometry evidence is missing; do not move resolution,
+  readiness, approval, or execution into Streamlit. Reason: a preview must
+  explain the same facts FEM will use, stable labels make corrections precise,
+  and duplicating geometry arithmetic in the UI would create a contradictory
+  fourth mechanics implementation.
 - **2026-07-27 — Live BC language uses flat semantic operations**: version the
   live prompt/continuation contract to v2 and replace legacy support/traction
   updates with a strict flat transport for BC create, update, delete, and
@@ -677,7 +698,7 @@ Reverse chronological; final decisions only.
       authoritative approval evidence, and unchanged explicit run gate.
 - [x] BC Work Package 5 — versioned live prompt, compact first-class BC adapter,
       legacy-session migration, mocked regressions, and passing v3 live gate.
-- [ ] BC Work Package 6 — human BC cards, requested/resolved preview, and precise
+- [x] BC Work Package 6 — human BC cards, requested/resolved preview, and precise
       correction UX.
 - [ ] BC Work Package 7 — complete deterministic, numerical, UI, and billed live
       first-increment gate.

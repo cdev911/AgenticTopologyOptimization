@@ -392,8 +392,7 @@ retains the original display value/unit, resolves global and edge-local load
 directions, converts pressure and traction magnitudes to global traction vectors,
 and keeps total resultants as forces. A resultant is explicitly marked deferred:
 it cannot become a traction until the Package 3 mesh resolver supplies the actual
-loaded-boundary measure. This core is deterministic and tested, but is not yet
-the live OpenAI extraction path.
+loaded-boundary measure.
 
 Package 3 upgrades the prepared tool boundary to canonical
 `AgentSafeConfig 2.0` and tool contract `5.0.0`. Stable `S…`/`L…` boundary
@@ -422,6 +421,18 @@ units, and records unsupported rollers/pins/point loads without aliasing them.
 The application still owns IDs, migration of older browser-session facts,
 provenance validation, readiness, unit/geometry conversion, approval, and every
 side effect.
+
+Package 6 makes that state reviewable at the user's level. Partial and validated
+supports/loads appear as human-readable cards keyed by their stable `S…`/`L…`
+labels, with direct correction guidance such as “Change L1 …”. Before approval,
+the UI draws a deterministic rectangle diagram from successful validation
+evidence: orange dashed spans show the requested continuous extent, solid spans
+show the mesh-resolved support/load facets, and load arrows use the resolved
+global traction direction. Cards show facet count, resolved extent and measure,
+effective traction, integrated resultant, units, thickness, and warnings where
+applicable. Exact field provenance and revisions remain in the diagnostic
+expander; neither the cards nor the diagram perform geometry resolution or grant
+run authority.
 
 ## Supported natural-language scope
 
@@ -500,7 +511,7 @@ docker compose run --rm -T fenitop python -m pip check
 docker compose run --rm -T fenitop pytest -q
 ```
 
-Current checkpoint: **275 tests plus 194 subtests pass**. The suite
+Current checkpoint: **280 tests plus 194 subtests pass**. The suite
 includes schema and adversarial-input tests, real compliance/mechanism baselines,
 finite-difference sensitivities, geometry validation, resource calibration,
 process timeout/cancellation/crash behavior, secret scrubbing, path and

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Literal
 
+from agentic.boundary_presentation import validated_boundary_cards
 from agentic.compiler import CompilationResult
 from fenitop.tools.contracts import ValidateConfigResponse
 
@@ -61,51 +61,14 @@ def format_run_approval_request(
     config = compilation.config
     bounds = config.mesh.bounds
     divisions = config.mesh.divisions
-    evidence_by_id = {
-        item.bc_id: item
-        for item in validation.geometry_report.entities
-        if item.bc_id is not None
-    }
-    boundary_lines = []
-    for item in config.fem.boundary_conditions:
-        evidence = evidence_by_id.get(item.bc_id)
-        if evidence is None:
-            raise ValueError(
-                f"Validated geometry evidence is missing for {item.bc_id}."
-            )
-        requested = json.dumps(
-            item.selector.model_dump(mode="json"),
-            separators=(",", ":"),
-        )
-        resolved = (
-            f"facets={evidence.count}, extent={evidence.resolved_extent}, "
-            f"measure={evidence.measure}, centroid={evidence.centroid}, "
-            f"normal={evidence.outward_normal}"
-        )
-        if item.kind == "fixed":
-            meaning = "full-vector zero clamp"
-        else:
-            meaning = (
-                f"{evidence.quantity_kind} input={evidence.input_vector}; "
-                f"effective traction={evidence.effective_traction}; "
-                f"integrated resultant={evidence.integrated_resultant}"
-            )
-            if evidence.stress_unit is not None:
-                meaning += (
-                    f"; units length={evidence.length_unit}, "
-                    f"force={evidence.force_unit}, stress={evidence.stress_unit}, "
-                    f"thickness={evidence.thickness_value} "
-                    f"{evidence.thickness_unit}"
-                )
-        warning = (
-            f"; warning={evidence.resolution_warning}"
-            if evidence.resolution_warning
-            else ""
-        )
-        boundary_lines.append(
-            f"- {item.bc_id} `{item.kind}`: {meaning}; "
-            f"requested selector=`{requested}`; resolved {resolved}{warning}"
-        )
+    boundary_lines = [
+        "- "
+        + " — ".join((f"{card.bc_id} {card.title}", card.physics))
+        + "; "
+        + "; ".join((card.location, *card.details))
+        + (f"; Warning: {card.warning}" if card.warning else "")
+        for card in validated_boundary_cards(config, validation)
+    ]
     estimated = validation.estimated_cost
     cost_line = (
         f"- Estimated run: {estimated.num_elements} elements, "

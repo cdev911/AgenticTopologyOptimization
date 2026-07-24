@@ -69,11 +69,12 @@ class ApprovalTests(unittest.TestCase):
             "Boundary conditions (requested → mesh-resolved)",
             message,
         )
-        self.assertIn("S1 `fixed`: full-vector zero clamp", message)
-        self.assertIn("L1 `uniform_traction`: traction input=", message)
-        self.assertIn("requested selector=", message)
-        self.assertIn("resolved facets=32", message)
-        self.assertIn("integrated resultant=", message)
+        self.assertIn("S1 Support — full-vector zero clamp", message)
+        self.assertIn("L1 Load — uniform effective traction [0, -1]", message)
+        self.assertIn("Requested: whole right edge", message)
+        self.assertIn("Mesh-resolved: 32 mesh facets", message)
+        self.assertIn("Integrated resultant:", message)
+        self.assertNotIn("requested selector=", message)
         self.assertIn("Do you approve these parameters", message)
         self.assertIn("Reply **yes** to start", message)
 
