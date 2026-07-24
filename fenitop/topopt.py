@@ -17,9 +17,11 @@ Reference:
   Struct Multidisc Optim 67, 140 (2024).
   https://doi.org/10.1007/s00158-024-03818-7
 """
-
-import time
 import sys
+import json
+import logging
+import time
+from pathlib import Path
 
 import numpy as np
 from mpi4py import MPI
@@ -31,11 +33,61 @@ from fenitop.optimize import optimality_criteria, mma_optimizer
 from fenitop.utility import Communicator, XDMFTimeSeries  # Plotter, save_xdmf
 
 
+class FlushFileHandler(logging.FileHandler):
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
+
+def _configure_logger(log_path, file_prefix, comm):
+    logger = logging.getLogger(f"fenitop_{file_prefix}")
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+    logger.propagate = False
+
+    if comm.rank == 0:
+        formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(stream_handler)
+
+        file_handler = FlushFileHandler(log_path)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    else:
+        logger.addHandler(logging.NullHandler())
+
+    return logger
+
+
 def topopt(fem, opt):
     """Main function for topology optimization."""
 
     # Initialization
     comm = MPI.COMM_WORLD
+    output_dir = Path(opt.get("output_folder", "results"))
+    if not output_dir.is_absolute():
+        output_dir = Path.cwd() / output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    opt["output_folder"] = str(output_dir)
+
+    file_prefix = opt.get("output_prefix", "fenitop")
+    if comm.rank == 0:
+        for pattern in [
+            f"{file_prefix}_*.xdmf",
+            f"{file_prefix}_*.h5",
+            f"{file_prefix}_summary.json",
+            f"{file_prefix}_run.log",
+        ]:
+            for stale_path in output_dir.glob(pattern):
+                stale_path.unlink(missing_ok=True)
+    comm.barrier()
+
+    logger = _configure_logger(output_dir / f"{file_prefix}_run.log", file_prefix, comm)
+    if comm.rank == 0:
+        logger.info("Starting topology optimization with output directory %s", output_dir)
+
     linear_problem, u_field, lambda_field, rho_field, rho_phys_field = form_fem(fem, opt)
     density_filter = DensityFilter(comm, rho_field, rho_phys_field,
                                    opt["filter_radius"], fem["petsc_options"])
@@ -45,8 +97,10 @@ def topopt(fem, opt):
 
     # Initialize XDMF time series writer
     path = opt["output_folder"]
-    file_prefix = opt["output_prefix"]
-    xdmf_saver = XDMFTimeSeries(fem["mesh"], f"{path}/{file_prefix}_optimization_history.xdmf")
+    density_saver = XDMFTimeSeries(
+        fem["mesh"], f"{path}/{file_prefix}_density_history.xdmf", "density")
+    displacement_saver = XDMFTimeSeries(
+        fem["mesh"], f"{path}/{file_prefix}_displacement_history.xdmf", "displacement")
 
     # if comm.rank == 0:
     #     plotter = Plotter(fem["mesh_serial"])
@@ -65,9 +119,24 @@ def topopt(fem, opt):
     rho_min, rho_max = np.zeros(num_elems), np.ones(num_elems)
     rho_min[solid], rho_max[void] = 0.99, 0.01
 
-    xdmf_saver.save(rho_phys_field, 0.0)  # Save initial state
+    initial_entry = {
+        "iteration": 0,
+        "state": "initial",
+        "beta": 1.0,
+        "compliance": None,
+        "volume": None,
+        "objective": None,
+        "change": None,
+        "grayness": None,
+        "initial_density": float(opt["vol_frac"]),
+    }
     if comm.rank == 0:
-        print("[info] Saved initial design to XDMF time series.", flush=True)
+        logger.info("history %s", json.dumps(initial_entry, sort_keys=True))
+
+    density_saver.save(rho_phys_field, 0.0)  # Save initial state
+    displacement_saver.save(u_field, 0.0)
+    if comm.rank == 0:
+        logger.info("Saved initial design to XDMF time series.")
     save_interval = max(1, opt["max_iter"] // opt["output_interval"])  # Save ~20 time steps during optimization
     final_saved = False  # Track if final iteration was already saved
 
@@ -116,31 +185,69 @@ def topopt(fem, opt):
         # Save to time series at regular intervals
         saved_this_iter = False
         if opt_iter % save_interval == 0:
-            xdmf_saver.save(rho_phys_field, float(opt_iter))
+            density_saver.save(rho_phys_field, float(opt_iter))
+            displacement_saver.save(u_field, float(opt_iter))
             saved_this_iter = True
             if comm.rank == 0:
-                print(f"[info] Saved iteration {opt_iter} to XDMF time series.", flush=True)
+                logger.info("Saved iteration %d to XDMF time series.", opt_iter)
 
         # Output the histories
         opt_time = time.perf_counter() - opt_start_time
+        grayness = comm.allreduce(np.sum(np.abs(rho_new - 0.5)), op=MPI.SUM) / comm.allreduce(rho_new.size, op=MPI.SUM)
+        history_entry = {
+            "iteration": int(opt_iter),
+            "state": "iterate",
+            "beta": float(beta),
+            "compliance": float(C_value),
+            "volume": float(V_value),
+            "objective": float(U_value),
+            "change": float(change),
+            "grayness": float(grayness),
+            "time_seconds": float(opt_time),
+        }
         if comm.rank == 0:
-            print(f"opt_iter: {opt_iter}, opt_time: {opt_time:.3g} (s), "
-                  f"beta: {beta}, C: {C_value:.3f}, V: {V_value:.3f}, "
-                  f"U: {U_value:.3f}, change: {change:.3f}", flush=True)
+            logger.info("history %s", json.dumps(history_entry, sort_keys=True))
+            logger.info(
+                "iter=%d time=%.3f beta=%.3f compliance=%.6e volume=%.6f objective=%.6e change=%.6e grayness=%.6f",
+                opt_iter,
+                opt_time,
+                beta,
+                C_value,
+                V_value,
+                U_value,
+                change,
+                grayness,
+            )
             
         # Store whether we saved this iteration for final check
         final_saved = saved_this_iter
 
     # Save final result to time series only if we didn't already save it
     if not final_saved:
-        xdmf_saver.save(rho_phys_field, float(opt_iter))
+        density_saver.save(rho_phys_field, float(opt_iter))
+        displacement_saver.save(u_field, float(opt_iter))
         if comm.rank == 0:
-            print(f"[info] Saved final design (iteration {opt_iter}) to XDMF time series.", flush=True)
+            logger.info("Saved final design (iteration %d) to XDMF time series.", opt_iter)
     else:
         if comm.rank == 0:
-            print(f"[info] Final design already saved at iteration {opt_iter}.", flush=True)
+            logger.info("Final design already saved at iteration %d.", opt_iter)
 
     values = S_comm.gather(rho_phys_field.x.petsc_vec)
+    if comm.rank == 0 and values is not None:
+        summary = {
+            "iterations": int(opt_iter),
+            "final_compliance": float(C_value),
+            "final_volume": float(V_value),
+            "final_objective": float(U_value),
+            "grayness": float(grayness),
+            "output_folder": str(output_dir),
+            "output_prefix": file_prefix,
+            "initial_density": float(opt["vol_frac"]),
+        }
+        summary_path = output_dir / f"{file_prefix}_summary.json"
+        with open(summary_path, "w", encoding="utf-8") as handle:
+            json.dump(summary, handle, indent=2)
+        logger.info("Wrote summary to %s", summary_path)
     # if comm.rank == 0:
     #     plotter.plot(values)
     # save_xdmf(fem["mesh"], rho_phys_field)
