@@ -9,9 +9,10 @@ Last updated: 2026-07-27
 
 - **Release**: v1 numerical/execution behavior remains complete, and the post-v1
   conversational Phase 1 is now the released Streamlit entry path.
-- **Verification**: 280 tests plus 194 subtests pass in the pinned Docker
-  image. Compose config, dependency checks, Streamlit health, the no-credit
-  idempotent harness, and documentation links have also passed.
+- **Verification**: 292 tests plus 194 subtests pass in the pinned Docker image,
+  and `pip check` reports no broken requirements. This includes historical
+  numerical baselines, exact resultant integration, deterministic selector/error
+  behavior, UI approval behavior, and solver lifecycle tests.
 - **Scope**: personal learning/demo workflow, not engineering design software or a
   hosted multi-user service. This scope does not authorize intentionally weak or
   toy implementations: functional quality and measured reliability are the
@@ -81,8 +82,17 @@ Last updated: 2026-07-27
   Requested extents are dashed, resolved supports/loads are solid, load arrows
   use effective traction, and cards expose mesh extent/measure, conversions,
   integrated resultants, thickness, units, and warnings.
-- **Next action**: execute BC Work Package 7: the complete deterministic,
-  numerical, UI, and billed first-increment release gate.
+- **Just implemented**: BC Work Package 7 adds a dedicated formulation-only
+  53-case billed evaluator for `boundary-condition-evals-v6`, semantic
+  normalization and forbidden-behavior grading, bounded retries for connection
+  and timeout errors only, and deterministic application normalization of
+  constant traction uniformity. The clean Sol/medium run reached 51/53 with zero
+  solver starts; both remaining constant-traction cases passed a focused 2/2 live
+  rerun after the deterministic fix. The deterministic/numerical gate passes,
+  but a fresh clean 53/53 billed invocation has not been run after that fix.
+- **Next action**: rerun the clean 53-case billed gate once to close Work Package
+  7. Only after a 53/53 result should the explicit Work Package 8
+  component-support checkpoint begin.
 
 ## 1. Product
 
@@ -213,8 +223,8 @@ The live Streamlit formulation configuration is:
 - `gpt-5.6-sol` through `OPENAI_FORMULATION_MODEL`;
 - medium reasoning through `OPENAI_FORMULATION_REASONING_EFFORT`;
 - `reasoning.context=all_turns` and `previous_response_id`;
-- prompt `formulation-system-v2`;
-- strict `OpenAIFormulationTurn` output with a 6,491-character schema and flat
+- prompt `formulation-system-v3`;
+- strict `OpenAIFormulationTurn` output with a 7,162-character schema and flat
   first-class BC operations;
 - SDK retries disabled, one application-owned deterministic patch repair, and one
   continuation-expiry full-history recovery; and
@@ -233,6 +243,17 @@ scenarios passed across ten calls with 51,726 input, 7,921 output, 3,578 reasoni
 and 43,317 cached tokens in 147.888 seconds, with no context recoveries and zero
 solver starts. The earlier v2 comparison remains the evidence for the Sol/Terra
 default decision; v3 measures the changed BC contract.
+
+The Package 7 evaluator uses `boundary-condition-evals-v6` and the
+`formulation-system-v3` / `openai-responses-v3` live contract. It imports no
+orchestrator or solver entry point and reports `solver_executed=false`. Transport
+timeouts and connection failures receive up to three attempts; semantic failures
+receive exactly one. The latest clean run before the final deterministic
+constant-traction fix passed 51/53 over 64 API calls with 385,496 input, 46,355
+output, 18,613 reasoning, and 350,573 cached tokens in 835.464 seconds, with no
+context recoveries and zero solver starts. The two remaining cases then passed a
+focused 2/2 live rerun after the fix. This is strong implementation evidence but
+is not recorded as a 53/53 release pass.
 
 ## 7. Testing
 
@@ -434,6 +455,17 @@ contract, prompt update, numerical tests, and an explicit decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — The BC release gate grades engineering meaning and separates
+  provider health**: execute the fixed 53-case corpus through a dedicated
+  formulation-only live evaluator. Canonicalize only proven-equivalent selector
+  encodings and redundant exact-point labels; retain exact load/support facts,
+  clarifications, assumptions, capability limits, forbidden transformations, and
+  the no-solver rule. Retry only provider connection/timeouts, never semantic
+  failures. Make constant traction uniformity an application-owned deterministic
+  derivation once its finite selector is complete. Reason: the gate exposed
+  evaluator crashes, stale expectations, provider outages, harmless selector
+  spelling variation, and genuine model-basis variation. Release evidence must
+  distinguish all five rather than prompt-tune or rerun until a convenient pass.
 - **2026-07-27 — Pre-run BC presentation is a pure evidence view**: render
   partial first-class BCs as stable-ID cards with retained semantic facts,
   missing fields, pending confirmations, capability limits, and direct
@@ -701,7 +733,8 @@ Reverse chronological; final decisions only.
 - [x] BC Work Package 6 — human BC cards, requested/resolved preview, and precise
       correction UX.
 - [ ] BC Work Package 7 — complete deterministic, numerical, UI, and billed live
-      first-increment gate.
+      first-increment gate. Implementation and deterministic/numerical gates are
+      complete; one clean post-fix 53/53 billed invocation remains.
 - [ ] BC Work Package 8 — explicit component-support checkpoint and optional
       roller/symmetry/point-pin implementation.
 - [ ] BC Work Package 9 — shipped-behavior documentation, learning record, and

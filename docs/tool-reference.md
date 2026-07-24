@@ -115,6 +115,15 @@ length/offset from a corner on the named edge, and expert region. Boundary
 points, unspecified extents, invalid corner/edge pairs, and intervals outside
 the edge fail before tool validation.
 
+A constant traction vector or magnitude plus a complete finite selector
+deterministically implies `load.distribution=uniform`; the application upgrades
+any model-proposed uniform assumption to a derived fact. Resultants do not use
+this rule: their uniform distribution remains a visible assumption until the
+user confirms it. The conversational draft may also retain formulation-only
+details for unsupported nonzero prescribed displacement
+(`support.direction`, `support.magnitude`, and `support.unit`) so the request is
+not silently changed, but readiness and compilation still reject that capability.
+
 During the staged adapter migration, a draft with no first-class BC state copies
 legacy support/traction facts into first-class entities exactly once at this
 boundary and uses `legacy_consistent` units. If first-class state exists, it is

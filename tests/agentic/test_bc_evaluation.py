@@ -162,6 +162,46 @@ class BoundaryGraderTests(unittest.TestCase):
         self.assertTrue(result.passed, result.checks)
         self.assertTrue(all(check.passed for check in result.checks))
 
+    def test_equivalent_fraction_selectors_grade_as_same_geometry(self):
+        scenario = self.by_id["upper_half_left_clamp"]
+        equivalent = ExpectedBoundaryCondition(
+            bc_id="S1",
+            kind="support",
+            support_kind="fixed_all",
+            edge="left",
+            selector_kind="centered_fraction",
+            center=0.75,
+            span=0.5,
+        )
+
+        result = grade_boundary_observation(
+            self.suite,
+            scenario,
+            exact_observation(
+                scenario,
+                boundary_conditions=(equivalent,),
+            ),
+        )
+
+        self.assertTrue(result.passed, result.checks)
+
+    def test_redundant_corner_label_does_not_change_exact_point(self):
+        scenario = self.by_id["true_corner_pin_requires_node_selector"]
+        redundant = scenario.expected.boundary_conditions[0].model_copy(
+            update={"from_corner": "lower_left"}
+        )
+
+        result = grade_boundary_observation(
+            self.suite,
+            scenario,
+            exact_observation(
+                scenario,
+                boundary_conditions=(redundant,),
+            ),
+        )
+
+        self.assertTrue(result.passed, result.checks)
+
     def test_grader_detects_lost_partial_load_fact(self):
         scenario = self.by_id[
             "supplied_cantilever_transcript_retains_partial_resultant"

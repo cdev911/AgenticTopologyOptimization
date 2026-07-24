@@ -36,8 +36,8 @@ from agentic.formulation import (
 )
 
 
-PROMPT_VERSION = "formulation-system-v2"
-ADAPTER_ID = "openai-responses-v2"
+PROMPT_VERSION = "formulation-system-v3"
+ADAPTER_ID = "openai-responses-v3"
 DEFAULT_MODEL = "gpt-5.6-sol"
 ReasoningEffort = Literal["low", "medium", "high", "xhigh", "max"]
 ErrorKind = Literal["provider", "invalid_response", "refusal"]
@@ -321,7 +321,7 @@ def config_from_environment() -> OpenAIFormulationConfig:
 def load_system_prompt() -> str:
     prompt = (
         files("agentic.prompts")
-        .joinpath("formulation_system_v2.txt")
+        .joinpath("formulation_system_v3.txt")
         .read_text(encoding="utf-8")
         .strip()
     )

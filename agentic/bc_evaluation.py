@@ -14,7 +14,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-BC_EVALUATION_VERSION = "boundary-condition-evals-v1"
+BC_EVALUATION_VERSION = "boundary-condition-evals-v6"
 
 ScenarioFamily = Literal[
     "support_aliases",
@@ -376,6 +376,33 @@ def _check(name: str, passed: bool, detail: str) -> GradeCheck:
     return GradeCheck(name=name, passed=passed, detail=detail)
 
 
+def _canonical_boundary_condition(
+    condition: ExpectedBoundaryCondition,
+) -> dict:
+    """Canonicalize mathematically equivalent fractional selector forms."""
+    payload = condition.model_dump(mode="python")
+    if payload["selector_kind"] == "centered_fraction":
+        center = payload["center"]
+        span = payload["span"]
+        payload["selector_kind"] = "fraction_interval"
+        payload["start"] = round(center - span / 2.0, 12)
+        payload["end"] = round(center + span / 2.0, 12)
+        payload["center"] = None
+        payload["span"] = None
+    if payload["point"] is not None:
+        payload["from_corner"] = None
+    return payload
+
+
+def _boundary_conditions_equal(
+    expected: tuple[ExpectedBoundaryCondition, ...],
+    observed: tuple[ExpectedBoundaryCondition, ...],
+) -> bool:
+    return tuple(map(_canonical_boundary_condition, expected)) == tuple(
+        map(_canonical_boundary_condition, observed)
+    )
+
+
 def grade_boundary_observation(
     suite: BoundaryEvaluationSuite,
     scenario: BoundaryScenario,
@@ -398,7 +425,10 @@ def grade_boundary_observation(
         ),
         _check(
             "boundary_conditions",
-            observation.boundary_conditions == expected.boundary_conditions,
+            _boundary_conditions_equal(
+                expected.boundary_conditions,
+                observation.boundary_conditions,
+            ),
             (
                 f"expected={expected.boundary_conditions!r} "
                 f"observed={observation.boundary_conditions!r}"
