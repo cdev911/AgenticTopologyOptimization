@@ -83,7 +83,47 @@ class CannedFormulationAgent:
         return self.turns.pop(0)
 
 
+class FirstClassCannedFormulationAgent(CannedFormulationAgent):
+    first_class_boundary_patches = True
+
+
 class FormulationTests(unittest.TestCase):
+    def test_first_class_adapter_migrates_a_legacy_session_before_model_turn(self):
+        original = "Use the complete legacy cantilever."
+        legacy = merge_formulation_turn(
+            ProblemDraft(),
+            complete_turn(original),
+            user_message=original,
+            turn_number=1,
+        )
+        agent = FirstClassCannedFormulationAgent([
+            FormulationTurn(
+                assistant_message="I retained the migrated BCs.",
+                questions=("Which mechanical units should be used?",),
+            )
+        ])
+
+        step = ConversationFormulator(agent).advance(
+            FormulationSession(draft=legacy.draft),
+            "Keep the boundary conditions as they are.",
+        )
+
+        self.assertEqual(
+            [
+                condition.bc_id
+                for condition in agent.requests[0].draft.boundary_state.conditions
+            ],
+            ["S1", "L1"],
+        )
+        self.assertEqual(
+            [
+                condition.bc_id
+                for condition in step.session.draft.boundary_state.conditions
+            ],
+            ["S1", "L1"],
+        )
+        self.assertIn("units.length", step.readiness.missing_fields)
+
     def test_ready_first_class_bc_step_uses_finalized_draft_not_legacy_intent(self):
         user = (
             "Use a 10 by 4 compliance domain, E 100 Pa, nu 0.3, units m N Pa, "

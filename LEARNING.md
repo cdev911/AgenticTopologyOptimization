@@ -730,6 +730,43 @@ reintegrated force together. This is a stronger review boundary than displaying
 a serialized input list, and it leaves the later explicit “yes” transition
 unchanged.
 
+Package 5 showed that a richer semantic model does not require sending the model
+the recursive solver contract. The live transport is a flat list of create,
+update, delete, and confirmation operations. Field values still use compact JSON
+strings, so the strict schema stays small and OpenAI-compatible while existing
+path-specific deterministic validators remain authoritative. Turn-local
+`new_load_1` references group a creation; only application merge code allocates
+durable `L1`. Later turns can update `L1` without replacing any sibling load.
+
+Versioning provider continuation state matters when the prompt contract changes.
+An old v1 response chain contains assumptions about legacy `supports` and
+`tractions`, so the v2 adapter ID intentionally declines that continuation and
+replays application history. There was a second migration hazard: if an old
+browser draft had legacy BC lists and the v2 model created one new first-class
+entity, first-class authority would correctly hide the unmigrated lists. The
+formulator now migrates the complete legacy set before the first turn only for an
+adapter that declares first-class BC support. This keeps migration and provenance
+in code rather than asking the model to reconstruct old facts.
+
+The live gate also reminded us to distinguish model failures from grader
+failures. Three initial failures were encoding/wording differences with preserved
+meaning: bounds versus origin/width/height, “patch length” versus “segment
+width,” and a derived semantic mesh path carrying an exact user quote. The
+graders were broadened to compare meaning. A fourth failure was real: the model
+treated newly stated edge coordinates as authority to overwrite an incompatible
+existing width, even though the user had not requested a correction. We retained
+that failure and added an explicit rule and example: a conflicting implication is
+evidence to ask a question, not correction authority. The focused rerun and final
+complete gate then passed.
+
+Prompt quality is now measured at two layers. Mocked tests prove transport
+decoding, stable IDs, bounded repair, partial-state confirmation, migration, and
+compile/mesh handoff without API cost. The billed v3 gate verifies that the actual
+Sol/medium model can use the contract conversationally. It passed all six
+scenarios over ten calls with no solver starts. This still is not the 53-case
+first-increment release gate; Package 7 remains responsible for that broader
+claim.
+
 ## 17. How we will continue learning
 
 We will use these rules for the remaining work:
@@ -796,5 +833,9 @@ This condensed trail connects the lessons above to the implementation order:
   finalization, compiled semantic selectors and explicit-unit
   traction/resultants directly into schema 2.0, migrated legacy live facts once,
   and joined requested/resolved boundary evidence in the unchanged approval gate.
-- **Next** — teach the live Responses prompt and compact adapter to create,
-  refine, and confirm first-class BC patches directly.
+- **2026-07-27** — versioned the live Responses contract, added compact
+  first-class BC operations, stable-ID corrections and confirmations,
+  deterministic legacy-session migration, semantic grader fixes, and a passing
+  six-scenario Sol/medium v3 gate with zero solver starts.
+- **Next** — render human BC cards and a deterministic requested/resolved boundary
+  preview, then exercise precise correction language through the UI.

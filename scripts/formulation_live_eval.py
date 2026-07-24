@@ -17,7 +17,7 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
-from agentic.compiler import compile_intent
+from agentic.compiler import compile_formulation_draft
 from agentic.formulation import (
     ConversationFormulator,
     FormulationSession,
@@ -51,6 +51,10 @@ def _fact(step: FormulationStep, path: str):
     return fact.value if fact is not None else None
 
 
+def _bc(step: FormulationStep, bc_id: str):
+    return step.session.draft.boundary_state.condition(bc_id)
+
+
 def _contains_all(text: str, words: tuple[str, ...]) -> bool:
     lowered = text.casefold()
     return all(word.casefold() in lowered for word in words)
@@ -74,28 +78,31 @@ def _grade(
     scenario_id = scenario["id"]
 
     if scenario_id == "disordered_cantilever_over_two_turns":
-        intent = final.intent
+        support = _bc(final, "S1")
+        load = _bc(final, "L1")
+        load_values = load.values() if load is not None else {}
         checks.extend(
             [
                 _check(
                     "domain",
-                    intent is not None
-                    and intent.domain.bounds == ((0, 0), (10, 5)),
                     (
-                        f"observed={intent.domain.bounds}"
-                        if intent is not None
-                        else "no final intent"
+                        _fact(final, "domain.bounds") == [[0, 0], [10, 5]]
+                        or (
+                            _fact(final, "domain.origin") == [0, 0]
+                            and _fact(final, "domain.width") == 10
+                            and _fact(final, "domain.height") == 5
+                        )
                     ),
+                    f"facts={final.session.draft.values()}",
                 ),
                 _check(
                     "physics",
                     (
-                        intent is not None
-                        and intent.problem_type == "minimize_compliance"
-                        and intent.material.young_modulus == 10
-                        and intent.material.poisson_ratio == 0.3
+                        _fact(final, "problem_type") == "minimize_compliance"
+                        and _fact(final, "material.young_modulus") == 10
+                        and _fact(final, "material.poisson_ratio") == 0.3
                         and abs(
-                            float(intent.volume_fraction) - (1.0 / 3.0)
+                            float(_fact(final, "volume_fraction")) - (1.0 / 3.0)
                         )
                         < 0.01
                     ),
@@ -103,25 +110,41 @@ def _grade(
                 ),
                 _check(
                     "support_and_load",
-                    intent is not None
-                    and bool(intent.supports)
-                    and bool(intent.tractions)
-                    and intent.tractions[0].edge_segment is not None
-                    and intent.tractions[0].edge_segment.span_fraction
-                    == 0.1,
+                    support is not None
+                    and support.values().get("support.kind") == "fixed_all"
+                    and load_values.get("load.kind") == "traction_vector"
+                    and load_values.get("selector.kind")
+                    == "centered_fraction"
+                    and load_values.get("selector.span") == 0.1,
                     "left support and centered 10% traction are required",
                 ),
             ]
         )
     elif scenario_id == "correction_overrides_prior_dimension":
-        intent = final.intent
-        domain = intent.domain.bounds if intent is not None else None
+        bounds = _fact(final, "domain.bounds")
+        if bounds is not None:
+            domain = tuple(map(tuple, bounds))
+        elif (
+            _fact(final, "domain.origin") is not None
+            and _fact(final, "domain.width") is not None
+            and _fact(final, "domain.height") is not None
+        ):
+            origin = _fact(final, "domain.origin")
+            domain = (
+                tuple(origin),
+                (
+                    origin[0] + _fact(final, "domain.width"),
+                    origin[1] + _fact(final, "domain.height"),
+                ),
+            )
+        else:
+            domain = None
         related = (
             _fact(final, "material.young_modulus"),
             _fact(final, "material.poisson_ratio"),
             _fact(final, "volume_fraction"),
-            bool(intent and intent.supports),
-            bool(intent and intent.tractions),
+            _bc(final, "S1") is not None,
+            _bc(final, "L1") is not None,
         )
         domain_revisions = [
             revision
@@ -172,14 +195,24 @@ def _grade(
             [
                 _check(
                     "no_silent_point_load_conversion",
-                    not bool(_fact(final, "tractions")),
-                    "no traction may be created before width and magnitude are agreed",
+                    all(
+                        condition.values().get("load.kind")
+                        not in {
+                            "traction_vector",
+                            "traction_magnitude",
+                            "resultant_vector",
+                            "resultant_magnitude",
+                        }
+                        for condition in final.session.draft.boundary_state.conditions
+                        if condition.kind == "load"
+                    ),
+                    "no finite load may be created before the patch is agreed",
                 ),
                 _check(
                     "supported_alternative_explained",
                     _contains_all(
                         response_text,
-                        ("point", "distributed", "traction"),
+                        ("point", "distributed", "resultant"),
                     ),
                     response_text,
                 ),
@@ -189,10 +222,11 @@ def _grade(
                     and (
                         "width" in response_text.casefold()
                         or "segment" in response_text.casefold()
+                        or "patch" in response_text.casefold()
                     )
                     and (
-                        "magnitude" in response_text.casefold()
-                        or "traction" in response_text.casefold()
+                        "force" in response_text.casefold()
+                        or "resultant" in response_text.casefold()
                     ),
                     response_text,
                 ),
@@ -282,14 +316,14 @@ def _grade(
                 _check(
                     "mesh_provenance",
                     fact is not None
-                    and fact.basis == "explicit"
+                    and fact.basis in {"explicit", "derived"}
                     and fact.source_turn == 1
                     and fact.source_quote is not None,
                     f"observed={fact}",
                 ),
                 _check(
                     "missing_physics_not_invented",
-                    final.intent is None
+                    final.finalized_draft is None
                     and _fact(final, "problem_type") is None,
                     f"facts={final.session.draft.values()}",
                 ),
@@ -297,16 +331,16 @@ def _grade(
         )
 
     if final.session.status == "ready_for_review":
-        if final.intent is None:
+        if final.finalized_draft is None:
             checks.append(
                 _check(
-                    "strict_intent",
+                    "finalized_draft",
                     False,
-                    "ready_for_review is missing strict intent",
+                    "ready_for_review is missing finalized draft",
                 )
             )
         else:
-            compilation = compile_intent(final.intent)
+            compilation = compile_formulation_draft(final.finalized_draft)
             validation = ValidateConfigResponse.model_validate(
                 validate_config_tool(
                     ValidateConfigRequest(config=compilation.config)
