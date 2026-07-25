@@ -185,7 +185,11 @@ def _evaluate_with_transient_retries(
         transient = (
             error.get("kind") == "provider"
             and error.get("provider_error_type")
-            in {"APIConnectionError", "APITimeoutError"}
+            in {
+                "APIConnectionError",
+                "APITimeoutError",
+                "InternalServerError",
+            }
         )
         if not transient or attempt == attempts:
             break

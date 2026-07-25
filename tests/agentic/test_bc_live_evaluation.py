@@ -296,7 +296,7 @@ class LiveBoundaryNormalizationTests(unittest.TestCase):
             "passed": False,
             "error": {
                 "kind": "provider",
-                "provider_error_type": "APITimeoutError",
+                "provider_error_type": "InternalServerError",
             },
             "usage": usage,
         }

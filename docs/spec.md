@@ -9,7 +9,7 @@ Last updated: 2026-07-27
 
 - **Release**: v1 numerical/execution behavior remains complete, and the post-v1
   conversational Phase 1 is now the released Streamlit entry path.
-- **Verification**: 293 tests plus 194 subtests pass in the pinned Docker image,
+- **Verification**: 294 tests plus 194 subtests pass in the pinned Docker image,
   and `pip check` reports no broken requirements. This includes historical
   numerical baselines, exact resultant integration, deterministic selector/error
   behavior, UI approval behavior, and solver lifecycle tests.
@@ -84,18 +84,16 @@ Last updated: 2026-07-27
   integrated resultants, thickness, units, and warnings.
 - **Just implemented**: BC Work Package 7 adds a dedicated formulation-only
   53-case billed evaluator for `boundary-condition-evals-v6`, semantic
-  normalization and forbidden-behavior grading, bounded retries for connection
-  and timeout errors only, and deterministic application normalization of
-  constant traction uniformity. A post-fix clean Sol/medium run reached 52/53
-  with zero solver starts; the only difference was a redundant direction label
-  consistent with the retained vector, now covered by a strict equivalence
-  regression that still rejects contradictions. The following full attempt was
-  interrupted after 29 cases by persistent provider `RateLimitError` responses,
-  including a one-case recovery probe. The deterministic/numerical gate passes,
-  but a fresh clean 53/53 billed invocation remains required.
-- **Next action**: rerun the clean 53-case billed gate once to close Work Package
-  7. Only after a 53/53 result should the explicit Work Package 8
-  component-support checkpoint begin.
+  normalization and forbidden-behavior grading, bounded retries for connection,
+  timeout, and provider internal-server errors only, and deterministic
+  application normalization of constant traction uniformity and named-edge-center
+  retention. The final clean
+  Sol/medium run passed 53/53 with zero solver starts, zero context recoveries,
+  and no transport retries. The complete deterministic/numerical gate also
+  passes, closing the first BC increment.
+- **Next action**: execute BC Work Package 8's explicit component-support
+  checkpoint: version and test the roller/symmetry/point-pin physics contract
+  before changing the supported solver surface.
 
 ## 1. Product
 
@@ -250,15 +248,11 @@ default decision; v3 measures the changed BC contract.
 The Package 7 evaluator uses `boundary-condition-evals-v6` and the
 `formulation-system-v3` / `openai-responses-v3` live contract. It imports no
 orchestrator or solver entry point and reports `solver_executed=false`. Transport
-timeouts and connection failures receive up to three attempts; semantic failures
-receive exactly one. The latest complete semantic run passed 52/53 over 64 API
-calls with 388,483 input, 46,908 output, 18,924 reasoning, and 360,244 cached
-tokens in 768.307 seconds, with no context recoveries and zero solver starts. Its
-sole difference was a redundant direction label consistent with an axis-aligned
-vector; the grader now ignores only an exact match and explicitly rejects a
-contradiction. The next full attempt reached 29 passing cases before 24 persistent
-`RateLimitError` responses, and a one-case probe failed immediately with the same
-provider error. This is not recorded as a 53/53 release pass.
+timeouts, connection failures, and provider internal-server errors receive up to
+three attempts; semantic failures receive exactly one. The final clean run passed
+53/53 over 64 API calls with 393,486 input, 45,631 output, 18,314 reasoning, and
+364,507 cached tokens in 804.885 seconds, with no context recoveries, no
+transport retries, and zero solver starts.
 
 ## 7. Testing
 
@@ -460,6 +454,16 @@ contract, prompt update, numerical tests, and an explicit decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — Preserve named edge centers independently of selector
+  completeness**: when a current-turn source quote names the center/middle of an
+  already identified edge, deterministically retain `selector.center=0.5` even
+  while kind and extent remain unresolved. If a later model patch repeats the
+  same value as an assumption, preserve the stronger explicit/derived fact.
+  Retry provider internal-server errors with the same bounded policy as
+  connection/timeouts, never semantic failures. Reason: the supplied six-turn
+  transcript showed that a known center could otherwise disappear until a later
+  span arrived, while a single provider 5xx invalidated an otherwise 52/53 run.
+  With these changes the clean billed gate passed 53/53 with zero solver starts.
 - **2026-07-27 — Redundant vector direction is equivalent only when provably
   consistent**: when an axis-aligned load vector exactly implies the separately
   retained direction label, ignore that duplicate label during live grading;
@@ -745,9 +749,8 @@ Reverse chronological; final decisions only.
       legacy-session migration, mocked regressions, and passing v3 live gate.
 - [x] BC Work Package 6 — human BC cards, requested/resolved preview, and precise
       correction UX.
-- [ ] BC Work Package 7 — complete deterministic, numerical, UI, and billed live
-      first-increment gate. Implementation and deterministic/numerical gates are
-      complete; one clean post-fix 53/53 billed invocation remains.
+- [x] BC Work Package 7 — complete deterministic, numerical, UI, and 53/53 billed
+      live first-increment gate with zero solver starts.
 - [ ] BC Work Package 8 — explicit component-support checkpoint and optional
       roller/symmetry/point-pin implementation.
 - [ ] BC Work Package 9 — shipped-behavior documentation, learning record, and
