@@ -202,6 +202,32 @@ class BoundaryGraderTests(unittest.TestCase):
 
         self.assertTrue(result.passed, result.checks)
 
+    def test_matching_vector_direction_is_redundant_but_conflict_fails(self):
+        scenario = self.by_id["whole_right_traction_vector"]
+        expected = scenario.expected.boundary_conditions[0]
+
+        matching = expected.model_copy(update={"direction": "down"})
+        matching_result = grade_boundary_observation(
+            self.suite,
+            scenario,
+            exact_observation(
+                scenario,
+                boundary_conditions=(matching,),
+            ),
+        )
+        self.assertTrue(matching_result.passed, matching_result.checks)
+
+        conflicting = expected.model_copy(update={"direction": "up"})
+        conflicting_result = grade_boundary_observation(
+            self.suite,
+            scenario,
+            exact_observation(
+                scenario,
+                boundary_conditions=(conflicting,),
+            ),
+        )
+        self.assertFalse(conflicting_result.passed)
+
     def test_grader_detects_lost_partial_load_fact(self):
         scenario = self.by_id[
             "supplied_cantilever_transcript_retains_partial_resultant"

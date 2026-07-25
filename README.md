@@ -452,10 +452,11 @@ Equivalent fractional selector forms compare as the same interval, exact points
 may carry a redundant consistent corner label, and constant traction over a
 complete finite selector is deterministically uniform. Unsupported semantics,
 assumptions, clarifications, silent conversions, and the no-solver rule remain
-exactly graded. The complete local gate passes; the latest clean live run reached
-51/53 before the final constant-traction normalization, and those remaining two
-cases then passed a focused 2/2 rerun. A fresh clean 53/53 invocation remains the
-release checkpoint.
+exactly graded. The complete local gate passes. A post-fix clean live run reached
+52/53; its sole difference was the redundant consistent label `direction=down`
+beside vector `[0,-1]`, which now has a regression that still rejects conflicting
+directions. A subsequent full attempt was interrupted by a persistent provider
+`RateLimitError`. A fresh clean 53/53 invocation remains the release checkpoint.
 
 ## Supported natural-language scope
 
@@ -534,7 +535,7 @@ docker compose run --rm -T fenitop python -m pip check
 docker compose run --rm -T fenitop pytest -q
 ```
 
-Current checkpoint: **292 tests plus 194 subtests pass**. The suite
+Current checkpoint: **293 tests plus 194 subtests pass**. The suite
 includes schema and adversarial-input tests, real compliance/mechanism baselines,
 finite-difference sensitivities, geometry validation, resource calibration,
 process timeout/cancellation/crash behavior, secret scrubbing, path and

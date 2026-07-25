@@ -855,12 +855,15 @@ would corrupt the measurement. The release harness now retries only connection
 and timeout failures, up to three attempts, and never retries a semantic miss.
 Usage is accumulated across attempts.
 
-The latest clean post-contract run reached 51/53 with zero solver starts. Its two
-remaining constant-traction cases then passed a focused 2/2 live rerun after the
-deterministic merger fix. The complete Docker suite passed 292 tests plus 194
-subtests. We record this as strong implementation evidence, but not as a 53/53
-release pass: a clean post-fix full invocation is still required. Honest release
-bookkeeping is part of the learning.
+The next clean post-fix run reached 52/53 with zero solver starts. Its sole
+difference was a redundant `direction=down` label beside vector `[0,-1]`. The
+grader now ignores that label only when the axis-aligned vector proves it;
+`[0,-1]` plus `up` remains a failing contradiction. The following full attempt
+passed 29 cases before 24 persistent provider rate-limit responses, and a
+one-case recovery probe failed immediately. The complete Docker suite passed 293
+tests plus 194 subtests. We record this as strong implementation evidence, but
+not as a 53/53 release pass: a clean full invocation is still required. Honest
+release bookkeeping is part of the learning.
 
 ## 17. How we will continue learning
 
@@ -940,7 +943,8 @@ This condensed trail connects the lessons above to the implementation order:
   evaluator representational defects, separated provider retry from semantic
   grading, strengthened the v3 BC prompt/IR, and made constant-traction
   uniformity deterministic in application code. The local gate passes; the clean
-  live gate reached 51/53 before the final fix and the affected cases passed 2/2
-  afterward.
+  live gate reached 52/53 after the final product fix; the sole redundant-vector
+  grading difference is now covered, but the next full attempt hit a persistent
+  provider rate limit.
 - **Next** — rerun the clean post-fix first-increment billed gate, including the
   fixed billed BC conversations, without starting the solver.

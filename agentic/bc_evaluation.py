@@ -391,6 +391,21 @@ def _canonical_boundary_condition(
         payload["span"] = None
     if payload["point"] is not None:
         payload["from_corner"] = None
+    vector = payload["vector"]
+    direction = payload["direction"]
+    if vector is not None and direction is not None:
+        x_value, y_value = vector
+        implied_direction = None
+        if x_value == 0 and y_value < 0:
+            implied_direction = "down"
+        elif x_value == 0 and y_value > 0:
+            implied_direction = "up"
+        elif y_value == 0 and x_value < 0:
+            implied_direction = "left"
+        elif y_value == 0 and x_value > 0:
+            implied_direction = "right"
+        if direction == implied_direction:
+            payload["direction"] = None
     return payload
 
 
