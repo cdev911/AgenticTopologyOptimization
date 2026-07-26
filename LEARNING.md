@@ -933,6 +933,31 @@ numerical suite passes, and the Streamlit health endpoint responds. Billed model
 evaluation is not repeated merely for bookkeeping: the unchanged live contract
 keeps the clean 53/53 v7 result from Package 8 as its language-quality evidence.
 
+### 16.12 User acceptance scenarios are layered specifications
+
+A readable end-to-end example and a semantic unit test serve different purposes.
+The 53-case BC corpus isolates phrases and grades exact retained meaning; a user
+acceptance scenario should instead resemble a real engineering conversation and
+let a learner inspect formulation, defaults, approval, execution, and evidence as
+one journey. Overloading every example with every feature would improve a
+checkbox matrix while making the prompts less realistic.
+
+The first five-scenario draft already contained one fully customized mesh, but it
+did not vary mesh interaction enough. The revised guide deliberately tests four
+paths: geometry-derived defaults, exact axis-specific triangle divisions, casual
+long-side/short-side quadrilateral divisions, and replacement of defaults during
+a post-proposal correction. The mechanism keeps defaults because that makes the
+mesh dependence of per-DOF spring stiffness visible rather than hiding it.
+
+Coverage also needs an honest negative space. Five runnable problems cannot test
+every supported feature and every refusal path while remaining teachable. The
+guide therefore includes a coverage matrix, lists untested capabilities, and
+separates no-run probes for 3D geometry, mathematical point load, nonzero
+prescribed displacement, varying traction, and applied moment. A scenario becomes
+a numerical benchmark only after its formulation and real output have been
+reviewed; invented “expected” objective values or topology pictures would defeat
+the evidence boundary.
+
 ## 17. How we will continue learning
 
 We will use these rules for the remaining work:
@@ -1021,5 +1046,8 @@ This condensed trail connects the lessons above to the implementation order:
   documenting a mechanically valid roller-plus-pin conversation and exact
   rigid-body rows, verifying secret/Compose/dependency/test/UI boundaries, and
   retaining the clean Package 8 v7 live result as the unchanged language gate.
+- **2026-07-27** — added five review-first user acceptance journeys with distinct
+  mesh interaction paths, multi-load correction, mechanism education, a coverage
+  matrix, explicit gaps, and separate no-run capability-limit probes.
 - **Next** — broaden user-led acceptance beyond the fixed corpus and turn new
   failures into versioned regression cases.
