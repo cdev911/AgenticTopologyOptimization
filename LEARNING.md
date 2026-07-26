@@ -907,6 +907,32 @@ also no longer causes an irrelevant global N-mm-MPa proposal. After focused
 regressions, the clean 53-case v7 run passed 53/53 with zero solver starts; the
 complete Docker suite passed 303 tests plus 197 subtests.
 
+### 16.11 Release bookkeeping is a contract audit
+
+Package 9 did not add another physics feature. Its purpose was to prove that the
+released explanation matched the behavior already exercised by schema,
+mesh-resolution, FEM, UI, and live-language gates. Historical Package 3–7
+descriptions still name schema 2.0 and earlier prompt versions because they
+explain the migration path; the current-version blocks in the README and tool
+reference name 2.1 and 5.1.0. Rewriting all history to the newest number would
+make the learning record less accurate, not more current.
+
+Writing a reproducible component-support example also exposed a useful modeling
+lesson. A normal roller on the bottom edge constrains `y` at every bottom node. A
+two-component pin placed on that edge would repeat the pin node's `y` constraint,
+so the validator correctly rejects it as a duplicate constrained degree of
+freedom. The release example therefore uses the bottom roller and a pin at the
+midpoint of the left edge. It is mechanically stable without relying on
+duplicate constraints, and its requested point is visible beside the
+mesh-resolved node.
+
+The final checkpoint treats release verification as more than a test count. It
+checks that the real `.env` is ignored and untracked, Compose parses, the locked
+container dependency set is consistent, the complete deterministic and
+numerical suite passes, and the Streamlit health endpoint responds. Billed model
+evaluation is not repeated merely for bookkeeping: the unchanged live contract
+keeps the clean 53/53 v7 result from Package 8 as its language-quality evidence.
+
 ## 17. How we will continue learning
 
 We will use these rules for the remaining work:
@@ -991,5 +1017,9 @@ This condensed trail connects the lessons above to the implementation order:
   physics, caught a trusted-normalizer semantic loss with a real FEM baseline,
   added component-aware validation/UI/live behavior, and passed the v7 53/53
   formulation gate with zero solver starts.
-- **Next** — complete Package 9 release bookkeeping, then broaden user-led
-  acceptance beyond the fixed corpus.
+- **2026-07-27** — closed Package 9 by auditing the shipped public contracts,
+  documenting a mechanically valid roller-plus-pin conversation and exact
+  rigid-body rows, verifying secret/Compose/dependency/test/UI boundaries, and
+  retaining the clean Package 8 v7 live result as the unchanged language gate.
+- **Next** — broaden user-led acceptance beyond the fixed corpus and turn new
+  failures into versioned regression cases.

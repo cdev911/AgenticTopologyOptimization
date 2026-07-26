@@ -97,8 +97,14 @@ Last updated: 2026-07-27
   subspace constraints, roller/symmetry/pin compilation, UI cards/preview, and a
   real roller+pin numerical baseline. Valid 2.0 inputs migrate deterministically.
   The clean v7 Sol/medium gate passed 53/53 with zero solver starts.
-- **Next action**: complete Work Package 9 documentation/release bookkeeping and
-  use the released workflow for broader user-led acceptance.
+- **Release bookkeeping**: Work Package 9 audits the public version/migration
+  narrative, documents a mechanically valid roller-plus-pin acceptance
+  conversation and the exact planar rigid-body rows, and verifies the secret,
+  Compose, dependency, complete test, and UI-health boundaries. The unchanged
+  live contract retains Package 8's clean 53/53 v7 result rather than spending
+  API credit to repeat the same measurement.
+- **Next action**: use the released workflow for broader user-led acceptance and
+  turn any newly observed failure into a versioned regression case.
 
 ## 1. Product
 
@@ -506,6 +512,17 @@ contract, prompt update, numerical tests, and an explicit decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — Close the BC program at the verified Package 9 boundary**:
+  treat release bookkeeping as a contract audit rather than another physics
+  increment. Keep older schema/prompt numbers where they accurately describe
+  historical package boundaries, while making current 2.1/5.1.0 contracts and
+  deterministic migration explicit. Publish a nonduplicating bottom-roller plus
+  mid-left-pin conversation and the exact planar rigid-body constraint rows.
+  Verify secret exclusion, Compose, locked dependencies, the complete suite, and
+  UI health; do not rerun a billed language gate when its contract and corpus are
+  unchanged from the clean Package 8 53/53 result. Reason: release claims should
+  be traceable to the layer that proves them, and repeating an unchanged billed
+  measurement adds cost without new evidence.
 - **2026-07-27 — Version zero-component supports and true boundary-node pins**:
   advance canonical config to 2.1 and tool contracts to 5.1.0 while migrating
   valid 2.0 inputs deterministically. Keep `fixed` for full clamps; represent new
@@ -827,5 +844,5 @@ Reverse chronological; final decisions only.
 - [x] BC Work Package 8 — versioned component-support checkpoint,
       roller/symmetry/point-pin implementation, numerical/UI coverage, and 53/53
       v7 live gate.
-- [ ] BC Work Package 9 — shipped-behavior documentation, learning record, and
+- [x] BC Work Package 9 — shipped-behavior documentation, learning record, and
       release verification.

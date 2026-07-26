@@ -316,6 +316,30 @@ Expected behavior:
   `gathering` while a supported reformulation is being negotiated; and
 - validation and solver execution are never called.
 
+### 4. Component support and true pin
+
+```text
+Minimize compliance of a rectangular 10 by 4 mm plane-strain domain starting at
+[0, 0]. Use Young's modulus 100 MPa and Poisson ratio 0.3, with mm, N, and MPa
+as the mechanical unit system. Put a normal roller along the entire bottom edge
+and a pin at the midpoint of the left edge, [0, 2]. Apply a distributed traction
+[0, -1] MPa on the entire right edge. Use 40 percent material.
+```
+
+Expected behavior:
+
+- the bottom roller becomes zero `y` displacement, not a full clamp;
+- the pin becomes zero `x` and `y` displacement at one boundary mesh node, not a
+  clamped edge segment;
+- the validated cards and preview show the requested and resolved pin point plus
+  any mesh snap distance;
+- the component-aware rigid-body check succeeds and the proposal waits for the
+  same explicit run approval as every other valid problem; and
+- placing the pin at a bottom-edge node instead would be rejected because its
+  zero-`y` degree of freedom would duplicate the roller constraint. Move the pin
+  away from the roller edge or change the support arrangement rather than asking
+  the model to hide the duplicate.
+
 ## No-credit deterministic harness
 
 To exercise compile → validate → contained solve → manifest handoff → analysis
@@ -559,6 +583,18 @@ and Streamlit application tests.
 
 The focused test tiers and exact tool contracts are documented in
 [`docs/tool-reference.md`](docs/tool-reference.md).
+
+Before a release checkpoint, also verify the local secret boundary and Compose
+configuration:
+
+```bash
+git check-ignore -q .env
+! git ls-files --error-unmatch .env
+docker compose config --quiet
+```
+
+The first command proves the real key file is ignored; the second proves it is
+not tracked. `.env.example` remains intentionally committed with a blank key.
 
 ## Direct tool and example usage
 

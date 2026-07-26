@@ -132,6 +132,20 @@ duplicate constrained DOFs, and rejects a component-supported boundary load only
 when every nonzero load component is constrained at every selected load node.
 Dolfinx applies component constraints through vector subspaces.
 
+The rigid-body check is based on the three planar rigid motions, not support
+labels. At a constrained node `(x,y)`, translation `(a,b)` and infinitesimal
+rotation `ω` produce:
+
+```text
+u_x = a - ω y    → x-component constraint row [1, 0, -y]
+u_y = b + ω x    → y-component constraint row [0, 1,  x]
+```
+
+The stacked constraint matrix must have rank three. Each `(node, component)` may
+appear only once, so a two-component pin placed on a node already covered by a
+normal roller is rejected for the duplicated normal component. This is an input
+modeling conflict, not a solver error.
+
 A named center/middle/midpoint of an identified edge is retained immediately as
 fractional `selector.center=0.5`, even if selector kind or finite extent remains
 unresolved. A later identical assumption cannot downgrade that derived fact.
