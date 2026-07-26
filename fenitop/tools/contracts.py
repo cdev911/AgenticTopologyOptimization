@@ -57,7 +57,9 @@ class EntityMatchRecord(ContractModel):
     count: int
     bounds: tuple[tuple[float, float], tuple[float, float]]
     bc_id: str | None = None
-    selector_kind: Literal["rectangle_edge", "expert_region"] | None = None
+    selector_kind: Literal[
+        "rectangle_edge", "expert_region", "boundary_node"
+    ] | None = None
     requested_extent: tuple[float, float] | None = None
     resolved_extent: tuple[float, float] | None = None
     measure: float | None = None
@@ -65,6 +67,9 @@ class EntityMatchRecord(ContractModel):
     outward_normal: tuple[float, float] | None = None
     resolution_error: float | None = None
     resolution_warning: str | None = None
+    requested_point: tuple[float, float] | None = None
+    resolved_point: tuple[float, float] | None = None
+    constrained_components: tuple[Literal["x", "y"], ...] | None = None
     quantity_kind: Literal["traction", "resultant"] | None = None
     input_vector: tuple[float, float] | None = None
     effective_traction: tuple[float, float] | None = None

@@ -828,7 +828,8 @@ class OpenAIFormulationAgentTests(unittest.TestCase):
         )
 
         prompt = load_system_prompt()
-        self.assertEqual(PROMPT_VERSION, "formulation-system-v3")
+        self.assertEqual(PROMPT_VERSION, "formulation-system-v4")
+        self.assertIn("Package 8 component-support contract", prompt)
         self.assertIn("Collaborate with the user over as many turns", prompt)
         self.assertIn("repair_feedback", prompt)
         self.assertIn("source_quote", prompt)

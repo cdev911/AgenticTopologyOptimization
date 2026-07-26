@@ -870,6 +870,43 @@ with zero solver starts, zero context recoveries, and no retries; the complete
 Docker suite passed 294 tests plus 194 subtests. Honest failure classification and
 application-owned partial memory were both necessary to close the gate.
 
+### 16.10 A schema change is not implemented until every trusted layer preserves it
+
+Package 8 made roller and pin language executable only after defining an
+unambiguous solver contract. The schema does not store “roller direction,” which
+can mean either permitted travel or restrained motion. It stores exactly which
+zero-displacement components are constrained. Normal rollers and symmetry
+boundaries compile from the named rectangle edge to `x` or `y`; a true pin
+compiles to both components at one boundary node. Rigid-body rank is then
+calculated from the actual `(node, component)` rows rather than from support
+labels.
+
+The first real FEM test exposed a cross-layer bug immediately. The schema and
+solver compiler carried `components`, but the older trusted
+`normalize_boundary_conditions()` adapter discarded that field and supplied its
+default full-vector zero value. The solve succeeded, which made the bug more
+dangerous: rollers and pins had silently become clamps. Preserving `components`
+changed the component-model compliance from the accidental-clamp result
+`0.009116382135022602` to the intended baseline `0.009611586069889313`. A passing
+solve is not proof of correct semantics; a physics-specific baseline across every
+adapter is.
+
+Boundary-node selection created another useful distinction between requested and
+executed truth. A requested point must lie on the rectangle boundary, but it need
+not coincide with a mesh node. The resolver selects one nearest boundary node and
+shows the requested point, resolved point, and snap distance before approval. The
+approximation is deterministic and inspectable instead of hidden in the FEM
+assembly.
+
+The v7 live gate also refined a language policy. “The right side/edge/face” means
+the complete boundary, while “the load on the right” establishes only the side
+location. Qualifiers such as “somewhere,” “center,” or “segment” likewise prevent
+a whole-edge inference. Prompt guidance alone was variable, so the application
+now normalizes both sides of this convention. A capability-limited `N mm` moment
+also no longer causes an irrelevant global N-mm-MPa proposal. After focused
+regressions, the clean 53-case v7 run passed 53/53 with zero solver starts; the
+complete Docker suite passed 303 tests plus 197 subtests.
+
 ## 17. How we will continue learning
 
 We will use these rules for the remaining work:
@@ -950,5 +987,9 @@ This condensed trail connects the lessons above to the implementation order:
   uniformity deterministic in application code. The local gate passes; the clean
   live gate ultimately passed 53/53 after adding deterministic named-center
   retention and bounded provider-5xx retry, with zero solver starts.
-- **Next** — execute the explicit component-support checkpoint before versioning
-  roller, symmetry, or point-pin solver physics.
+- **2026-07-27** — versioned zero-component support and boundary-node pin
+  physics, caught a trusted-normalizer semantic loss with a real FEM baseline,
+  added component-aware validation/UI/live behavior, and passed the v7 53/53
+  formulation gate with zero solver starts.
+- **Next** — complete Package 9 release bookkeeping, then broaden user-led
+  acceptance beyond the fixed corpus.

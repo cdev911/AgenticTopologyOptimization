@@ -207,6 +207,8 @@ def _selector_text(
             f"{selector.edge} edge, {axis}={_number(interval.start)} to "
             f"{_number(interval.end)}"
         )
+    if selector.kind == "boundary_node":
+        return f"boundary point {_vector(selector.point)}"
     region = selector.region.model_dump(mode="json")
     if region.get("op") == "plane":
         axis = region["axis"]
@@ -215,7 +217,11 @@ def _selector_text(
 
 
 def _resolved_text(record: EntityMatchRecord) -> str:
-    base = f"{record.count} mesh facets"
+    base = (
+        f"{record.count} mesh node"
+        if record.entity_kind == "node"
+        else f"{record.count} mesh facets"
+    )
     if record.resolved_extent is not None:
         base += (
             f", extent {_number(record.resolved_extent[0])} to "
@@ -243,10 +249,24 @@ def validated_boundary_cards(
         record = evidence.get(bc.bc_id)
         if record is None:
             raise ValueError(f"Geometry evidence is missing for {bc.bc_id}.")
-        if bc.kind == "fixed":
+        if bc.kind in {"fixed", "zero_displacement"}:
             title = "Support"
-            physics = "full-vector zero clamp"
-            details = (f"Mesh-resolved: {_resolved_text(record)}",)
+            physics = (
+                "full-vector zero clamp"
+                if bc.kind == "fixed"
+                else "zero displacement in "
+                + ", ".join(bc.components)
+            )
+            detail_items = [f"Mesh-resolved: {_resolved_text(record)}"]
+            if record.requested_point is not None:
+                detail_items.append(
+                    "Requested point: " + _vector(record.requested_point)
+                )
+            if record.resolved_point is not None:
+                detail_items.append(
+                    "Resolved node: " + _vector(record.resolved_point)
+                )
+            details = tuple(detail_items)
         else:
             if record.input_vector is None:
                 raise ValueError(f"Validated load evidence is incomplete for {bc.bc_id}.")
@@ -292,7 +312,7 @@ def validated_boundary_cards(
                 details=details,
                 correction_hint=(
                     f'Say “Change {bc.bc_id} …” to revise only this '
-                    f'{"support" if bc.kind == "fixed" else "load"}; '
+                    f'{"support" if bc.kind in {"fixed", "zero_displacement"} else "load"}; '
                     "the proposal will be revalidated before approval."
                 ),
                 warning=record.resolution_warning,
@@ -383,6 +403,20 @@ def boundary_preview_svg(
         record = evidence.get(bc.bc_id)
         if record is None:
             raise ValueError(f"Geometry evidence is missing for {bc.bc_id}.")
+        if bc.selector.kind == "boundary_node":
+            if record.resolved_point is None:
+                raise ValueError(f"Node evidence is incomplete for {bc.bc_id}.")
+            cx, cy = point(*record.resolved_point)
+            parts.append(
+                f'<circle cx="{cx:.3f}" cy="{cy:.3f}" r="8" '
+                'fill="#175cd3" stroke="#ffffff" stroke-width="2"/>'
+            )
+            parts.append(
+                f'<text x="{cx + 12:.3f}" y="{cy - 10:.3f}" '
+                'font-family="sans-serif" font-size="12" fill="#175cd3">'
+                f"{escape(bc.bc_id)}</text>"
+            )
+            continue
         edge = (
             bc.selector.edge
             if bc.selector.kind == "rectangle_edge"
@@ -407,14 +441,15 @@ def boundary_preview_svg(
                 'stroke-dasharray="7 5" opacity="0.65"/>'
             )
         (ax, ay), (bx, by) = (point(*resolved[0]), point(*resolved[1]))
-        color = "#175cd3" if bc.kind == "fixed" else "#b42318"
+        is_support = bc.kind in {"fixed", "zero_displacement"}
+        color = "#175cd3" if is_support else "#b42318"
         parts.append(
             f'<line x1="{ax:.3f}" y1="{ay:.3f}" x2="{bx:.3f}" '
             f'y2="{by:.3f}" stroke="{color}" stroke-width="6" '
             'stroke-linecap="round"/>'
         )
         cx, cy = (ax + bx) / 2, (ay + by) / 2
-        if bc.kind == "fixed":
+        if is_support:
             # Compact clamp teeth point out from the supported edge.
             outward = {
                 "left": (-1, 0),

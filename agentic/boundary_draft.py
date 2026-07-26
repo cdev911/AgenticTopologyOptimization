@@ -447,13 +447,7 @@ class BoundaryDraftReadiness(StrictBoundaryModel):
     conditions: tuple[BoundaryConditionReadiness, ...]
 
 
-_CAPABILITY_SUPPORTS = {
-    "roller_normal": "component_support",
-    "roller_x": "component_support",
-    "roller_y": "component_support",
-    "symmetry": "component_support",
-    "pin": "point_node_pin",
-}
+_CAPABILITY_SUPPORTS = {}
 _CAPABILITY_LOADS = {
     "point_force": "mathematical_point_load",
     "moment": "applied_moment",
@@ -696,6 +690,75 @@ def _retain_named_edge_center(
         rationale=(
             "A named edge center fixes the along-edge fractional position at 0.5."
         ),
+    )
+    return condition.model_copy(update={
+        "facts": tuple(
+            facts[name] for name in BOUNDARY_FIELDS if name in facts
+        )
+    })
+
+
+def _resolve_unqualified_named_side(
+    condition: BoundaryConditionDraft,
+    *,
+    user_message: str,
+    turn_number: int,
+) -> BoundaryConditionDraft:
+    """Treat an unqualified named side as the complete rectangle edge."""
+    kind = condition.fact("selector.kind")
+    edge = condition.fact("selector.edge")
+    if (
+        kind is None
+        or edge is None
+        or edge.source_turn != turn_number
+    ):
+        return condition
+    partial_qualifier = re.search(
+        r"(?:\b(?:center|centre|middle|midpoint|upper|lower|half|third|"
+        r"quarter|between|from|near|tip|end|segment|part|portion|width|"
+        r"span|point|corner|somewhere)\b|%)",
+        user_message,
+        re.IGNORECASE,
+    )
+    named_side = re.search(
+        rf"\b{re.escape(str(edge.value))}\s+(?:side|edge|face|boundary)\b",
+        user_message,
+        re.IGNORECASE,
+    )
+    vague_directional_location = re.search(
+        rf"\b(?:load|force|traction|pressure)\s+on\s+the\s+"
+        rf"{re.escape(str(edge.value))}\b",
+        user_message,
+        re.IGNORECASE,
+    )
+    if (
+        kind.value == "whole_edge"
+        and named_side is None
+        and vague_directional_location is not None
+    ):
+        value = "unspecified_extent"
+        rationale = (
+            "A bare directional location identifies the edge but not its extent."
+        )
+    elif (
+        kind.value == "unspecified_extent"
+        and partial_qualifier is None
+        and named_side is not None
+    ):
+        value = "whole_edge"
+        rationale = (
+            "An unqualified named rectangle side denotes the complete edge."
+        )
+    else:
+        return condition
+    facts = {fact.field: fact for fact in condition.facts}
+    facts["selector.kind"] = BoundaryFieldFact(
+        field="selector.kind",
+        value=value,
+        basis="derived",
+        source_turn=turn_number,
+        source_quote=edge.source_quote,
+        rationale=rationale,
     )
     return condition.model_copy(update={
         "facts": tuple(
@@ -994,7 +1057,11 @@ def merge_boundary_patch(
     conditions = {
         bc_id: _derive_constant_traction_distribution(
             _retain_named_edge_center(
-                condition,
+                _resolve_unqualified_named_side(
+                    condition,
+                    user_message=user_message,
+                    turn_number=turn_number,
+                ),
                 turn_number=turn_number,
             ),
             turn_number=turn_number,

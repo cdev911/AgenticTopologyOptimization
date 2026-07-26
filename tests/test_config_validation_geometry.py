@@ -124,6 +124,63 @@ class GeometryValidationTests(unittest.TestCase):
             "traction_on_fixed_support", {error["code"] for error in result["errors"]}
         )
 
+    def test_component_supports_drive_rank_duplicates_and_load_effectiveness(self):
+        from fenitop.tools.config_models import migrate_legacy_config
+
+        underconstrained = migrate_legacy_config(
+            _load("smoke_beam_2d", from_fixtures=True)
+        )
+        underconstrained["fem"]["boundary_conditions"][0] = {
+            "bc_id": "S1",
+            "kind": "zero_displacement",
+            "selector": {
+                "kind": "rectangle_edge",
+                "edge": "bottom",
+                "interval": {"kind": "fraction", "start": 0, "end": 1},
+            },
+            "components": ["y"],
+        }
+        result = validate_config_tool(
+            {"config": underconstrained}, policy=self.policy
+        )
+        self.assertIn(
+            "rigid_body_modes_unconstrained",
+            {error["code"] for error in result["errors"]},
+        )
+        self.assertEqual(result["geometry_report"]["rigid_body_rank"], 2)
+
+        duplicate = migrate_legacy_config(
+            _load("smoke_beam_2d", from_fixtures=True)
+        )
+        duplicate["fem"]["boundary_conditions"].insert(1, {
+            "bc_id": "S2",
+            "kind": "zero_displacement",
+            "selector": duplicate["fem"]["boundary_conditions"][0]["selector"],
+            "components": ["x"],
+        })
+        result = validate_config_tool({"config": duplicate}, policy=self.policy)
+        self.assertIn(
+            "duplicate_constrained_dof",
+            {error["code"] for error in result["errors"]},
+        )
+
+        ineffective = migrate_legacy_config(
+            _load("smoke_beam_2d", from_fixtures=True)
+        )
+        ineffective["fem"]["boundary_conditions"].insert(1, {
+            "bc_id": "S2",
+            "kind": "zero_displacement",
+            "selector": ineffective["fem"]["boundary_conditions"][-1]["selector"],
+            "components": ["y"],
+        })
+        result = validate_config_tool(
+            {"config": ineffective}, policy=self.policy
+        )
+        self.assertIn(
+            "load_components_fully_constrained",
+            {error["code"] for error in result["errors"]},
+        )
+
     def test_spring_regions_must_match_distinct_unconstrained_nodes(self):
         missing = _load("mechanism_2d")
         missing["opt"]["out_spring"]["region"] = {

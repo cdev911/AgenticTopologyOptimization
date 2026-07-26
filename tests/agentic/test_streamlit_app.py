@@ -227,7 +227,7 @@ class StreamlitAppTests(unittest.TestCase):
             REPO_ROOT / "streamlit_app.py",
             default_timeout=10,
         ).run()
-        user = "Put a 10 N resultant on the right edge."
+        user = "Put a 10 N resultant somewhere on the right edge."
 
         def bc_field(name, value):
             return BoundaryFieldInput(
@@ -549,7 +549,7 @@ class StreamlitAppTests(unittest.TestCase):
             compliance.write_bytes(png)
             analysis = AnalyzeResultsResponse.model_validate(
                 {
-                    "contract_version": "5.0.0",
+                    "contract_version": "5.1.0",
                     "tool": "analyze_results",
                     "status": "ok",
                     "warnings": [],

@@ -189,8 +189,14 @@ def _check_geometry(
             return None
         record = {
             "path": path,
-            "entity_kind": "facet",
-            "count": int(len(resolved.facets)),
+            "entity_kind": (
+                "node" if selector["kind"] == "boundary_node" else "facet"
+            ),
+            "count": int(
+                len(resolved.node_indices)
+                if selector["kind"] == "boundary_node"
+                else len(resolved.facets)
+            ),
             "bounds": resolved.bounds,
             "bc_id": bc["bc_id"] if bc else None,
             "selector_kind": selector["kind"],
@@ -201,6 +207,9 @@ def _check_geometry(
             "outward_normal": resolved.outward_normal,
             "resolution_error": resolved.resolution_error,
             "resolution_warning": resolved.warning,
+            "requested_point": resolved.requested_point,
+            "resolved_point": resolved.resolved_point,
+            "constrained_components": None,
             "quantity_kind": None,
             "input_vector": None,
             "effective_traction": None,
@@ -229,10 +238,21 @@ def _check_geometry(
 
     support_facets: list[np.ndarray] = []
     support_node_masks: list[np.ndarray] = []
+    support_component_masks = {
+        0: np.zeros(total_nodes, dtype=bool),
+        1: np.zeros(total_nodes, dtype=bool),
+    }
     constrained_rows: list[tuple[float, float, int]] = []
     conditions = config["fem"]["boundary_conditions"]
-    supports = [bc for bc in conditions if bc["kind"] == "fixed"]
-    loads = [bc for bc in conditions if bc["kind"] != "fixed"]
+    supports = [
+        bc for bc in conditions
+        if bc["kind"] in {"fixed", "zero_displacement"}
+    ]
+    loads = [
+        bc for bc in conditions
+        if bc["kind"] in {"uniform_traction", "uniform_resultant"}
+    ]
+    constrained_keys: dict[tuple[int, int], str] = {}
     for index, bc in enumerate(supports):
         path = f"config.fem.boundary_conditions.{bc['bc_id']}.selector"
         checked = check_facets(path, bc["selector"], bc=bc)
@@ -242,10 +262,40 @@ def _check_geometry(
             mask = resolved_node_mask(resolved)
         support_node_masks.append(mask)
         if checked is not None:
-            resolved, _ = checked
-            support_facets.append(resolved.facets)
-            for x, y, *_ in mesh.geometry.x[resolved.node_indices]:
-                constrained_rows.extend([(x, y, 0), (x, y, 1)])
+            resolved, record = checked
+            components = (
+                ("x", "y")
+                if bc["kind"] == "fixed"
+                else tuple(bc["components"])
+            )
+            record["constrained_components"] = components
+            if bc["kind"] == "fixed":
+                support_facets.append(resolved.facets)
+            component_indices = tuple(
+                0 if component == "x" else 1 for component in components
+            )
+            for component in component_indices:
+                support_component_masks[component][mask] = True
+            for node_index, (x, y, *_) in zip(
+                resolved.node_indices,
+                mesh.geometry.x[resolved.node_indices],
+            ):
+                for component in component_indices:
+                    key = (int(node_index), component)
+                    previous = constrained_keys.get(key)
+                    if previous is not None:
+                        errors.append(
+                            FieldError(
+                                path,
+                                "duplicate_constrained_dof",
+                                f"{bc['bc_id']} repeats component "
+                                f"{'x' if component == 0 else 'y'} at a node "
+                                f"already constrained by {previous}.",
+                            )
+                        )
+                        continue
+                    constrained_keys[key] = bc["bc_id"]
+                    constrained_rows.append((x, y, component))
 
     traction_facets: list[tuple[int, np.ndarray]] = []
     traction_node_masks: list[np.ndarray] = []
@@ -346,9 +396,11 @@ def _check_geometry(
     all_support_facets = (
         np.unique(np.concatenate(support_facets)) if support_facets else np.array([])
     )
+    fixed_overlap_loads: set[int] = set()
     for index, facets in traction_facets:
         overlap = np.intersect1d(all_support_facets, facets)
         if overlap.size:
+            fixed_overlap_loads.add(index)
             errors.append(
                 FieldError(
                     (
@@ -357,6 +409,34 @@ def _check_geometry(
                     ),
                     "traction_on_fixed_support",
                     f"Traction overlaps fully fixed support on {overlap.size} facets.",
+                )
+            )
+    for index, (bc, load_mask) in enumerate(zip(loads, traction_node_masks)):
+        if index in fixed_overlap_loads or not load_mask.any():
+            continue
+        vector = (
+            bc["traction"]
+            if bc["kind"] == "uniform_traction"
+            else bc["resultant"]
+        )
+        active_components = [
+            component
+            for component, value in enumerate(vector)
+            if float(value) != 0.0
+        ]
+        if active_components and all(
+            np.all(support_component_masks[component][load_mask])
+            for component in active_components
+        ):
+            errors.append(
+                FieldError(
+                    (
+                        "config.fem.boundary_conditions."
+                        f"{bc['bc_id']}.selector"
+                    ),
+                    "load_components_fully_constrained",
+                    "Every nonzero load component is constrained at all "
+                    "selected boundary nodes, so the load can do no work.",
                 )
             )
 
@@ -380,11 +460,6 @@ def _check_geometry(
 
     spring_masks: dict[str, np.ndarray] = {}
     if config["opt"]["problem_type"] == "compliant_mechanism":
-        support_mask = (
-            np.logical_or.reduce(support_node_masks)
-            if support_node_masks
-            else np.zeros(total_nodes, dtype=bool)
-        )
         for name in ("in_spring", "out_spring"):
             path = f"config.opt.{name}.region"
             mask = compile_region(config["opt"][name]["region"])(node_coords.T)
@@ -398,13 +473,17 @@ def _check_geometry(
                         f"Spring region matched 0 of {total_nodes} displacement nodes.",
                     )
                 )
-            elif np.any(mask & support_mask):
+            spring_component = (
+                0 if config["opt"][name]["direction"] == "x" else 1
+            )
+            overlap = mask & support_component_masks[spring_component]
+            if np.any(overlap):
                 errors.append(
                     FieldError(
                         path,
                         "spring_overlaps_fixed_support",
-                        f"Spring region overlaps {int(np.sum(mask & support_mask))} "
-                        "fully constrained nodes.",
+                        f"Spring region overlaps {int(np.sum(overlap))} nodes "
+                        "constrained in its active component.",
                     )
                 )
         overlap = spring_masks["in_spring"] & spring_masks["out_spring"]
@@ -508,13 +587,16 @@ def _validate_config_impl(
         validation_policy.check_geometry,
     )
     migrated_legacy = False
+    source_version = None
     try:
         if isinstance(request, ValidateConfigRequest):
+            source_version = request.config.schema_version
             parsed_config, migrated_legacy = parse_agent_safe_config(
                 request.config
             )
             parsed_request = ValidateConfigRequest(config=parsed_config)
         elif isinstance(request, dict) and isinstance(request.get("config"), dict):
+            source_version = request["config"].get("schema_version")
             parsed_config, migrated_legacy = parse_agent_safe_config(
                 request["config"]
             )
@@ -549,11 +631,17 @@ def _validate_config_impl(
     normalized = model.model_dump(mode="json")
     warnings = compute_warnings(model)
     if migrated_legacy:
-        warnings.append(
-            "AgentSafeConfig 1.1 was deterministically migrated to canonical "
-            "2.0; legacy consistent units remain unspecified and resultants "
-            "are therefore unavailable."
-        )
+        if source_version in {None, "1.1"}:
+            warnings.append(
+                "AgentSafeConfig 1.1 was deterministically migrated to "
+                "canonical 2.1; legacy consistent units remain unspecified "
+                "and resultants are therefore unavailable."
+            )
+        else:
+            warnings.append(
+                f"AgentSafeConfig {source_version} was deterministically "
+                "migrated to canonical 2.1 without changing its physics."
+            )
     semantic_errors = _semantic_errors(model)
     cost = estimate_cost(
         normalized["mesh"],

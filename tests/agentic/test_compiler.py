@@ -135,6 +135,57 @@ def first_class_draft(*, load_kind="resultant_vector", assumed_field=None):
 
 
 class CompilerTests(unittest.TestCase):
+    def test_roller_and_true_pin_compile_to_component_and_node_constraints(self):
+        draft = first_class_draft()
+        roller = _condition(
+            "S4",
+            "support",
+            {
+                "support.kind": "roller_normal",
+                "selector.kind": "whole_edge",
+                "selector.edge": "bottom",
+            },
+        )
+        pin = _condition(
+            "S5",
+            "support",
+            {
+                "support.kind": "pin",
+                "selector.kind": "boundary_point",
+                "selector.point": [0, 4],
+            },
+        )
+        load = draft.boundary_state.condition("L7")
+        draft = draft.model_copy(update={
+            "boundary_state": BoundaryDraftState(
+                conditions=(roller, pin, load),
+                next_support_number=6,
+                next_load_number=8,
+            )
+        })
+
+        result = compile_formulation_draft(draft)
+        roller_config, pin_config, _ = result.config.fem.boundary_conditions
+        self.assertEqual(roller_config.kind, "zero_displacement")
+        self.assertEqual(roller_config.components, ("y",))
+        self.assertEqual(roller_config.selector.kind, "rectangle_edge")
+        self.assertEqual(pin_config.kind, "zero_displacement")
+        self.assertEqual(pin_config.components, ("x", "y"))
+        self.assertEqual(pin_config.selector.kind, "boundary_node")
+        self.assertEqual(pin_config.selector.point, (0.0, 4.0))
+
+        validation = validate_config_tool({"config": result.config})
+        self.assertEqual(validation["status"], "ok", validation["errors"])
+        pin_record = next(
+            record
+            for record in validation["geometry_report"]["entities"]
+            if record["bc_id"] == "S5"
+        )
+        self.assertEqual(pin_record["entity_kind"], "node")
+        self.assertEqual(pin_record["resolved_point"], [0.0, 4.0])
+        self.assertEqual(pin_record["constrained_components"], ["x", "y"])
+        self.assertEqual(validation["geometry_report"]["rigid_body_rank"], 3)
+
     def test_first_class_resultant_compiles_stable_ids_units_and_selectors(self):
         draft = first_class_draft()
         self.assertTrue(assess_draft(draft).ready)

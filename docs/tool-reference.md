@@ -7,9 +7,9 @@ machine sources of truth are `fenitop/tools/contracts.py`,
 
 Current versions:
 
-- tool contract: `5.0.0`
-- canonical agent-safe config schema: `2.0`
-- accepted legacy input schema: `1.1` through deterministic migration
+- tool contract: `5.1.0`
+- canonical agent-safe config schema: `2.1`
+- accepted prior input schemas: `2.0` and `1.1` through deterministic migration
 - successful-run manifest: `1.0`
 
 ## 1. Scope and trust boundary
@@ -41,7 +41,7 @@ hardcoded Python regions, but those are not agent-tool capabilities.
 | Constitutive model | Isotropic linear elasticity under plane strain | Unit out-of-plane thickness is fixed |
 | Units | Explicit length, force, and stress units with fixed one-length-unit thickness; migrated 1.1 inputs retain an unlabeled consistent-unit sentinel | Pint validates and converts dimensions; missing unit labels are never invented |
 | Material | SIMP interpolation using `young_modulus`, `poisson_ratio`, `penalty`, and positive ersatz `epsilon` | Single isotropic material plus void approximation |
-| Support | Stable `S…` full-vector zero clamp on an expert region or rectangle-edge interval | No roller/component-only support and no nonzero prescribed displacement |
+| Support | Stable `S…` full-vector zero clamp or explicit zero `x`/`y` displacement components on a boundary selector; one-node pins use a boundary point | No nonzero prescribed displacement |
 | Boundary load | Stable `L…` constant effective traction or uniform total resultant on an expert region or rectangle-edge interval | Overlapping load facets are rejected rather than summed; exact point loads remain unsupported |
 | Body force | Constant force-per-volume vector integrated over the domain, with unit thickness | It is not a total force |
 | Passive zones | Cell-center regions forced near solid (`0.99`) or void (`0.01`) | Regions must match cells, remain disjoint, and preserve required neighborhoods |
@@ -73,27 +73,32 @@ unknown fields. Regions describe geometric selection; they do not execute code.
 
 ### 2.1 Canonical boundary representation
 
-Schema 2.0 stores all supports and loads in `fem.boundary_conditions`. Every
+Schema 2.1 stores all supports and loads in `fem.boundary_conditions`. Every
 condition has a strict stable ID and discriminated `kind`:
 
 - `S…` + `fixed` + zero `value`;
+- `S…` + `zero_displacement` + ordered, unique nonempty
+  `components=["x"]`, `["y"]`, or `["x","y"]`;
 - `L…` + `uniform_traction` + `traction=[tx,ty]`; or
 - `L…` + `uniform_resultant` + `resultant=[Fx,Fy]`.
 
-A selector is either:
+A selector is one of:
 
 - `expert_region`, containing the bounded region DSL; or
 - `rectangle_edge`, containing `edge` and a positive interval. A `fraction`
   interval uses `[0,1]` along the edge; a `coordinate` interval uses the
-  configured length unit.
+  configured length unit; or
+- `boundary_node`, containing one requested physical boundary point. It is valid
+  for `zero_displacement`, not distributed loads or full-vector facet clamps.
 
-Schema 1.1 remains accepted by direct, CLI, and MCP inputs. Deterministic code
-validates it, allocates `S1…`/`L1…` in list order, wraps its regions as
-`expert_region`, and returns only canonical 2.0 as `normalized_config`. Its unit
-labels remain intentionally unspecified, so migration preserves existing
-traction behavior but cannot represent a total resultant.
+Schema 2.0 and 1.1 remain accepted by direct, CLI, and MCP inputs. Deterministic
+code upgrades 2.0 without changing physics. For 1.1 it allocates `S1…`/`L1…` in
+list order and wraps regions as `expert_region`. Successful validation returns
+only canonical 2.1 as `normalized_config`. Legacy 1.1 unit labels remain
+intentionally unspecified, so migration preserves traction behavior but cannot
+represent a total resultant.
 
-### 2.2 Conversational finalization into schema 2.0
+### 2.2 Conversational finalization into schema 2.1
 
 The application compiler has two typed front doors. Retained v1
 `ProblemIntent` inputs compile through the compatibility path. A ready
@@ -107,13 +112,25 @@ conversational `ProblemDraft` compiles through the first-class path:
    total resultants as force vectors;
 5. convert semantic rectangle selectors into positive fraction or coordinate
    intervals inside the named edge; and
-6. emit the original stable `S…`/`L…` IDs in canonical schema 2.0.
+6. compile full clamps, edge-normal roller/symmetry components, explicit zero
+   components, and true point pins without changing their physics; and
+7. emit the original stable `S…`/`L…` IDs in canonical schema 2.1.
 
-Supported conversions are whole edge, centered fraction, fraction interval,
+Supported facet conversions are whole edge, centered fraction, fraction interval,
 coordinate interval, physical width about a fractional center, physical
-length/offset from a corner on the named edge, and expert region. Boundary
-points, unspecified extents, invalid corner/edge pairs, and intervals outside
-the edge fail before tool validation.
+length/offset from a corner on the named edge, and expert region. A true pin
+converts an absolute boundary point or edge-relative fractional point into
+`boundary_node`. Unspecified extents, invalid corner/edge pairs, and intervals
+outside the edge fail before tool validation.
+
+The mesh resolver accepts a boundary-node request only on the rectangle boundary,
+selects one nearest boundary mesh node, and reports `requested_point`,
+`resolved_point`, and Euclidean `resolution_error`. Any nonzero snap is a visible
+warning before approval. Validation expands every support into actual
+`(node, component)` rows, uses those rows for the planar rigid-body rank, rejects
+duplicate constrained DOFs, and rejects a component-supported boundary load only
+when every nonzero load component is constrained at every selected load node.
+Dolfinx applies component constraints through vector subspaces.
 
 A named center/middle/midpoint of an identified edge is retained immediately as
 fractional `selector.center=0.5`, even if selector kind or finite extent remains

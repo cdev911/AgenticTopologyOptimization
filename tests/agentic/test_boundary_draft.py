@@ -336,6 +336,33 @@ class BoundaryDraftMergeTests(unittest.TestCase):
         self.assertEqual(center.basis, "derived")
         self.assertEqual(center.source_turn, 1)
 
+    def test_bare_directional_load_location_does_not_become_whole_edge(self):
+        result = merge_boundary_patch(
+            BoundaryDraftState(),
+            BoundaryPatch(creates=(
+                BoundaryCreate(
+                    local_ref="new_load",
+                    kind="load",
+                    fields=(
+                        field("load.magnitude", 10, "10"),
+                        field(
+                            "selector.kind",
+                            "whole_edge",
+                            "on the right",
+                            basis="derived",
+                        ),
+                        field("selector.edge", "right", "right"),
+                    ),
+                ),
+            )),
+            user_message="The load on the right is 10.",
+            turn_number=1,
+        )
+
+        selector = result.state.condition("L1").fact("selector.kind")
+        self.assertEqual(selector.value, "unspecified_extent")
+        self.assertEqual(selector.basis, "derived")
+
     def test_generic_yes_confirms_exactly_one_assumption(self):
         initial = merge_boundary_patch(
             BoundaryDraftState(),
@@ -599,7 +626,7 @@ class BoundaryDraftMergeTests(unittest.TestCase):
         readiness = assess_boundary_state(partial)
         item = readiness.conditions[0]
         self.assertFalse(readiness.ready)
-        self.assertIn("selector.extent", item.missing_fields)
+        self.assertNotIn("selector.extent", item.missing_fields)
         self.assertIn("load.direction", item.missing_fields)
         self.assertEqual(
             item.unconfirmed_fields,
@@ -635,8 +662,8 @@ class BoundaryDraftMergeTests(unittest.TestCase):
             turn_number=1,
         ).state
         item = assess_boundary_state(roller).conditions[0]
-        self.assertEqual(item.capability_limits, ("component_support",))
-        self.assertFalse(item.ready)
+        self.assertEqual(item.capability_limits, ())
+        self.assertTrue(item.ready)
 
 
 class BoundaryDraftIntegrationTests(unittest.TestCase):

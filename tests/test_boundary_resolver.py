@@ -71,7 +71,7 @@ class ConfigMigrationTests(unittest.TestCase):
         self.assertTrue(migrated)
         self.assertTrue(second_migrated)
         self.assertEqual(first, second)
-        self.assertEqual(first.schema_version, "2.0")
+        self.assertEqual(first.schema_version, "2.1")
         self.assertEqual(first.units.kind, "legacy_consistent")
         self.assertEqual(
             [bc.bc_id for bc in first.fem.boundary_conditions],
@@ -85,7 +85,7 @@ class ConfigMigrationTests(unittest.TestCase):
     def test_validation_returns_only_canonical_normalized_config(self):
         result = validate_config_tool({"config": _legacy_smoke()})
         self.assertEqual(result["status"], "ok", result["errors"])
-        self.assertEqual(result["normalized_config"]["schema_version"], "2.0")
+        self.assertEqual(result["normalized_config"]["schema_version"], "2.1")
         self.assertIn(
             "boundary_conditions", result["normalized_config"]["fem"]
         )
@@ -94,6 +94,19 @@ class ConfigMigrationTests(unittest.TestCase):
         )
         self.assertTrue(
             any("migrated" in warning["message"] for warning in result["warnings"])
+        )
+
+    def test_canonical_20_migrates_to_21_without_semantic_change(self):
+        previous = _canonical()
+        previous["schema_version"] = "2.0"
+
+        current, migrated = parse_agent_safe_config(previous)
+
+        self.assertTrue(migrated)
+        self.assertEqual(current.schema_version, "2.1")
+        self.assertEqual(
+            [condition.kind for condition in current.fem.boundary_conditions],
+            ["fixed", "uniform_traction"],
         )
 
     def test_canonical_contract_enforces_ids_intervals_and_resultant_units(self):
@@ -131,6 +144,23 @@ class ConfigMigrationTests(unittest.TestCase):
 
         for config in mutations:
             with self.subTest(config=config), self.assertRaises(ValidationError):
+                AgentSafeConfig.model_validate(config)
+
+    def test_component_contract_requires_canonical_unique_zero_components(self):
+        for components in ([], ["x", "x"], ["y", "x"]):
+            config = _canonical()
+            config["fem"]["boundary_conditions"][0] = {
+                "bc_id": "S1",
+                "kind": "zero_displacement",
+                "selector": {
+                    "kind": "boundary_node",
+                    "point": [0, 0],
+                },
+                "components": components,
+            }
+            with self.subTest(components=components), self.assertRaises(
+                ValidationError
+            ):
                 AgentSafeConfig.model_validate(config)
 
 
@@ -208,6 +238,42 @@ class BoundaryResolverTests(unittest.TestCase):
         self.assertEqual(result.measure, 0.5)
         self.assertIn("single closest facet", result.warning)
         self.assertGreater(result.resolution_error, 0)
+
+    def test_boundary_node_is_exact_or_visibly_snapped(self):
+        from fenitop.boundary_resolver import resolve_boundary
+
+        mesh = self._mesh()
+        exact = resolve_boundary(mesh, {
+            "kind": "boundary_node",
+            "point": [0.0, 2.0],
+        })
+        self.assertEqual(len(exact.node_indices), 1)
+        self.assertEqual(exact.requested_point, (0.0, 2.0))
+        self.assertEqual(exact.resolved_point, (0.0, 2.0))
+        self.assertEqual(exact.resolution_error, 0.0)
+        self.assertIsNone(exact.warning)
+
+        snapped = resolve_boundary(mesh, {
+            "kind": "boundary_node",
+            "point": [0.0, 1.13],
+        })
+        self.assertEqual(snapped.requested_point, (0.0, 1.13))
+        self.assertEqual(snapped.resolved_point, (0.0, 1.0))
+        self.assertAlmostEqual(snapped.resolution_error, 0.13)
+        self.assertIn("snapped", snapped.warning)
+
+    def test_boundary_node_rejects_interior_point(self):
+        from fenitop.boundary_resolver import (
+            BoundaryResolutionError,
+            resolve_boundary,
+        )
+
+        with self.assertRaises(BoundaryResolutionError) as captured:
+            resolve_boundary(self._mesh(), {
+                "kind": "boundary_node",
+                "point": [2.0, 1.0],
+            })
+        self.assertEqual(captured.exception.code, "point_not_on_boundary")
 
     def test_coordinate_interval_outside_edge_is_rejected(self):
         from fenitop.boundary_resolver import (

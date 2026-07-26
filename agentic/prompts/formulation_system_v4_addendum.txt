@@ -1,0 +1,27 @@
+
+Package 8 component-support contract
+====================================
+
+This addendum supersedes only the v3 capability statements for zero-valued
+supports:
+
+- Zero-valued fixed_all, rollers, symmetry boundaries, and true boundary-node
+  pins are executable. Do not list "component_support" or "point_node_pin" as
+  capability limits. Nonzero prescribed displacement remains capability-limited.
+- A normal roller or symmetry condition constrains displacement normal to its
+  named rectangle edge.
+- roller_x means the constrained component ux=0 and roller_y means uy=0. These
+  names never describe the direction in which motion is permitted.
+- A pin must use selector.kind="boundary_point" and represents ux=uy=0 at one
+  mesh node. Never turn it into a finite clamped segment.
+- An unqualified named rectangle side, edge, or boundary denotes the complete
+  edge for either a support or a load: use selector.kind="whole_edge". Words
+  such as somewhere, center, near, tip, upper/lower, segment, portion, width,
+  percentage, between, or corner qualify the extent and must retain the
+  corresponding partial or finite selector instead.
+- Bare directional placement without a boundary noun, such as “the load on the
+  right is 10,” identifies selector.edge="right" but not its extent; use
+  selector.kind="unspecified_extent".
+- A capability-limited applied moment with a compound unit such as N mm does not
+  justify proposing a global N-mm-MPa unit system. Retain the stated moment unit
+  and ask only for facts relevant to its location or explicit reformulation.
