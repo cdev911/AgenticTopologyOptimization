@@ -20,6 +20,7 @@ from agentic.formulation import (
     FormulationTurn,
     ProblemDraft,
     assess_draft,
+    clarification_questions,
     merge_formulation_turn,
     migrate_legacy_boundary_facts,
 )
@@ -69,6 +70,59 @@ def create_load(quote="traction [0,-1] on the right edge"):
 
 
 class BoundaryDraftMergeTests(unittest.TestCase):
+    def test_named_corner_pin_is_retained_without_model_coordinate_arithmetic(self):
+        quote = "Use a pin at the lower-left corner"
+        result = merge_boundary_patch(
+            BoundaryDraftState(),
+            BoundaryPatch(creates=(BoundaryCreate(
+                local_ref="new_pin",
+                kind="support",
+                fields=(
+                    field("support.kind", "pin", quote),
+                    field("selector.kind", "boundary_point", quote),
+                ),
+            ),)),
+            user_message=quote,
+            turn_number=1,
+        )
+
+        pin = result.state.condition("S1")
+        self.assertEqual(pin.fact("selector.from_corner").value, "lower_left")
+        self.assertTrue(assess_boundary_state(result.state).ready)
+
+    def test_readiness_generates_a_human_pin_question_when_model_omits_one(self):
+        readiness = type("Readiness", (), {
+            "missing_fields": ("S1.selector.point_or_edge_center",)
+        })()
+        questions = clarification_questions(readiness)
+        self.assertIn("named rectangle corner", questions[0])
+        self.assertNotIn("point_or_edge_center", questions[0])
+
+    def test_semantic_springs_receive_stable_role_ids(self):
+        quote = "input spring on the center of the left edge"
+        spring = BoundaryCreate(
+            local_ref="new_input_spring",
+            kind="input_spring",
+            fields=(
+                field("spring.direction", "x", quote),
+                field("spring.stiffness", 10, quote),
+                field("spring.unit", "N/m", quote),
+                field("selector.kind", "centered_fraction", quote),
+                field("selector.edge", "left", quote),
+                field("selector.center", 0.5, quote),
+                field("selector.span", 0.2, quote),
+            ),
+        )
+        result = merge_boundary_patch(
+            BoundaryDraftState(),
+            BoundaryPatch(creates=(spring,)),
+            user_message=quote,
+            turn_number=1,
+        )
+        self.assertEqual(result.state.conditions[0].bc_id, "I1")
+        self.assertEqual(result.state.next_input_spring_number, 2)
+        self.assertTrue(assess_boundary_state(result.state).ready)
+
     def test_application_allocates_stable_support_and_load_ids(self):
         message = (
             "clamp the left edge and use traction [0,-1] on the right edge"

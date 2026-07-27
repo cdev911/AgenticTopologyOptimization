@@ -897,6 +897,14 @@ def _run_topopt_impl(
             if worker_result.worker_api_key_present:
                 raise RuntimeError("Solver worker inherited an API key.")
             terminal_state = "succeeded" if response["status"] == "ok" else "failed"
+            typed_error = response.get("error") or {}
+            failure_summary = (
+                f"Solver worker returned typed failure "
+                f"{typed_error.get('code') or typed_error.get('exception_type')}: "
+                f"{typed_error.get('message')}"
+                if terminal_state == "failed"
+                else None
+            )
             lifecycle = update_lifecycle(
                 run_dir,
                 lifecycle,
@@ -905,7 +913,7 @@ def _run_topopt_impl(
                 message=(
                     "Solver worker completed successfully."
                     if terminal_state == "succeeded"
-                    else "Solver worker returned a typed failure."
+                    else failure_summary
                 ),
                 **common_terminal,
             )

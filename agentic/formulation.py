@@ -57,6 +57,7 @@ from agentic.mechanical_units import (
     LengthUnitName,
     MechanicalUnitContext,
     StressUnitName,
+    normalize_scalar,
 )
 
 
@@ -1011,8 +1012,30 @@ def assess_draft(draft: ProblemDraft) -> DraftReadiness:
 
     problem_type = values.get("problem_type")
     if problem_type == "compliant_mechanism":
-        missing.extend(
-            path for path in MECHANISM_REQUIRED_PATHS if path not in values
+        if "compliance_bound" not in values:
+            missing.append("compliance_bound")
+        spring_kinds = [
+            condition.kind
+            for condition in draft.boundary_state.conditions
+            if condition.kind in {"input_spring", "output_spring"}
+        ]
+        for role, legacy_path in (
+            ("input_spring", "input_spring"),
+            ("output_spring", "output_spring"),
+        ):
+            count = spring_kinds.count(role)
+            if count == 0 and legacy_path not in values:
+                missing.append(legacy_path)
+            elif count > 1:
+                semantic_errors.append(
+                    f"Only one {role.replace('_', ' ')} is supported."
+                )
+    elif any(
+        item.kind in {"input_spring", "output_spring"}
+        for item in draft.boundary_state.conditions
+    ):
+        semantic_errors.append(
+            "Mechanism springs are only valid for compliant_mechanism problems."
         )
 
     tractions = values.get("tractions", [])
@@ -1040,7 +1063,12 @@ def assess_draft(draft: ProblemDraft) -> DraftReadiness:
             for fact in condition.facts
             if fact.basis == "assumption"
         )
-        if boundary_loads:
+        boundary_springs = [
+            item
+            for item in draft.boundary_state.conditions
+            if item.kind in {"input_spring", "output_spring"}
+        ]
+        if boundary_loads or boundary_springs:
             unit_readiness = assess_mechanical_units(draft)
             missing.extend(unit_readiness.missing_fields)
             unconfirmed.extend(unit_readiness.unconfirmed_fields)
@@ -1059,6 +1087,23 @@ def assess_draft(draft: ProblemDraft) -> DraftReadiness:
                         f"{condition.bc_id}.{issue.field}: {issue.message}"
                         for issue in resolution.issues
                     )
+                for condition in boundary_springs:
+                    values = condition.values()
+                    if (
+                        "spring.stiffness" in values
+                        and "spring.unit" in values
+                    ):
+                        try:
+                            normalize_scalar(
+                                values["spring.stiffness"],
+                                values["spring.unit"],
+                                "spring_stiffness",
+                                unit_readiness.context,
+                            )
+                        except ValueError as exc:
+                            semantic_errors.append(
+                                f"{condition.bc_id}.spring.unit: {exc}"
+                            )
     _, mesh_errors = _resolved_mesh_divisions(values, bounds)
     semantic_errors.extend(mesh_errors)
     if not first_class and not missing and not unconfirmed:
@@ -1075,6 +1120,67 @@ def assess_draft(draft: ProblemDraft) -> DraftReadiness:
         unconfirmed_fields=tuple(dict.fromkeys(unconfirmed)),
         semantic_errors=tuple(semantic_errors),
     )
+
+
+def clarification_questions(
+    readiness: DraftReadiness,
+    *,
+    existing: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    """Guarantee useful user questions for deterministic readiness gaps."""
+    questions = list(existing)
+    normalized = {" ".join(item.casefold().split()) for item in questions}
+
+    def add(question: str) -> None:
+        key = " ".join(question.casefold().split())
+        if key not in normalized and len(questions) < 3:
+            normalized.add(key)
+            questions.append(question)
+
+    for path in readiness.missing_fields:
+        if len(questions) >= 3:
+            break
+        if path.endswith("selector.point_or_edge_center"):
+            label = path.split(".", 1)[0]
+            add(
+                f"Where exactly should {label} be placed: at which named "
+                "rectangle corner, physical boundary point, or edge midpoint?"
+            )
+        elif path.endswith("spring.direction"):
+            add(f"Should {path.split('.', 1)[0]} act in the x or y direction?")
+        elif path.endswith("spring.stiffness"):
+            add(
+                f"What stiffness should {path.split('.', 1)[0]} use, including "
+                "a force-per-length unit such as N/mm?"
+            )
+        elif path.endswith("spring.unit"):
+            add(
+                f"What force-per-length unit applies to "
+                f"{path.split('.', 1)[0]}'s spring stiffness?"
+            )
+        elif path in {"input_spring", "output_spring"}:
+            add(
+                f"Describe the {path.replace('_', ' ')} location, x/y "
+                "direction, stiffness, and force-per-length unit."
+            )
+        elif path == "domain.bounds":
+            add("What are the rectangle dimensions and its lower-left origin?")
+        elif path == "material.young_modulus":
+            add("What Young's modulus should the material use?")
+        elif path == "material.poisson_ratio":
+            add("What Poisson ratio should the material use?")
+        elif path == "external_load":
+            add("What nonzero load should act on the design?")
+        elif path == "supports":
+            add("How is the design supported?")
+        elif path.startswith(("S", "L", "I", "O")):
+            add(
+                f"Please specify the missing {path.split('.', 1)[1].replace('.', ' ')} "
+                f"for {path.split('.', 1)[0]}."
+            )
+        else:
+            add(f"What value should be used for {path.replace('.', ' ')}?")
+    return tuple(questions)
 
 
 def finalize_draft(draft: ProblemDraft) -> ProblemIntent:
@@ -1158,6 +1264,12 @@ class ConversationFormulator:
             )
 
         readiness = assess_draft(merge.draft)
+        effective_questions = clarification_questions(
+            readiness,
+            existing=turn.questions,
+        )
+        if effective_questions != turn.questions:
+            turn = turn.model_copy(update={"questions": effective_questions})
 
         intent = None
         finalized_draft = None
@@ -1183,7 +1295,18 @@ class ConversationFormulator:
             ConversationMessage(
                 turn=turn_number,
                 role="assistant",
-                content=turn.assistant_message,
+                content=(
+                    turn.assistant_message
+                    + (
+                        "\n\nQuestions:\n"
+                        + "\n".join(
+                            f"- {question}"
+                            for question in effective_questions
+                        )
+                        if effective_questions
+                        else ""
+                    )
+                ),
             ),
         )
         next_session = FormulationSession(
@@ -1191,7 +1314,7 @@ class ConversationFormulator:
             messages=messages,
             model_state=model_state,
             status=status,
-            questions=turn.questions,
+            questions=effective_questions,
             unsupported_features=turn.unsupported_features,
         )
         return FormulationStep(

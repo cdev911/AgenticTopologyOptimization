@@ -9,7 +9,7 @@ Last updated: 2026-07-27
 
 - **Release**: v1 numerical/execution behavior remains complete, and the post-v1
   conversational Phase 1 is now the released Streamlit entry path.
-- **Verification**: 303 tests plus 197 subtests pass in the pinned Docker image,
+- **Verification**: 311 tests plus 197 subtests pass in the pinned Docker image,
   and `pip check` reports no broken requirements. This includes historical
   numerical baselines, exact resultant integration, deterministic selector/error
   behavior, UI approval behavior, and solver lifecycle tests.
@@ -103,16 +103,27 @@ Last updated: 2026-07-27
   Compose, dependency, complete test, and UI-health boundaries. The unchanged
   live contract retains Package 8's clean 53/53 v7 result rather than spending
   API credit to repeat the same measurement.
-- **Acceptance preparation**: `docs/acceptance-scenarios.md` now defines five
-  realistic review-first journeys spanning both optimization types, distributed
-  traction, pressure, resultant conversion, component supports, multi-load
-  correction, and four distinct mesh/default interactions. It separates
-  formulation review from later execution, records expected evidence rather than
-  invented numerical outcomes, publishes a coverage/gap matrix, and includes
-  no-run capability-limit probes.
-- **Next action**: use the released workflow for broader user-led acceptance and
-  finalize these prompts before billed calls or solves; then turn every observed
-  semantic or numerical failure into a versioned regression case.
+- **Acceptance result**: the first five-scenario UI run is reviewed in
+  `docs/acceptance-run-2026-07-27.md`. Scenarios 1 and 3 formulated, approved,
+  solved, and produced the expected plot gallery; Scenario 4 formulated correctly
+  through Turn 2 but exposed an OC tolerance failure after its beta transition;
+  Scenario 2 lost a named-corner pin before finalization; and Scenario 5 exposed
+  the older raw spring contract.
+- **Just implemented**: acceptance repair v5 adds stable semantic `I…`/`O…`
+  springs with shared selectors, per-field provenance, force-per-length unit
+  normalization, matched-DOF approval evidence, and deterministic compilation to
+  the unchanged solver region contract. Named pin corners resolve from arbitrary
+  bounds; readiness owns human fallback questions; validation warnings are
+  approval-visible and inherited by final evidence; compliance explanations omit
+  the mechanism-only zero objective; typed solver failures enrich lifecycle
+  messages; and OC uses a scale-aware sign-noise threshold while preserving its
+  material-positive-gradient rejection.
+- **Numerical confirmation**: the exact failed Scenario 4 config completed 60
+  contained iterations across the beta transition with lifecycle `succeeded` and
+  normal `max_iterations_reached`. No billed model evaluation was run.
+- **Next action**: repeat all five UI journeys with the v5 live formulator,
+  including Scenario 4's omitted Turn 3. Use that run as user-level confirmation;
+  do not re-open deterministic repairs unless the repeated evidence differs.
 
 ## 1. Product
 
@@ -243,9 +254,9 @@ The live Streamlit formulation configuration is:
 - `gpt-5.6-sol` through `OPENAI_FORMULATION_MODEL`;
 - medium reasoning through `OPENAI_FORMULATION_REASONING_EFFORT`;
 - `reasoning.context=all_turns` and `previous_response_id`;
-- prompt `formulation-system-v4`, composed from the released v3 base plus the
-  Package 8 component-support addendum;
-- strict `OpenAIFormulationTurn` output with a 7,162-character schema and flat
+- prompt `formulation-system-v5`, composed from the released v3 base plus the
+  Package 8 component-support and acceptance-repair addenda;
+- strict `OpenAIFormulationTurn` output with a 6,787-character schema and flat
   first-class BC operations;
 - SDK retries disabled, one application-owned deterministic patch repair, and one
   continuation-expiry full-history recovery; and
@@ -520,6 +531,27 @@ contract, prompt update, numerical tests, and an explicit decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — Close acceptance defects at their owning deterministic
+  boundaries**: make named corners and mechanism springs retained semantic state,
+  normalize spring stiffness as force/length, compile selectors into the existing
+  solver region contract, guarantee readiness-owned human questions, promote
+  warnings to approval/final evidence, and distinguish compliance from signed
+  mechanism objective presentation. Keep the OC sign safeguard but use a
+  `max(1e-12, 1e-7 × global gradient scale)` noise threshold and retain a
+  material-positive counterexample. Reason: prompt arithmetic or removing a
+  numerical guard would hide the integration seams rather than repair them. The
+  exact failed transition and complete local suite pass without billed calls.
+- **2026-07-27 — Treat the first user acceptance run as repair evidence, not a
+  demo success count**: retain the successful compliance/resultant/default/
+  approval behavior, but make the observed OC projection-transition failure and
+  incomplete mechanism-spring contract P0. Make named-corner pin retention,
+  deterministic fallback questions, visible validation warnings, and
+  objective-specific explanation P1. Do not weaken the scenarios to fit current
+  internals; add versioned semantic and numerical regressions, then repeat the
+  same user journeys including the omitted Scenario 4 correction. Reason:
+  end-to-end transcripts revealed integration gaps that isolated passing tests
+  did not, and the learning objective is a functioning tool rather than a
+  carefully constrained demonstration.
 - **2026-07-27 — Separate realistic acceptance journeys from semantic and
   capability-limit probes**: keep five main scenarios readable as engineering
   problems while deliberately varying automatic defaults, exact axis-specific
@@ -867,3 +899,12 @@ Reverse chronological; final decisions only.
 - [x] User acceptance preparation — five realistic review-first scenarios,
       varied mesh/default interaction, expected evidence, coverage/gap matrix,
       and separate capability-limit probes.
+- [x] First user acceptance diagnosis — five PDF transcripts reviewed against
+      expected semantics, durable runs and plots inspected, Scenario 4 numerical
+      failure reproduced, and a prioritized regression-backed repair program
+      recorded.
+- [x] Acceptance repair v5 — semantic/dimensioned mechanism springs,
+      named-corner pin resolution, deterministic fallback questions, visible and
+      inherited warnings, objective-specific explanation, richer failure
+      lifecycle evidence, scale-aware OC handling, exact transition confirmation,
+      and complete local verification.

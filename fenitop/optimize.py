@@ -56,18 +56,29 @@ def optimality_criteria(rho, rho_min, rho_max, V, dCdrho, dVdrho, move=0.05):
             code="oc_invalid_volume_gradient", component=component,
             message="OC requires a strictly positive volume gradient.",
         ))
-    ratio_numerator = -dCdrho / dVdrho
-    if np.any(ratio_numerator < -1e-12):
+    # Projection/filter linear solves can leave isolated positive sensitivity
+    # noise at continuation transitions. Compare it with the global gradient
+    # scale: clip only values insignificant at the solver's numerical accuracy,
+    # while preserving the guard against materially non-descent gradients.
+    comm = MPI.COMM_WORLD
+    local_scale = float(np.max(np.abs(dCdrho))) if dCdrho.size else 0.0
+    gradient_scale = comm.allreduce(local_scale, op=MPI.MAX)
+    positive_tolerance = max(1e-12, 1e-7 * gradient_scale)
+    local_positive = float(np.max(dCdrho)) if dCdrho.size else 0.0
+    maximum_positive = comm.allreduce(local_positive, op=MPI.MAX)
+    if maximum_positive > positive_tolerance:
         raise NumericalError(NumericalFailure(
             code="oc_non_descent_gradient", component=component,
             message=(
-                "OC requires a non-positive compliance gradient so its "
-                "square-root update is real and descending."
+                "OC found a materially positive compliance sensitivity "
+                f"({maximum_positive:.6g}) above its scale-aware numerical "
+                f"tolerance ({positive_tolerance:.6g})."
             ),
         ))
+    dCdrho = np.minimum(dCdrho, 0.0)
+    ratio_numerator = -dCdrho / dVdrho
     ratio_numerator = np.maximum(ratio_numerator, 0.0)
     lb, ub = 0.0, 1e6
-    comm = MPI.COMM_WORLD
     minimum_linearized_volume = V + comm.allreduce(
         dVdrho @ (rho_min - rho), op=MPI.SUM
     )

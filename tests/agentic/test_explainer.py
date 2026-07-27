@@ -127,7 +127,7 @@ class ExplainerTests(unittest.TestCase):
             ["F001", "F002", "F003", "F004", "F005"],
         )
         self.assertEqual(ledger.facts[2].text, (
-            "Final compliance: 1.25; final volume: 0.4; final objective: 0.0."
+            "Final compliance objective: 1.25; final volume: 0.4."
         ))
         self.assertNotIn("/workspace/results", ledger.model_dump_json())
 
@@ -141,13 +141,28 @@ class ExplainerTests(unittest.TestCase):
 
         self.assertIn("# Result explanation", result.markdown)
         self.assertIn(
-            "- Final compliance: 1.25; final volume: 0.4; "
-            "final objective: 0.0. `[F003]`",
+            "- Final compliance objective: 1.25; final volume: 0.4. `[F003]`",
             result.markdown,
         )
+        self.assertNotIn("final objective: 0.0", result.markdown)
         sent = json.loads(llm.messages[0][1]["content"])
         self.assertIn("evidence_ledger", sent)
         self.assertNotIn("run_directory", sent)
+
+    def test_mechanism_ledger_names_the_signed_output_objective(self):
+        analysis = analysis_response()
+        metrics = analysis.metrics.model_copy(update={
+            "final_objective": -0.125,
+            "constraints": analysis.metrics.constraints.model_copy(update={
+                "compliance_bound": 2.0,
+                "compliance_bound_satisfied": True,
+            }),
+        })
+        ledger = build_evidence_ledger(
+            analysis.model_copy(update={"metrics": metrics})
+        )
+        self.assertIn("signed output objective: -0.125", ledger.facts[2].text)
+        self.assertNotIn("compliance objective", ledger.facts[2].text)
 
     def test_unknown_or_omitted_required_ids_are_rejected(self):
         ledger = build_evidence_ledger(analysis_response())

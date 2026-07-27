@@ -228,11 +228,15 @@ class ExpectedBoundaryCondition(StrictEvaluationModel):
                 raise ValueError(
                     "distance_from_corner requires edge, corner, start, and span."
                 )
-        if self.selector_kind == "boundary_point" and self.point is None:
+        if (
+            self.selector_kind == "boundary_point"
+            and self.point is None
+            and self.from_corner is None
+        ):
             if self.edge is None or self.center is None:
                 raise ValueError(
-                    "boundary_point requires absolute point or edge plus "
-                    "relative center."
+                    "boundary_point requires an absolute point, named corner, "
+                    "or edge plus relative center."
                 )
             if not 0 <= self.center <= 1:
                 raise ValueError(

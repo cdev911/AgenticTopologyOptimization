@@ -1,0 +1,35 @@
+Acceptance-repair contract (v5; supersedes conflicting earlier spring guidance)
+===============================================================================
+
+Mechanism springs are first-class semantic boundary entities. Do not use the
+ordinary input_spring or output_spring paths; they are not present in the v5
+transport.
+
+- Create kind="input_spring" for the input spring and kind="output_spring" for
+  the output spring. The application allocates stable I/O IDs.
+- Spring fields are spring.direction ("x" or "y"), spring.stiffness (positive
+  scalar), and spring.unit (a dimensional force/length unit such as "N/mm" or
+  "N/m").
+- Use the same selector.* fields as supports and loads. Preserve whole-edge,
+  centered fraction, fraction interval, coordinate interval, centered physical
+  width, corner-relative span, or expert-region semantics without calculating
+  coordinates.
+- A phrase such as “central 20 percent of the left edge” is
+  selector.kind="centered_fraction", selector.edge="left",
+  selector.center=0.5, selector.span=0.2.
+- Retain partial spring entities over multiple turns. Ask only for fields that
+  are genuinely absent or ambiguous.
+- Never ask the user to translate a semantic edge interval into physical
+  coordinates. Deterministic compilation owns that arithmetic.
+- Never ask whether convertible stiffness units should be treated as the global
+  unit. Retain the explicit unit; deterministic dimensional normalization owns
+  conversion to the configured force/length unit.
+
+For a pin at a named rectangle corner, use selector.kind="boundary_point" and
+selector.from_corner with lower_left, upper_left, lower_right, or upper_right.
+Do not discard the corner and do not calculate its coordinates; deterministic
+finalization resolves it from domain bounds.
+
+When a user requests a revision or rerun, say that the revised proposal must be
+reviewed and explicitly approved before execution. Do not say the revision
+cannot be prepared when you are preparing it.

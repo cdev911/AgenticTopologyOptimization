@@ -91,11 +91,12 @@ def _draft_location(condition: BoundaryConditionDraft) -> str:
         return f"corner-relative segment on the {edge_text}; extent incomplete"
     if kind == "boundary_point":
         point = values.get("selector.point")
-        return (
-            f"boundary point {_vector(point)}"
-            if point is not None
-            else f"point on the {edge_text}; location incomplete"
-        )
+        if point is not None:
+            return f"boundary point {_vector(point)}"
+        corner = values.get("selector.from_corner")
+        if corner is not None:
+            return f"{str(corner).replace('_', ' ')} corner"
+        return f"point on the {edge_text}; location incomplete"
     if kind == "expert_region":
         return (
             "expert region "
@@ -118,6 +119,19 @@ def _draft_physics(condition: BoundaryConditionDraft) -> str:
             "pin": "point-node pin",
         }
         return names.get(values.get("support.kind"), "support type not yet specified")
+    if condition.kind in {"input_spring", "output_spring"}:
+        role = "input spring" if condition.kind == "input_spring" else "output spring"
+        stiffness = values.get("spring.stiffness")
+        unit = values.get("spring.unit")
+        direction = values.get("spring.direction")
+        parts = [role]
+        if direction is not None:
+            parts.append(f"{direction}-direction")
+        if stiffness is not None:
+            parts.append(
+                _number(stiffness) + (f" {unit}" if unit is not None else "")
+            )
+        return " · ".join(parts)
 
     kind = values.get("load.kind")
     vector = values.get("load.vector")
@@ -170,7 +184,12 @@ def draft_boundary_cards(state: BoundaryDraftState) -> tuple[BoundaryCard, ...]:
             )
         details.extend(check.semantic_errors)
         status = "ready for deterministic compilation" if check.ready else "in progress"
-        title = "Support" if condition.kind == "support" else "Load"
+        title = {
+            "support": "Support",
+            "load": "Load",
+            "input_spring": "Input spring",
+            "output_spring": "Output spring",
+        }[condition.kind]
         cards.append(
             BoundaryCard(
                 bc_id=condition.bc_id,

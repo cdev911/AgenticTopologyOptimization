@@ -36,8 +36,8 @@ from agentic.formulation import (
 )
 
 
-PROMPT_VERSION = "formulation-system-v4"
-ADAPTER_ID = "openai-responses-v4"
+PROMPT_VERSION = "formulation-system-v5"
+ADAPTER_ID = "openai-responses-v5"
 DEFAULT_MODEL = "gpt-5.6-sol"
 ReasoningEffort = Literal["low", "medium", "high", "xhigh", "max"]
 ErrorKind = Literal["provider", "invalid_response", "refusal"]
@@ -55,8 +55,6 @@ LiveDraftPath = Literal[
     "body_force",
     "volume_fraction",
     "compliance_bound",
-    "input_spring",
-    "output_spring",
     "mesh.divisions",
     "mesh.long_short_divisions",
     "mesh.cell_type",
@@ -148,7 +146,7 @@ class OpenAIBoundaryCreate(StrictOpenAIFormulationModel):
 
 
 class OpenAIBoundaryUpdate(StrictOpenAIFormulationModel):
-    bc_id: str = Field(pattern=r"^[SL][1-9][0-9]*$")
+    bc_id: str = Field(pattern=r"^[SLIO][1-9][0-9]*$")
     field: BoundaryField
     value_json: str
     basis: BoundaryUpdateBasis
@@ -174,7 +172,7 @@ class OpenAIBoundaryUpdate(StrictOpenAIFormulationModel):
 
 
 class OpenAIBoundaryDelete(StrictOpenAIFormulationModel):
-    bc_id: str = Field(pattern=r"^[SL][1-9][0-9]*$")
+    bc_id: str = Field(pattern=r"^[SLIO][1-9][0-9]*$")
     source_quote: str
     rationale: str
 
@@ -183,7 +181,7 @@ class OpenAIBoundaryDelete(StrictOpenAIFormulationModel):
 
 
 class OpenAIBoundaryConfirm(StrictOpenAIFormulationModel):
-    bc_id: str = Field(pattern=r"^[SL][1-9][0-9]*$")
+    bc_id: str = Field(pattern=r"^[SLIO][1-9][0-9]*$")
     field: BoundaryField
     source_quote: str
     rationale: str
@@ -325,6 +323,7 @@ def load_system_prompt() -> str:
         for name in (
             "formulation_system_v3.txt",
             "formulation_system_v4_addendum.txt",
+            "formulation_system_v5_addendum.txt",
         )
     )
     if not prompt:

@@ -344,6 +344,22 @@ class DirectionalSensitivityTests(unittest.TestCase):
 
 
 class OptimizerGuardTests(unittest.TestCase):
+    def test_oc_clips_only_scale_insignificant_positive_sensitivity_noise(self):
+        from fenitop.optimize import optimality_criteria
+
+        updated, change, status = optimality_criteria(
+            rho=np.array([0.5, 0.5]),
+            rho_min=np.array([0.0, 0.0]),
+            rho_max=np.array([1.0, 1.0]),
+            V=0.0,
+            dCdrho=np.array([-1.0, 1e-8]),
+            dVdrho=np.array([1.0, 1.0]),
+            move=0.1,
+        )
+        self.assertTrue(np.all(np.isfinite(updated)))
+        self.assertTrue(np.isfinite(change))
+        self.assertTrue(status.converged)
+
     def test_oc_rejects_a_non_descent_square_root_update(self):
         from fenitop.numerics import NumericalError
         from fenitop.optimize import optimality_criteria

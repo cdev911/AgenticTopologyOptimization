@@ -828,7 +828,7 @@ class OpenAIFormulationAgentTests(unittest.TestCase):
         )
 
         prompt = load_system_prompt()
-        self.assertEqual(PROMPT_VERSION, "formulation-system-v4")
+        self.assertEqual(PROMPT_VERSION, "formulation-system-v5")
         self.assertIn("Package 8 component-support contract", prompt)
         self.assertIn("Collaborate with the user over as many turns", prompt)
         self.assertIn("repair_feedback", prompt)
@@ -840,6 +840,8 @@ class OpenAIFormulationAgentTests(unittest.TestCase):
         self.assertIn("total resultant", prompt)
         self.assertIn("highest-information", prompt)
         self.assertIn("nonzero prescribed displacement", prompt)
+        self.assertIn("Mechanism springs are first-class semantic", prompt)
+        self.assertIn("named rectangle corner", prompt)
 
     def test_configuration_rejects_unbounded_values(self):
         with self.assertRaises(ValueError):

@@ -958,6 +958,83 @@ a numerical benchmark only after its formulation and real output have been
 reviewed; invented “expected” objective values or topology pictures would defeat
 the evidence boundary.
 
+### 16.13 Real user journeys expose contract seams that isolated gates miss
+
+The first five-scenario PDF review validated much of the architecture: natural
+compliance formulation, mesh-aware distributed loads, resultant conversion,
+visible defaults, explicit approval, contained execution, and plot artifacts all
+worked together. It also found defects that the 303-test and 53-case formulation
+gates had not exposed.
+
+The simply supported beam showed that understanding a phrase in model prose is
+not enough. “Lower-left corner” was recognized, but the typed boundary-point
+selector lost that semantic fact and readiness later requested an internal
+`point_or_edge_center` field. Semantic language must survive in canonical state
+until deterministic geometry can resolve it. Deterministic readiness must also
+own a human-question fallback; otherwise a good model turn can still produce an
+unusable conversation.
+
+The mechanism case revealed a broader version of the same seam. Supports and
+loads had gained first-class semantic edge selectors and unit-bearing values,
+while input and output springs still crossed the old raw-region/bare-number
+contract. The result was an assistant asking the user to calculate coordinates
+and interpret `N/m` versus `N/mm` for the implementation. A feature is not
+agentically supported merely because the solver has fields for it. Every
+user-facing physical entity needs semantic location, dimensional quantity,
+provenance, deterministic compilation, and review evidence.
+
+The mixed-load solve added a numerical lesson. A strict OC sign check correctly
+protects a square-root update from materially invalid sensitivities, but an
+absolute `1e-12` threshold rejected one tiny positive value after a projection
+beta transition while the dominant gradient remained eight orders of magnitude
+larger. Numerical safety checks need scale-aware tolerances and counterexamples:
+we should clip measured roundoff while continuing to reject a genuine sign
+failure. Removing the guard would be as wrong as keeping an unjustified absolute
+threshold.
+
+Finally, evidence can exist without being visible at the decision point. The
+near-incompressibility warning was correctly produced by validation but hidden in
+a collapsed trace during approval and omitted from the final fact ledger.
+Informed approval depends on presentation contracts as well as validation
+contracts.
+
+These failures do not justify simplifying the acceptance prompts. The prompts
+did their job: they represented credible engineering conversations and exposed
+where implementation layers did not yet compose. The repair process should keep
+the problems stable, add regressions at each failed seam, and then repeat the same
+journeys.
+
+### 16.14 Repair semantic seams at their owning layer
+
+The acceptance repair did not add special-case prompt arithmetic. Named pin
+corners became retained selector facts and deterministic bounds-to-point
+resolution. Mechanism springs joined the application-owned entity catalog with
+stable input/output identities, shared selectors, provenance, partial readiness,
+and force-per-length normalization. The solver still receives its established
+bounded region and scalar stiffness contract. This is the useful migration
+pattern: improve the user-facing intermediate representation, then compile into a
+trusted numerical surface instead of teaching the model an internal workaround.
+
+Question quality also needs deterministic redundancy. The model remains
+responsible for natural, context-sensitive questions, but readiness now maps any
+unanswered canonical gap to a human fallback. That fallback is stored in
+conversation history as well as displayed, so a model omission cannot strand the
+user or show only an internal field path.
+
+Numerical safety was preserved rather than disabled. The OC updater measures the
+largest positive sensitivity against the global gradient scale, clips only the
+`1e-7`-relative noise band, and still rejects a material positive gradient. A
+synthetic accept/reject pair protects the rule, and the exact failed bracket
+configuration passed through iteration 60 and the beta transition that had
+previously aborted.
+
+The test strategy followed the cost boundary. New regressions were written before
+execution, one focused 63-test checkpoint covered the changed seams, one exact
+contained numerical confirmation exercised the real failure, and the complete
+local suite ran only at the integration checkpoint (plus one necessary rerun
+after a minimal test-double compatibility repair). No billed live-model gate was
+used to prove deterministic behavior.
+
 ## 17. How we will continue learning
 
 We will use these rules for the remaining work:
@@ -1049,5 +1126,14 @@ This condensed trail connects the lessons above to the implementation order:
 - **2026-07-27** — added five review-first user acceptance journeys with distinct
   mesh interaction paths, multi-load correction, mechanism education, a coverage
   matrix, explicit gaps, and separate no-run capability-limit probes.
-- **Next** — broaden user-led acceptance beyond the fixed corpus and turn new
-  failures into versioned regression cases.
+- **2026-07-27** — reviewed the five user-run PDF transcripts, confirmed the
+  working approval/resultant/default/output paths, reproduced the mixed-load OC
+  failure at a projection transition, and prioritized semantic springs,
+  named-corner pins, warning visibility, and objective-specific evidence.
+- **2026-07-27** — completed the acceptance repair: semantic/dimensioned springs,
+  named-corner pins, deterministic fallback questions, visible/inherited
+  warnings, objective-specific explanation, richer failure lifecycle messages,
+  and scale-aware OC handling. The exact failed transition and the 311-test plus
+  197-subtest local checkpoint pass without billed calls.
+- **Next** — repeat the same five UI journeys, including the Scenario 4
+  correction turn that was skipped in the first run.
