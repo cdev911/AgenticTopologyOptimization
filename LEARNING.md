@@ -348,8 +348,8 @@ reduction. Six multi-turn evaluation seeds cover disordered descriptions,
 corrections, load negotiation, unsupported reformulation, conflicts, and casually
 stated numerical preferences.
 
-The provider-independent foundation and live Responses adapter are now tested.
-The released Streamlit entry path has not yet migrated from the v1 interpreter.
+The provider-independent foundation and live Responses adapter are tested and now
+drive the released Streamlit entry path.
 
 ## 14. What the live formulation implementation taught us
 
@@ -471,7 +471,77 @@ This implementation follows the official guidance to use
 [structured Pydantic output](https://developers.openai.com/api/docs/guides/structured-outputs),
 lean prompts, and explicit approval boundaries.
 
-## 15. How we will continue learning
+## 15. What the UI migration taught us
+
+### 15.1 Connecting two correct subsystems still needs a typed boundary
+
+The formulator could already produce a strict `ProblemIntent`, and the
+orchestrator could already compile and validate one. Calling compiler functions
+directly from Streamlit would nevertheless have made the interface a new source
+of workflow authority.
+
+We added `DeterministicOrchestrator.prepare_formulation()`. It accepts a complete
+`FormulationStep`, verifies that deterministic status is `ready_for_review` and
+that a strict intent exists, then owns compilation and validation through the
+existing path. A partial, conflicted, assumed, or repair-needed draft cannot cross
+that method.
+
+The lesson is that integration code is a trust boundary, not just glue. Its input
+contract should express the state transition it is allowed to perform.
+
+### 15.2 “Ready for review” and “approved to execute” must remain different states
+
+The new UI can reach a ready formulation automatically after any user turn. It
+still only produces `AwaitingRunApproval`; it never submits a job. The later user
+message must independently match the deterministic whole-message approval
+classifier before the orchestrator creates `ValidatedWorkflow`.
+
+A subtler case appears when the user describes a change while an old proposal is
+awaiting approval. The UI now clears that approvable outcome before asking the
+model to interpret the revision. If the API times out or returns unusable output,
+the old parameters do not silently remain eligible for a later “yes.”
+
+The lesson is that invalidating stale authority is as important as granting new
+authority. A failed edit must fail closed.
+
+### 15.3 The canonical draft should be visible at the user's level
+
+Streamlit now shows accepted paths, values, and basis directly. Missing fields,
+unconfirmed assumptions, capability limits, semantic conflicts, and rejected
+patches are also visible without opening a diagnostic panel. Exact source quotes,
+concise modeling rationales, and revision records live in an inspectable expander.
+
+This gives the user enough information to correct the engineering formulation
+without presenting private chain-of-thought. Public provenance and private model
+reasoning are different things.
+
+### 15.4 Model prose should not determine run identity
+
+Responses can phrase the same question differently across otherwise equivalent
+conversations. If assistant prose were included in the durable idempotency
+material, those wording differences could create different run IDs for the same
+user turns and compiled configuration.
+
+`ConversationContext.from_formulation_session()` therefore retains ordered user
+turns for workflow identity and excludes assistant text. The normalized compiled
+configuration and defaults profile remain part of the idempotency key.
+
+The lesson is to keep nondeterministic presentation out of deterministic identity
+unless it carries required semantics.
+
+### 15.5 UI conversation behavior can be tested without API billing
+
+Streamlit application tests inject a canned `ConversationFormulator` while using
+the same typed turns, merge rules, readiness checks, and session state as the live
+path. They verify multi-turn retention, visible assumptions and capability limits,
+field-specific failures, ready-intent handoff, absence of job submission before
+approval, and stale-proposal invalidation.
+
+The model itself remains covered by the separate billed formulation evaluation.
+This separation keeps ordinary regression tests fast and deterministic while
+retaining a real-model quality gate.
+
+## 16. How we will continue learning
 
 We will use these rules for the remaining work:
 
@@ -487,10 +557,10 @@ We will use these rules for the remaining work:
 9. Keep `README.md` about the current product, `docs/spec.md` about current
    decisions, and this file about accumulated learning.
 
-The next lesson should come from making the live formulation conversation work
-well—not from keeping the design artificially simple.
+The next lesson should come from user-led live UI conversations and the failures
+they reveal—not from keeping the design artificially simple.
 
-## 16. Milestone trail
+## 17. Milestone trail
 
 This condensed trail connects the lessons above to the implementation order:
 
@@ -513,5 +583,8 @@ This condensed trail connects the lessons above to the implementation order:
 - **2026-07-27** — implemented the live Responses adapter, persisted continuation,
   bounded structured repair, strict transport conversion, semantic partial facts,
   v2 live graders, and the measured Sol/Terra comparison.
-- **Next** — migrate the UI while retaining the existing compiler, validator,
-  contained solver, evidence, and explicit approval boundaries.
+- **2026-07-27** — migrated Streamlit to the typed multi-turn formulation session,
+  added the ready-step orchestrator bridge, visible draft/provenance/error states,
+  stable user-turn workflow identity, and stale-approval invalidation.
+- **Next** — conduct live UI acceptance and convert real conversational or
+  presentation failures into versioned evaluations and regression tests.

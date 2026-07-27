@@ -9,12 +9,20 @@ from agentic.explainer import (
     ExplanationPlan,
     ExplanationResult,
 )
+from agentic.formulation import (
+    ConversationFormulator,
+    ConversationMessage,
+    DraftUpdate,
+    FormulationSession,
+    FormulationTurn,
+)
 from agentic.intent import InterpretationEnvelope
 from agentic.orchestrator import (
     AnalysisFailedWorkflow,
     AwaitingClarification,
     AwaitingRunApproval,
     CompletedWorkflow,
+    ConversationContext,
     DeterministicOrchestrator,
 )
 from fenitop.tools.contracts import (
@@ -130,6 +138,59 @@ class FakeInterpreter:
         return self.results.pop(0)
 
 
+class CannedFormulationAgent:
+    def __init__(self, turns):
+        self.turns = list(turns)
+
+    def formulate(self, _request):
+        return self.turns.pop(0)
+
+
+def ready_formulation_step():
+    user = (
+        "Minimize compliance on [[0,0],[10,10]] with E 100, nu 0.3, "
+        "the left edge fixed, traction [0,-1] on the right, and 40% material."
+    )
+
+    def update(path, value):
+        return DraftUpdate(
+            path=path,
+            value=value,
+            basis="explicit",
+            source_quote=user,
+            rationale="Directly stated problem fact.",
+        )
+
+    turn = FormulationTurn(
+        assistant_message="The problem is complete and ready for review.",
+        updates=(
+            update("problem_type", "minimize_compliance"),
+            update("domain.bounds", [[0, 0], [10, 10]]),
+            update("material.young_modulus", 100),
+            update("material.poisson_ratio", 0.3),
+            update("support_edges", ["left"]),
+            update(
+                "tractions",
+                [
+                    {
+                        "edge_segment": {
+                            "edge": "right",
+                            "center_fraction": 0.5,
+                            "span_fraction": 1.0,
+                        },
+                        "vector": [0, -1],
+                    }
+                ],
+            ),
+            update("volume_fraction", 0.4),
+        ),
+        declared_state="ready",
+    )
+    return ConversationFormulator(
+        CannedFormulationAgent([turn])
+    ).start(user)
+
+
 def approved(orchestrator, request="request"):
     awaiting = orchestrator.start(request)
     if not isinstance(awaiting, AwaitingRunApproval):
@@ -230,6 +291,99 @@ class RecordingExplainer:
 
 
 class OrchestratorTests(unittest.TestCase):
+    def test_ready_formulation_is_the_typed_compile_validate_entry(self):
+        timeline = []
+        validator = RecordingValidator(timeline=timeline)
+        orchestrator = DeterministicOrchestrator(
+            validator=validator,
+            event_callback=lambda event: timeline.append(event.stage),
+        )
+        step = ready_formulation_step()
+
+        outcome = orchestrator.prepare_formulation(step)
+
+        self.assertIsInstance(outcome, AwaitingRunApproval)
+        self.assertEqual(
+            timeline,
+            [
+                "formulated",
+                "defaults_applied",
+                "validator",
+                "validated",
+                "approval_requested",
+            ],
+        )
+        self.assertEqual(
+            outcome.conversation.original_request,
+            step.session.messages[0].content,
+        )
+        self.assertEqual(len(validator.requests), 1)
+
+    def test_nonready_formulation_cannot_compile_or_validate(self):
+        validator = RecordingValidator()
+        gathering = ConversationFormulator(
+            CannedFormulationAgent(
+                [
+                    FormulationTurn(
+                        assistant_message="I still need the material and load.",
+                        questions=("What material and load should be used?",),
+                    )
+                ]
+            )
+        ).start("Make a rectangular cantilever.")
+        orchestrator = DeterministicOrchestrator(validator=validator)
+
+        with self.assertRaisesRegex(ValueError, "deterministically ready"):
+            orchestrator.prepare_formulation(gathering)
+
+        self.assertEqual(validator.requests, [])
+
+    def test_formulation_conversation_identity_uses_ordered_user_turns(self):
+        session = FormulationSession(
+            messages=(
+                ConversationMessage(
+                    turn=1,
+                    role="user",
+                    content="Make a ten by five rectangle.",
+                ),
+                ConversationMessage(
+                    turn=1,
+                    role="assistant",
+                    content="What material and load should be used?",
+                ),
+                ConversationMessage(
+                    turn=2,
+                    role="user",
+                    content="Use E 100 and a downward traction.",
+                ),
+                ConversationMessage(
+                    turn=2,
+                    role="assistant",
+                    content="I retained those facts.",
+                ),
+            )
+        )
+
+        context = ConversationContext.from_formulation_session(session)
+
+        self.assertEqual(
+            context.original_request,
+            "Make a ten by five rectangle.",
+        )
+        self.assertEqual(len(context.clarifications), 1)
+        self.assertEqual(
+            context.clarifications[0].answer,
+            "Use E 100 and a downward traction.",
+        )
+        self.assertNotIn(
+            "I retained those facts.",
+            context.model_dump_json(),
+        )
+
+    def test_legacy_start_requires_an_interpreter(self):
+        with self.assertRaisesRegex(RuntimeError, "No legacy intent interpreter"):
+            DeterministicOrchestrator().start("Optimize a beam.")
+
     def test_ready_compiles_emits_notice_then_validates_exact_typed_request(self):
         timeline = []
         validator = RecordingValidator(timeline=timeline)

@@ -7,36 +7,34 @@ Last updated: 2026-07-27
 
 ## 0. Current Status
 
-- **Release**: v1 remains complete, but the Phase 1 interaction is now scheduled
-  for a post-v1 redesign before further feature work.
-- **Verification**: 192 tests plus 109 numerical subtests pass in the pinned Docker
+- **Release**: v1 numerical/execution behavior remains complete, and the post-v1
+  conversational Phase 1 is now the released Streamlit entry path.
+- **Verification**: 202 tests plus 109 numerical subtests pass in the pinned Docker
   image. Compose config, dependency checks, Streamlit health, the no-credit
   idempotent harness, and documentation links have also passed.
 - **Scope**: personal learning/demo workflow, not engineering design software or a
   hosted multi-user service. This scope does not authorize intentionally weak or
   toy implementations: functional quality and measured reliability are the
   learning objective.
-- **Just implemented**: the live OpenAI Responses formulation adapter and bounded
-  deterministic repair loop. Persisted continuation state is subordinate to the
-  canonical `ProblemDraft`; an unavailable continuation gets one full-history
-  recovery, while generic SDK retries remain disabled. Formulation-only facts now
-  retain partial geometry, relative support edges, and long/short mesh counts
-  without inventing coordinates. A 2,729-character strict transport replaces the
-  invalid open-JSON value node and immediately decodes values into deterministic
-  validators. The v2 six-scenario live gate passes on both Sol/medium and
-  Terra/medium, including real compilation and mesh validation for ready drafts.
-- **Next action**: migrate the Streamlit/orchestration entry path to
-  `ConversationFormulator`, display the evolving draft, assumptions, capability
-  limits, and repair-specific failures, then reverify the explicit approval gate.
-  The released UI still uses the v1 interpreter.
+- **Just implemented**: Streamlit now retains a typed `FormulationSession` and
+  uses `ConversationFormulator` plus the live Responses adapter. It displays
+  accepted facts, missing fields, unconfirmed assumptions, capability limits,
+  deterministic conflicts, rejected patches, and inspectable provenance/revision
+  history. A ready `FormulationStep` crosses into compilation only through the
+  orchestrator's typed `prepare_formulation()` method. Requested changes revoke
+  the prior approvable proposal before the new model call; explicit approval
+  remains the only path to solver execution.
+- **Next action**: perform user-led live UI acceptance with varied natural problem
+  descriptions and turn every observed conversation or presentation failure into
+  a versioned evaluation and deterministic regression test before adding physics.
 
 ## 1. Product
 
 The product is the full plain-language workflow:
 
 ```text
-interpret → clarify | unsupported | compile
-          → validate → await approval → run → analyze → explain
+formulate ↔ gather/repair/reformulate → finalize strict intent
+          → compile → validate → await approval → run → analyze → explain
 ```
 
 Users describe a rectangular 2D topology-optimization problem in chat. The system
@@ -73,14 +71,16 @@ contract. They do not expand the agent-safe surface.
 
 ## 3. Architecture
 
-- **LLM roles**: post-v1 conversational formulation, current v1 typed intent
-  interpretation, and constrained evidence organization only.
+- **LLM roles**: live conversational formulation and constrained evidence
+  organization. The one-shot v1 typed interpreter remains for regression and
+  compatibility paths, not the Streamlit entry.
 - **Deterministic authority**: compilation, defaults, validation, state
   transitions, side effects, retry bounds, and factual rendering.
 - **Hands**: `fenitop.tools` exposes `validate_config`, `run_topopt`, and
   `analyze_results` without depending on CrewAI.
-- **Interface**: Streamlit retains session/job state and displays events/evidence;
-  it does not own execution state.
+- **Interface**: Streamlit retains typed formulation/session/job state and
+  displays accepted facts, unresolved items, public provenance, events, and
+  evidence; it does not own readiness, validation, approval, or execution state.
 - **Execution**: one pinned Docker image; every native solve runs in a separate
   credential-free child process.
 - **Handoffs**: exact Pydantic objects and a checksum-verified `RunManifest`; no
@@ -90,7 +90,7 @@ contract. They do not expand the agent-safe surface.
   continuation improves multi-turn reasoning but never replaces canonical draft
   state. Model-declared readiness is advisory; deterministic repair, readiness,
   semantic resolution, and final strict intent validation remain authoritative.
-  This adapter is not yet the live UI path.
+  This is now the live UI path.
 
 ## 4. Deterministic Defaults
 
@@ -137,7 +137,7 @@ element edge. Resource validation remains authoritative.
 
 ## 6. LLM Configuration
 
-The released v1 configuration remains:
+The legacy v1 interpreter configuration retained for regression checks is:
 
 - CrewAI `1.15.6`
 - OpenAI `gpt-5.6-terra`
@@ -150,7 +150,7 @@ The released v1 configuration remains:
 The model is environment-configurable through `OPENAI_MODEL`. Model smoke/golden
 checks are manual and billed; the deterministic test suite uses canned results.
 
-The post-v1 formulation configuration is:
+The live Streamlit formulation configuration is:
 
 - direct OpenAI Responses API through `openai==2.48.0`;
 - `gpt-5.6-sol` through `OPENAI_FORMULATION_MODEL`;
@@ -183,9 +183,10 @@ Coverage includes schemas, adversarial requests, physics and mesh validation,
 resource calibration, numerical baselines and sensitivities, contained process
 lifecycle, secret scrubbing, idempotency, manifest/artifact integrity, CLI/MCP
 transports, workflow branches, Responses continuation/recovery, deterministic
-patch repair, partial semantic draft resolution, fact preservation, and Streamlit
-behavior. `scripts/formulation_live_eval.py` is a separate billed gate and never
-starts the solver.
+patch repair, partial semantic draft resolution, typed formulation handoff,
+approval invalidation on requested changes, visible draft/capability/error states,
+fact preservation, and Streamlit behavior. `scripts/formulation_live_eval.py` is
+a separate billed gate and never starts the solver.
 
 ## 8. Post-v1 Backlog
 
@@ -204,6 +205,17 @@ tests, and explicit user decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — The typed conversational draft is the live UI state**:
+  Streamlit retains `FormulationSession`, renders accepted facts and unresolved
+  items directly, and places detailed public provenance/revisions in an expander.
+  Only a `ready_for_review` `FormulationStep` can enter the orchestrator through
+  `prepare_formulation()`. The workflow identity is derived from ordered user
+  turns plus the compiled configuration, not variable assistant prose. Any
+  requested parameter change clears the prior approvable outcome before calling
+  the model. Reason: the UI must expose the conversation's canonical truth without
+  becoming readiness or execution authority, harmless wording variation should
+  not alter idempotency, and a failed revision must never leave stale parameters
+  eligible for a later “yes.”
 - **2026-07-27 — Responses API with a quality-first model default**: use the
   Responses API, `previous_response_id`, persisted all-turn reasoning, strict
   output, and the application-owned canonical draft for post-v1 formulation.
@@ -304,11 +316,11 @@ Reverse chronological; final decisions only.
 
 ## 10. Open Questions
 
-- No architecture question blocks the next slice.
-- During UI migration, decide how much revision/provenance detail is shown by
-  default versus placed in an inspectable expander. Assumptions, unresolved
-  conflicts, selected defaults, and the final approval question must always remain
-  visible.
+- No architecture question blocks live UI acceptance.
+- The provenance presentation decision is resolved: accepted facts, assumptions,
+  capability limits, conflicts, selected defaults, and the final approval question
+  are directly visible; exact source quotes and revision records are in an
+  inspectable expander.
 
 ## 11. Implementation Checklist
 
@@ -330,5 +342,5 @@ Reverse chronological; final decisions only.
       real regression lessons, and quality-first development principle.
 - [x] Post-v1 live formulation — conversation-state adapter, structured repair
       feedback, and measured Terra/Sol comparison.
-- [ ] Post-v1 UI migration — conversational draft display, error-specific UX,
+- [x] Post-v1 UI migration — conversational draft display, error-specific UX,
       final compile/validate handoff, and approval regression verification.
