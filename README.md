@@ -220,6 +220,23 @@ Pydantic models remain unchanged, so this compatibility layer does not weaken
 runtime validation. Tests snapshot these transport invariants, and a billed smoke
 check exercises ready, clarification, and unsupported outcomes.
 
+`agentic/compiler.py` handles the next deterministic boundary. If mesh resolution
+is omitted, it derives a target element size as `sqrt(domain area) / 50`, then
+rounds each axis count from its physical length. A square becomes `50×50`; a
+rectangle remains close to 2,500 elements with nearly square cells. Extremely
+slender domains keep at least two cells across the short direction and refine the
+long direction to preserve cell shape; the existing resource validator then
+decides whether that mesh is admissible. The default filter radius is 1.5 times
+the larger derived element edge.
+
+Compilation returns both the exact `AgentSafeConfig` and a versioned ledger of
+every application-selected setting. This includes omitted mesh/filter/iteration
+preferences plus optimizer, initialization, tolerance, continuation, move-limit,
+plane-strain, thickness, units, and passive-zone settings. The ledger generates
+the explicit user notice that the values were not provided and were selected by
+the deterministic compiler; the user may request changes, otherwise execution can
+continue without a confirmation gate.
+
 ## Agent-tool layer
 
 Beyond the example scripts, `fenitop/tools/` exposes the config-driven workflow as three composable tools for an agent (or any script) to call, each usable as a plain Python function, a `--input`/`--output` JSON CLI, or an MCP tool — one implementation behind all three. Logs and solver progress stay on stderr or in captured run files; CLI stdout is exactly one JSON response and real stdio MCP composition is tested.
@@ -358,8 +375,8 @@ cancellation/signal recovery, generated malformed inputs, corrupt artifacts,
 calibrated heuristics, CLI purity, and real MCP composition. Focused development
 commands are listed in the [tool reference](docs/tool-reference.md); the full
 command above remains the checkpoint gate. All 107 tests pass in the pinned image.
-The Stage 1 intent and interpreter additions bring the current checkpoint to 123
-passing tests plus 103 passing subtests.
+The Stage 1 intent, interpreter, and compiler additions bring the current
+checkpoint to 129 passing tests plus 103 passing subtests.
 
 ## Repository layout
 
