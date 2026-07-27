@@ -16,6 +16,12 @@ The project combines:
 This is a personal demonstration and learning repository, not a production or
 multi-user engineering service.
 
+It is a modified derivative of
+[FEniTop](https://github.com/missionlab/fenitop) by Yingqi Jia, Chao Wang, and
+Xiaojia Shelly Zhang. This repository is distributed under GPL-3.0; see
+[`LICENSE`](LICENSE), [`NOTICE.md`](NOTICE.md), and
+[`CITATION.cff`](CITATION.cff).
+
 ## What the demo does
 
 In the web UI, a user describes a supported 2D structural problem in ordinary
@@ -97,16 +103,14 @@ creates immutable fact IDs; the LLM may only organize allowed IDs under allowed
 headings. Code then checks completeness and renders the original fact text. An
 unknown, duplicated, or omitted required fact makes the explanation fail closed.
 
-### Execution and secret boundary
+### Execution boundary
 
 Streamlit, CrewAI, Dolfinx, and the solver share one pinned Docker image for a
 simple demo setup. Each native solve still runs in a separate child process:
 
 - the parent owns run paths, limits, idempotency, timeout, and cancellation;
 - all `OPENAI_*` variables are removed from the worker environment;
-- lifecycle state is written atomically;
-- timeout, cancellation, native crash, and orphan states are translated into
-  typed outcomes; and
+- lifecycle, timeout, cancellation, and worker failures become typed outcomes; and
 - successful artifacts are described by a checksum-verified `RunManifest`.
 
 There are two duplicate-solve defenses: an in-process orchestrator cache and a
@@ -293,14 +297,12 @@ This demo intentionally does not support:
   overrides.
 
 The repository still includes legacy 2D/3D example scripts, but those are not part
-of the hardened natural-language contract. Mechanism spring stiffness is
+of the natural-language contract. Mechanism spring stiffness is
 mesh/region dependent because it is applied per matched directional nodal degree
 of freedom. Artifact SHA-256 checks provide local integrity, not authenticity
 against someone able to rewrite the trusted results root. The child process
 contains native crashes but shares the container's memory boundary.
 
-There is currently no repository license file. Confirm the original FEniTop code's
-license and attribution before redistributing or presenting the project publicly.
 For a live presentation, the workflow still depends on API/network availability;
 the deterministic harness is the current offline fallback, not a prerecorded UI
 demo.
@@ -346,7 +348,7 @@ The focused test tiers and exact tool contracts are documented in
 
 ## Direct tool and example usage
 
-The three hardened tools share the same typed implementation across direct Python,
+The three tools share the same typed implementation across direct Python,
 JSON CLI, and stdio MCP transports. Start the MCP server with a clean non-TTY stdio
 transport:
 
@@ -401,7 +403,10 @@ scripts/                  demos, smoke checks, and legacy examples
 tests/                    agentic, transport, lifecycle, and numerical verification
   fixtures/               baselines, resource calibration, and artifact fixtures
 docs/spec.md              living status and decision log
-docs/tool-reference.md    exact tool contracts and operational reference
+docs/tool-reference.md    exact tool contracts and developer reference
+NOTICE.md                 upstream authorship and modification notice
+CITATION.cff              software and FEniTop paper citation metadata
+LICENSE                   GPL-3.0 license text
 results/                  generated, gitignored run artifacts
 ```
 
@@ -409,5 +414,7 @@ results/                  generated, gitignored run artifacts
 
 - [`docs/spec.md`](docs/spec.md) is the living decision log and current-status
   handoff for future development sessions.
-- [`docs/tool-reference.md`](docs/tool-reference.md) is the detailed hardened-tool
+- [`docs/tool-reference.md`](docs/tool-reference.md) is the detailed tool
   contract, including fields, failure behavior, and focused verification commands.
+- [`NOTICE.md`](NOTICE.md) records upstream authorship and this derivative's major
+  changes.

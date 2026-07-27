@@ -1,659 +1,191 @@
-# AgenticTopologyOptimization — Project Spec
+# AgenticTopologyOptimization — Living Project Spec
 
-This is a living working document, not a one-time design doc. Every time we make a
-decision or hit a checkpoint, we add to it. When a past decision changes, we go back
-and edit the relevant section rather than leaving stale info in place — the Decision
-Log is the only place history is preserved on purpose.
+This file is the compact handoff for future development. The release narrative is
+in `README.md`; exact tool behavior is in `docs/tool-reference.md`.
 
 Last updated: 2026-07-26
 
-## 0. Current Status (read this first; update it last, every session)
+## 0. Current Status
 
-- **Stage**: v1 complete; Stages 0–3 are finished.
-- **As of**: 2026-07-26.
-- **Just finished**: visitor-facing README rewrite. It now leads with the complete
-  agentic product, illustrates the deterministic/LLM trust boundary, provides a
-  Docker quick start, three reproducible interpretation scenarios, a no-credit
-  harness, supported scope and honest limitations, output/test guidance, and the
-  main learning conclusions. Local links and Compose config pass, the documented
-  no-credit harness completes as an idempotent replay, and both Streamlit UI tests
-  pass. The executable checkpoint remains all 151 tests plus 103 numerical
-  subtests.
-- **Architecture decisions updated** (§3, §6, §6a): deterministic orchestration
-  replaces the three-agent tool-calling pipeline; solver execution stays in the
-  same image/container but moves to a child process without the API key;
-  clarification is allowed for incomplete/ambiguous requests without adding a
-  pre-run confirmation gate; and `gpt-5.6-terra` replaces the old
-  `gpt-4.1-mini` default.
-- **Next action**: choose a post-v1 backlog item only after a user decision. The
-  two explicit showcase follow-ups are license/origin attribution and an optional
-  prerecorded UI fallback for demo-day API/network failure.
-- **If you're an AI assistant picking this up cold**: read this whole file before
-  doing anything, then summarize your understanding of current state + proposed
-  next step back to the user before acting. See `CLAUDE.md`/`AGENTS.md` at the
-  repo root for the full protocol.
+- **Release**: v1 complete and release-ready.
+- **Verification**: 151 tests plus 103 numerical subtests pass in the pinned Docker
+  image. Compose config, dependency checks, Streamlit health, the no-credit
+  idempotent harness, and documentation links have also passed.
+- **Scope**: personal learning/demo workflow, not engineering design software or a
+  hosted multi-user service.
+- **Just finished**: release cleanup. Documentation was consolidated around the
+  final architecture, superseded implementation chronology was removed, upstream
+  FEniTop GPL-3.0 attribution/citation was restored, and release metadata was
+  aligned.
+- **Next action**: no planned v1 work. Select and specify a post-v1 objective before
+  changing physics or workflow authority.
 
-## 1. Vision & Scope
+## 1. Product
 
-This is a learning project. The goal is to build an **agentic workflow** where an LLM
-acts as the "brain" that operates a topology-optimization solver as its "hands." The
-topology optimization code (`fenitop`) is not the product — it is the trusted tool
-layer the deterministic workflow operates after LLM interpretation. The product is
-the whole workflow: taking a plain-English structural design request, clarifying
-missing physics, turning it into a valid solver config, running the solve, and
-explaining the result back to the user.
+The product is the full plain-language workflow:
 
-Primary use: personal learning + demoing to others. Not a production service, not
-multi-tenant, not optimized for scale.
-
-## 2. Non-Goals (for now)
-
-- **This is explicitly not a production workflow.** It is a demonstration /
-  learning repo whose purpose is to show what was understood and built, not to be
-  hardened, scaled, or operated as a real service. Every design choice in this spec
-  should be read against that bar — "good enough to demo and explain clearly" beats
-  "production-grade."
-- Not building a hosted/multi-user product.
-- Not optimizing for large-scale or high-throughput solving.
-- Not committing to a single agent framework long-term — CrewAI is the v1 choice for
-  learning purposes; the architecture (see §3) keeps the door open to swapping it.
-- Not choosing the cheapest model at the expense of interpretation/tool-use
-  reliability. This is still a personal demo, so retries and execution remain
-  bounded and usage remains observable, but the original fixed $5/model-cost
-  optimization is no longer an architectural constraint (see §6).
-
-## 2a. Documentation Philosophy: spec.md vs README.md
-
-Two documents, two audiences, deliberately not merged:
-
-- **`docs/spec.md` (this file)** — the working decision log, for us. Chronological,
-  allowed to contain half-finished thinking, options considered and rejected, open
-  questions. Optimized for "why did we decide X," not for readability by a stranger.
-- **`README.md`** — the showcase document, for anyone visiting the repo (reviewers,
-  other learners, demo viewers). Should read as a clear narrative explanation of
-  what this project is, why it's built the way it is, and what was learned —
-  architecture, key design decisions and their reasoning, how to run the demo. It
-  should demonstrate understanding, not just list setup commands.
-
-The completed Stage 3 README distills the final workflow, architecture, operating
-recipe, demo scenarios, scope, limitations, and learning conclusions for outside
-readers. This spec remains the historical and forward-looking working record.
-
-## 3. Architecture Overview: Brain vs Hands
-
-- **Hands** — `fenitop/` (complete for the supported v1 scope). The domain library:
-  FEM/topology optimization solver, plus `fenitop/tools/` — three hardened,
-  framework-agnostic operations (`validate_config`, `run_topopt`,
-  `analyze_results`). The contract is typed, failure-contained, numerically
-  explicit, and ready for a CrewAI adapter.
-- **Brain** — `agentic/` (Stage 1 complete). Strict interpretation and constrained
-  evidence organization are the only LLM roles; deterministic code owns
-  compilation, transitions, side effects, and factual rendering.
-- **Orchestrator** — implemented deterministic state machine in `agentic/`, with
-  plain typed Python as authoritative domain state. It owns:
-  `interpret → clarify-or-compile → validate → launch worker → analyze → explain`.
-  Exact Pydantic objects/manifests move between stages; no LLM retypes a normalized
-  config, output path, or run envelope.
-
-Design principle: `fenitop` should never need to know an agent framework exists.
-`agentic/` depends on `fenitop.tools`, never the other way around.
-
-**Runtime placement (updated 2026-07-26): one Docker image/container, separate
-processes.** Streamlit/CrewAI and Dolfinx share the pinned image for simple demo
-deployment, but every expensive/native solve runs in a child worker process. The
-parent assigns trusted paths/limits, strips `OPENAI_API_KEY` from the worker
-environment, captures progress, enforces timeout/cancellation, and translates
-exit/signal/crash state into a job lifecycle manifest. This supersedes the earlier
-same-container/**same-process** decision: Python exception handling cannot contain
-PETSc/MPI native aborts or OOM, and the current solver's stdout would corrupt a
-stdio protocol.
-
-Agent workflow v1 is serial. Existing legacy scripts may still demonstrate MPI,
-but `run_topopt` does not advertise MPI until run IDs, output ownership, and
-rank-zero response behavior have an MPI-specific implementation and test.
-
-Operational implementation:
-- CrewAI `1.15.6` is pinned in `pyproject.toml` and the complete closure is pinned
-  in `requirements/runtime.lock`; the image was rebuilt successfully.
-- The container reaches api.openai.com through CrewAI, and
-  `scripts/stage0_model_smoke.py` proves a billed, schema-constrained Terra call.
-  Terra rejects an explicit `temperature=0`, so its default temperature is left
-  unset; with `response_format` CrewAI `1.15.6` returns the validated Pydantic
-  instance directly.
-- `OPENAI_API_KEY` is supplied to the container via `docker-compose.yml`'s
-  `env_file:` pointing at an untracked `.env` file — never baked into the image or
-  committed. Local `.env` files are excluded from Git and Docker build contexts.
-  The solver worker receives a sanitized environment without this key.
-
-## 4. Repository Layout
-
-### Current (as of 2026-07-26)
-```
-fenitop/                  # domain library: solver + tools/
-  tools/                  # hardened validate/run/analyze tool layer
-agentic/
-  intent.py               # strict semantic intent and interpretation outcomes
-  interpreter.py          # bounded LLM-backed interpretation only
-  compiler.py             # deterministic intent→config and defaults ledger
-  orchestrator.py         # typed interpret→compile→validate→run→analyze state
-  explainer.py            # constrained evidence-ID planner and renderer
-  prompts/                # versioned interpretation and explainer prompts
-config/                   # example configs (beam_2d, mechanism_2d)
-scripts/                  # example CLI entry points (config-driven + legacy hardcoded)
-tests/
-  agentic/                # deterministic full-workflow and LLM-boundary tests
-                         # plus existing dolfinx-free and Docker-only tool tests
-results/                  # gitignored solver outputs
-docs/spec.md              # this file
-docs/tool-reference.md    # final tool capabilities, contracts, and operations
+```text
+interpret → clarify | unsupported | compile
+          → validate → run → analyze → explain
 ```
 
-`streamlit_app.py` is the thin Stage 2 chat UI over typed workflow state.
-`agentic/` was created only after the Stage 0 environment/model checkpoint passed;
-modules were added in checklist order rather than as empty shells.
+Users describe a rectangular 2D topology-optimization problem in chat. The system
+collects missing physics, discloses deterministic defaults, performs contained
+numerical execution, and returns a fact-preserving explanation with inspectable
+evidence.
 
-## 5. Tool Contract (the "hands" API)
+This repository is a modified derivative of FEniTop by Yingqi Jia, Chao Wang, and
+Xiaojia Shelly Zhang. See `NOTICE.md`, `CITATION.cff`, and `LICENSE`.
 
-Source of truth: `fenitop/tools/contracts.py`,
-`fenitop/tools/config_models.py`, and the three tool implementations.
+## 2. Scope and Non-Goals
 
-- Public contract version is `4.0.0`; agent-safe config schema is `1.1`. Every
-  request and response is a strict Pydantic model with unknown fields forbidden
-  and structured issue records.
-- The LLM-visible inputs are exactly `validate_config(config)`,
-  `run_topopt(config)`, and `analyze_results(run_manifest)`.
-  `AgentSafeConfig` describes physics only. `TrustedValidationPolicy`,
-  `TrustedRunPolicy`, and `TrustedAnalysisPolicy` are Python/application-owned and
-  are not exported in the MCP schema.
-- Serialized regions are a bounded, recursive, discriminated 2D DSL; positional
-  mechanism springs were replaced with named models. All vectors are exactly two
-  finite values. JSON/source strings are never evaluated.
-- Supported physics is explicit: rectangular 2D plane strain, unit thickness,
-  distributed boundary traction, consistent user units, and full-vector zero
-  clamps. Nonzero prescribed displacements and component-wise supports are
-  rejected for v1.
-- `validate_config_tool` performs structural/cross-field physics checks,
-  independent pure-arithmetic resource admission, then trusted mesh-backed checks
-  for all support/load/spring/passive entities and their relevant conflicts. Its
-  typed geometry report includes entity counts and 2D bounds.
-- `ResourceLimits` independently bounds elements (250,000), nodes (300,000),
-  displacement DOFs (600,000), iterations (2,000), solver-weighted work
-  (500 million units), estimated peak memory (2,048 MiB), output (1,024 MiB), and
-  wall time (900 s). These defaults are application-owned. Estimates incorporate
-  the selected iterative/direct profile and compliance/mechanism solve count and
-  are calibrated in `tests/fixtures/resource_calibration.json`.
-- `run_topopt_tool` always re-validates and internally compiles safe physics with
-  trusted PETSc/output settings. Run paths, identifiers, rendering, timeout, and
-  safety overrides cannot be supplied in its public request.
-- A successful run checks every PETSc elasticity/adjoint/filter solve, finite
-  fields/metrics/gradients/updates, density bounds, and explicit optimizer status.
-  Iteration zero and every update are evaluated states. Final metrics/artifacts
-  share one state and include grayness, binarization, beta, and continuation.
-- A successful `run_topopt_tool` response includes a canonical `RunManifest`;
-  `analyze_results_tool` accepts only that manifest. It recovers normalized config
-  and analysis evidence without duplicated caller fields. Its relative artifact
-  inventory is checked for trusted-root containment, symlinks, existence,
-  completeness, size, and SHA-256 before any content is parsed.
-- Real MCP input and output schemas are hash-snapshotted. Because pinned MCP 1.28.1
-  generated the outer function argument model with extra fields ignored, server
-  registration explicitly switches that generated model to `extra="forbid"` and
-  tests both its schema and runtime behavior.
+Supported agent-safe physics:
 
-The final hardened boundary is built around six guarantees:
+- rectangular 2D plane strain with unit thickness;
+- isotropic single-material compliance or compliant-mechanism optimization;
+- full-vector zero clamps;
+- distributed boundary traction and body force;
+- volume fraction and declarative 2D selection regions; and
+- explicit compliant-mechanism input/output springs.
 
-1. **Two capability levels**: a strict `AgentSafeConfig` (physics only, region DSL
-   only) and trusted application-owned run policy (paths, solver profile, limits,
-   timeout, rendering, idempotency). Lambda strings are removed from JSON config
-   loading; hardcoded Python examples may still use internal callables.
-2. **Typed/versioned boundaries**: strict Pydantic requests, structured
-   warnings/errors, response models, and a self-contained `RunManifest`. Every
-   JSON-shaped public request returns a schema-valid envelope; no exception crosses.
-3. **Complete validation**: pure arithmetic rejects unsafe mesh/work sizes before
-   Dolfinx; mesh-backed checks cover supports, loads, springs, passive zones,
-   overlaps, rigid motion, and supported physics.
-4. **Numerical truthfulness**: elasticity/adjoint/filter convergence and finite
-   values are checked; initial/final artifacts and metrics describe one explicit
-   evaluated state; optimizer failure/continuation status is surfaced.
-5. **Contained execution**: fresh path-contained run directories, no agent safety
-   override, idempotent kickoff, serial v1 worker subprocess, timeout/cancellation,
-   sanitized environment without the API key, and atomic lifecycle manifests.
-6. **Clean composition/transports**: Tool 2 emits everything Tool 3 needs; Tool 3
-   never asks an LLM to retype a config/path; stdout is one JSON response; real CLI
-   and MCP integration tests verify framing.
+Not supported in v1:
 
-These guarantees are covered by the pinned 107-test suite. The detailed operational
-and field-level contract is in `docs/tool-reference.md`.
+- agent-safe 3D, non-rectangular domains, plane stress, nonlinear/dynamic/thermal
+  physics, or multiple materials;
+- roller/component supports, nonzero prescribed displacement, point loads, or
+  total-force semantics;
+- parallel tool execution, multiple concurrent solves, or browser/LLM control of
+  paths, solver profiles, limits, timeouts, or safety policy.
 
-## 6. Brain: LLM Provider Strategy
+The legacy FEniTop examples may cover capabilities outside the natural-language
+contract. They do not expand the agent-safe surface.
 
-**Decision updated 2026-07-26: OpenAI API, default model `gpt-5.6-terra`,
-environment-configurable and pinned/recorded for reproducible demo runs.**
+## 3. Architecture
 
-Why:
+- **LLM roles**: typed intent interpretation and constrained evidence
+  organization only.
+- **Deterministic authority**: compilation, defaults, validation, state
+  transitions, side effects, retry bounds, and factual rendering.
+- **Hands**: `fenitop.tools` exposes `validate_config`, `run_topopt`, and
+  `analyze_results` without depending on CrewAI.
+- **Interface**: Streamlit retains session/job state and displays events/evidence;
+  it does not own execution state.
+- **Execution**: one pinned Docker image; every native solve runs in a separate
+  credential-free child process.
+- **Handoffs**: exact Pydantic objects and a checksum-verified `RunManifest`; no
+  prose or LLM copying between stages.
 
-- CrewAI (the open-source pip package) has no usage limits or cost of its own — it's
-  local orchestration code. All spend risk comes from the LLM API it calls, not from
-  CrewAI. (CrewAI's separate hosted "AMP" cloud product, with its own free/paid
-  execution tiers, is not something we opted into.)
-- A ChatGPT Plus subscription does **not** include API credits — API billing is
-  entirely separate from the consumer subscription.
-- The user explicitly prefers a stronger current-generation model over minimizing
-  token cost for this personal project. `gpt-5.6-terra` is the current balanced
-  intelligence/cost candidate rather than the flagship/highest-cost choice. The
-  model will be set through `OPENAI_MODEL`, recorded in each workflow trace, and
-  changed only through config — never hard-wired throughout prompts/tasks.
-- The Stage 0 golden intent gate passed on both the selected model and cheaper
-  current alternative. The final recorded configuration is OpenAI
-  `gpt-5.6-terra` through CrewAI `1.15.6`, low reasoning effort, temperature
-  unset, and strict Pydantic structured output. The public model catalog exposes
-  the `gpt-5.6-terra` ID without a distinct dated snapshot, so that ID is the
-  recorded pin. `gpt-5.6-luna` also passed but remains only a lower-cost comparison.
-- Local LLM (Ollama) was considered and deliberately deferred, not rejected — small
-  local models are meaningfully less reliable at strict JSON-schema tool-calling and
-  multi-step self-correction, which would shift effort into prompt-engineering
-  workarounds rather than saving effort. May be added later as a $0/offline fallback
-  profile; CrewAI's LiteLLM backend makes this a config change, not a redesign.
+## 4. Deterministic Defaults
 
-Budget is no longer the architecture driver, but operational bounds still matter:
-pin exact CrewAI/model configuration once implemented; cap interpretation retries;
-use structured outputs and low reasoning effort for intent extraction (Terra does
-not accept `temperature=0`, so temperature remains unset); log token usage; and
-never let an LLM retry an expensive solver side effect directly.
-Solver idempotency/resource limits are tool policy, not LLM-cost policy.
+`agentic-defaults-v1` owns omitted numerical preferences and shows every selected
+value and reason before execution continues.
 
-## 6a. Agentic Layer Design: Agents, Tasks, Process
+For an omitted mesh:
 
-**Decisions updated 2026-07-26:**
+```text
+h = sqrt(domain area) / 50
+nx = round(domain width / h)
+ny = round(domain height / h)
+```
 
-- **Orchestration shape**: deterministic state machine, not three agents mapped 1:1
-  to three tools. The fixed path is:
-  `interpret → clarify/unsupported/ready → compile → validate → run worker →
-  analyze → explain`. CrewAI Flow may host the state transitions, but typed Python
-  domain state is authoritative and remains testable without an LLM.
-- **LLM roles**:
-  - Intent Interpreter — the essential LLM step. Produces a typed `ProblemIntent`
-    or a clarification/unsupported result from free text.
-  - Result Explainer — optional LLM step over Tool 3's deterministic evidence.
-    It may improve presentation but cannot change metrics or quality flags.
-  There is no Solver Operator agent. Launching an expensive deterministic function
-  does not need judgment, and an extra agent would add mutation/retry risk.
-- **Exact handoffs**: tools/manifests are passed as Pydantic/Python objects. No task
-  output is reparsed from prose and no LLM is asked to copy a normalized config,
-  filesystem path, safety setting, or prior tool envelope.
-- **Clarification without confirmation**: there is still no approval gate for a
-  ready, supported request, but the interpreter must not invent missing
-  problem-defining physics. It returns one of:
-  - `ready` — enough explicit/safely-derived information to compile the supported
-    problem;
-  - `needs_clarification` — asks focused chat questions and does not solve;
-  - `unsupported` — explains the tool capability mismatch and does not solve.
-  This supersedes the earlier “fully autonomous with accepted
-  semantically-wrong-but-valid risk” posture. Clarification is required-input
-  collection, not a confirm-every-run human gate.
-- **Intent versus defaults**: `ProblemIntent` requires problem-defining physics
-  (problem type, rectangular 2D geometry, material, supports, external loads,
-  target volume, and mechanism fields when applicable). Mesh divisions/cell type,
-  filter radius, and iteration limit are optional user preferences. The
-  deterministic compiler—not the LLM—will supply versioned defaults for omitted
-  preferences and optimizer/tolerance/continuation details.
-- **Visible defaults without a confirmation gate**: before validation/run, the
-  workflow must show every omitted preference, the deterministic value applied,
-  and why. User-facing wording should make the authority accurate: “The compiler
-  applied these defaults. Tell me if you want changes; otherwise I’ll proceed.”
-  This is an editable transparency notice, not a pause or approval requirement.
-- **Execution authority**: application code owns run IDs, filesystem roots, solver
-  profiles, timeout/cancellation, idempotency, and resource ceilings. These are not
-  LLM tools/arguments. The worker process never receives the API key (§3, §5).
-- **Interface**: a minimal **Streamlit** web UI, not a CLI. (Gradio was the other
-  candidate; Streamlit picked for broader familiarity in data/ML-style demos — this
-  is a low-stakes, reversible pick.) Build order remains: verify the deterministic
-  orchestrator with a plain harness and mocked LLM before the UI. The UI shows an
-  inspectable event trace (intent, clarification, normalized config, validation,
-  resource estimate, progress, analysis evidence), not hidden chain-of-thought.
-  Long solver work is represented as job state so a Streamlit rerun/refresh does
-  not duplicate it.
-- **Input shape (decided 2026-07-25)**: **free-text chat only**, not a structured
-  form and not a hybrid with a JSON-paste escape hatch. The user describes the
-  problem in plain English; clarification remains chat, not a fallback form.
-  Interpretation targets the smaller `ProblemIntent`, while a deterministic
-  compiler supplies trusted numerical/execution defaults and creates
-  `AgentSafeConfig`. This preserves the natural-language learning goal without
-  asking the model to author PETSc options, paths, or other non-semantic details.
+A square is approximately `50 × 50`; ordinary rectangles remain near 2,500 cells
+with nearly square elements. Extreme aspect ratios retain at least two cells
+across the short direction. The default filter radius is 1.5 times the larger
+element edge. Resource validation remains authoritative.
 
-## 7. Testing Strategy
+## 5. Trust Boundaries
 
-Existing (unittest-based, already in place):
-- Dolfinx-free unit tests: bounded region DSL and adversarial source/shape/numeric
-  cases, strict agent-safe/config/response contracts, real generated MCP schema
-  snapshots, independently calibrated resource estimates/limits, Tool 1
-  structural/cross-field checks, narrative generation, and typed Tool 2→Tool 3
-  handoff against committed fixture logs.
-- Docker-only tests (need dolfinx/PETSc/MPI): geometry checks, Tool 2 end-to-end
-  smoke runs, root-discovered serial compliance/mechanism numerical baselines,
-  complete support/load/spring/passive-zone entity/conflict checks, filter/stop
-  semantics, central directional finite differences, PETSc/filter/optimizer fault
-  injection, configured/passive initialization, final-grid metric consistency,
-  cleanup, config-hash guards, artifact consistency, isolated worker execution,
-  credential scrubbing, path/idempotency/capacity behavior, and real process-group
-  timeout/cancellation/crash recovery, checksum-verified Tool 2→Tool 3
-  composition, CLI JSON purity, and actual stdio MCP composition.
-- Test entry point: `docker compose run --rm -T fenitop python -m unittest discover -v`.
-  `tests/__init__.py` makes nested discovery reliable; zero collection exits 5.
-  Current result: all 151 tests plus 103 subtests pass with no expected failures:
-  107 hardened-tool tests plus 7 strict-intent, 9 interpreter, 6 compiler, 12
-  core deterministic-orchestrator, 7 fact-preserving explainer tests, and the
-  Stage 2 orchestration/UI additions
-  (`docker compose run --rm -T fenitop pytest -q`, 34.58 seconds at the Stage 2
-  checkpoint).
+- `AgentSafeConfig` contains physics only.
+- Application code owns paths, IDs, PETSc profiles, resource ceilings, timeout,
+  cancellation, rendering, and idempotency.
+- The solver worker receives no `OPENAI_*` variables.
+- In-process and durable idempotency prevent duplicate solves across UI reruns and
+  process restarts.
+- Successful solver evidence is immutable; deterministic derived plots are not
+  added to the original manifest.
+- SHA-256 protects local evidence consistency, not authenticity against an actor
+  who can rewrite the entire trusted results root.
 
-Remaining additions for agent-workflow compatibility:
-- **Hardened-tool suite (passed)**: contract/schema, generated
-  adversarial JSON, path/security, geometry/numerics/fault injection, subprocess
-  lifecycle, CLI stdout, actual MCP stdio, artifact integrity, and
-  manifest-driven Tool 2→Tool 3 composition are implemented.
-- **Measured resource calibration**: frozen in
-  `tests/fixtures/resource_calibration.json`; refresh deliberately if the runtime,
-  estimator, solver profiles, or output state model changes.
-- **Mocked-LLM deterministic-flow integration test**: canned
-  ready/clarification/unsupported interpreter outputs exercise the whole state
-  machine without a real API call or solver duplication.
-- **Golden-scenario smoke test** (manual/occasional, real API call, not in CI): one
-  real selected-model run across a small set of supported, ambiguous, and
-  unsupported requests, to catch prompt/model drift over time.
+## 6. LLM Configuration
 
-## 8. Reviewer Notes / Backlog (things to come back to)
+The recorded v1 configuration is:
 
-Flagged during initial planning (2026-07-25), not yet actioned:
-- Demo-day reliability: consider caching/recording a known-good run so a live
-  presentation doesn't depend on a live LLM call working under pressure.
-- License/attribution check: confirm the origin/license of the `fenitop` codebase
-  before presenting this publicly as a demo.
+- CrewAI `1.15.6`
+- OpenAI `gpt-5.6-terra`
+- low reasoning effort
+- temperature unset
+- strict Pydantic structured output
+- two application-owned interpretation attempts with provider retries disabled
 
-Completed since the initial review:
-- The Streamlit UI exposes a structured event/config/validation/analysis trace and
-  lifecycle progress without private chain-of-thought.
-- Stage 0 smoke and golden checks confirmed outbound API access from Compose.
+The model is environment-configurable through `OPENAI_MODEL`. Model smoke/golden
+checks are manual and billed; the deterministic test suite uses canned results.
 
-Final tool review findings (2026-07-26):
+## 7. Testing
 
-- No architectural reversal is needed. Deterministic orchestration,
-  same-container/separate-process solves, clarification without confirmation,
-  application-owned execution authority, and manifest-only analysis remain the
-  right fit for this personal learning/demo scope.
-- Mechanism spring stiffness is applied per matched directional nodal DOF and the
-  output functional sums matched nodal displacements. It is therefore
-  mesh/region-dependent, not a mesh-independent total spring constant. The future
-  intent compiler must preserve this explicit contract and show matched counts;
-  changing the formulation would be a deliberate future physics/version change.
-- Manifest/artifact SHA-256 provides local evidence integrity, not authenticity
-  against an actor who can rewrite the trusted results root. The child process
-  contains native crashes but shares the parent's container-level OOM boundary;
-  independent memory admission remains the primary defense.
-- Solver evidence in a successful manifest is immutable. Analyzer-created plots
-  are deterministic derived outputs, are not part of the original solve manifest,
-  and may be regenerated.
-- Use the focused test tiers in `docs/tool-reference.md` during implementation and
-  the full pinned suite only at checkpoints or after cross-cutting executable
-  changes.
+Checkpoint command:
+
+```bash
+docker compose run --rm -T fenitop python -m pip check
+docker compose run --rm -T fenitop pytest -q
+```
+
+Coverage includes schemas, adversarial requests, physics and mesh validation,
+resource calibration, numerical baselines and sensitivities, contained process
+lifecycle, secret scrubbing, idempotency, manifest/artifact integrity, CLI/MCP
+transports, workflow branches, fact preservation, and Streamlit behavior.
+
+## 8. Post-v1 Backlog
+
+No item below is authorized or designed yet:
+
+- optional recorded UI scenario for offline/live-demo reliability;
+- roller supports or nonzero prescribed displacement;
+- agent-safe 3D and MPI execution;
+- additional materials/physics; and
+- hosted or multi-user deployment.
+
+Any physics addition requires a new versioned contract, prompt update, numerical
+tests, and explicit user decision.
 
 ## 9. Decision Log
 
-Reverse-chronological. Each entry: date, decision, why, status.
+Reverse chronological; final decisions only.
 
-- **2026-07-26** — Finish Stage 3 by replacing the accumulated implementation-style
-  README with a visitor-first showcase narrative. Lead with the complete
-  plain-language-to-evidence outcome, make the LLM/deterministic trust split the
-  central architecture story, put the Docker chat demo before lower-level tools,
-  and include reproducible ready/clarification/unsupported prompts, a no-credit
-  harness, supported scope, limitations, verification, and learning conclusions.
-  Explicitly disclose the missing license/origin attribution and live API/network
-  dependency rather than implying public-release or offline-demo readiness.
-  Reason: this learning project should demonstrate architectural understanding and
-  honest boundaries, not merely preserve setup commands and implementation
-  chronology. Status: implemented; local links and Compose config pass, the
-  no-credit harness completes as an idempotent replay, and both Streamlit UI tests
-  pass. Stage 3 complete.
-- **2026-07-26** — Implement Stage 2 as a thin Streamlit `1.60.0` chat layer over
-  the existing typed orchestrator. Keep the orchestrator, current outcome,
-  conversation messages, validated job state, and background `Future` in
-  `st.session_state`; use a timed fragment to poll the durable lifecycle and
-  rerender progress. Automatically continue a validated request after displaying
-  its defaults notice. Derive cancellation identity inside the orchestrator and
-  keep the trusted `results/` root in application code, so the browser supplies
-  neither paths nor policy. Reason: Streamlit reruns are a presentation lifecycle,
-  not workflow authority; stable in-memory and durable tool idempotency continue
-  to own no-duplicate-solve behavior. Pinning Streamlit resolved PyArrow from
-  `25.0.0` to compatible `24.0.0`, so the image and full test suite were rebuilt.
-  Status: implemented; service health, `pip check`, 151 tests, and 103 numerical
-  subtests pass.
-- **2026-07-26** — Implement the optional explainer as a constrained evidence-ID
-  planner, not a prose generator. Deterministic code extracts immutable facts from
-  successful Tool 3 evidence, marks outcome/convergence/metrics/constraints/
-  quality facts required, omits the run directory, validates the model's section
-  plan for known unique IDs and completeness, and renders original fact text with
-  citations. The LLM can order and select supporting facts only. Reason:
-  “fact-preserving” must be enforced structurally; a prompt that merely asks free
-  prose not to hallucinate cannot guarantee it. Status: implemented and integrated
-  as an idempotent optional final state; a billed Terra check passes and the full
-  148-test suite passes. Stage 1 complete.
-- **2026-07-26** — Complete the deterministic run/analyze transitions with two
-  idempotency layers. Cache a typed run response within the orchestrator process,
-  and give `TrustedRunPolicy` a stable `agentic-workflow-v1` key derived from the
-  full clarification-aware conversation, compiled config, and defaults profile.
-  Pass the successful `RunManifest` object directly into
-  `AnalyzeResultsRequest`; analysis failure retains that run and retries analysis
-  only. Reason: UI refresh in one process and restart in another are different
-  duplicate-solve risks, while manifest identity is the evidence boundary.
-  Status: implemented. The no-API harness completed a real contained run and
-  analysis; a fresh-process repeat returned the same run ID as an idempotent
-  replay; the full 139-test suite passes.
-- **2026-07-26** — Implement orchestration as typed domain state before adopting
-  any CrewAI Flow lifecycle wrapper. The first slice has four explicit outcomes:
-  awaiting clarification, unsupported, validation failed, and validated.
-  Clarification state persists each missing-field/question/answer exchange so
-  resume does not rely on hidden model memory. A user-visible defaults event is
-  emitted before the exact `ValidateConfigRequest` call, while validation proceeds
-  without an approval gate. Reason: plain Python state and injected boundaries
-  make branch authority, event order, and absence of side effects directly
-  testable; a framework wrapper can later host these transitions without becoming
-  authoritative. Status: implemented through validation; canned-interpreter real
-  validation and the full 134-test suite pass. Run/analyze transitions remain.
-- **2026-07-26** — Pin deterministic compiler defaults as
-  `agentic-defaults-v1`. For omitted mesh divisions, target
-  `h=sqrt(domain area)/50` and round each axis count, giving 50×50 for a square,
-  roughly 2,500 cells for ordinary rectangles, and near-square element edges.
-  Preserve at least two cells across extreme short axes and refine the long axis;
-  trusted resource validation, not the mesh formula, rejects excessive work.
-  Default filter radius is 1.5 times the larger element edge. Retain the approved
-  compliance/mechanism iteration, optimizer, tolerance, continuation, move, and
-  fixed plane-strain profiles. Return every compiler-selected value and reason in
-  a typed ledger and explicit editable notice before proceeding without a
-  confirmation gate. Reason: mesh resolution must follow geometry rather than
-  distort elements or silently assume a fixed aspect ratio, while default
-  authority remains deterministic and visible. Status: implemented; a compiled
-  60×20 cantilever passes real mesh-backed validation and the full 129-test suite
-  passes.
-- **2026-07-26** — Implement the Stage 1 interpretation boundary as a small
-  CrewAI-backed adapter rather than an autonomous tool-using agent. Pin low
-  reasoning effort, disable provider retries, permit two application-owned
-  attempts, validate every outcome with `InterpretationEnvelope`, and expose only
-  sanitized failure metadata. The versioned prompt is the capability contract and
-  explicitly encodes bounds as `[[x_min,y_min],[x_max,y_max]]`. A transport-only
-  schema adapter normalizes Pydantic fixed tuples and recursive objects for
-  OpenAI's strict-schema subset without weakening the semantic model. Reason:
-  language interpretation needs an LLM, while retry authority, validation, and
-  side effects stay deterministic and testable. Status: mocked tests and billed
-  live ready/clarification/unsupported checks pass; clean-image full suite is 123
-  passing tests plus 103 passing subtests.
-- **2026-07-26** — Define the first Stage 1 semantic boundary. A `ready`
-  `ProblemIntent` contains problem-defining physics while mesh divisions/cell type,
-  filter radius, and iteration limit remain optional preferences. Application code
-  supplies omitted numerical defaults, reports each applied value and reason to
-  the user, and proceeds without a confirmation gate unless the user asks for a
-  change. Reason: do not burden natural-language users with solver tuning, do not
-  misattribute deterministic choices to the model, and keep all assumptions
-  inspectable. Status: `agentic/intent.py` implemented; rebuilt image and all 114
-  tests pass. Compiler/default disclosure remains part of the orchestrator work.
-- **2026-07-26** — Close Stage 0 with a documented, Docker-only learning recipe.
-  Keep `.env` outside both Git history and the Docker build context, inject it only
-  into the parent at runtime, and document verification, billed model checks, and
-  dependency rollback in README. Reason: make the checkpoint reproducible and
-  explain the security/runtime boundaries before agentic code is added. Status:
-  done.
-- **2026-07-26** — Complete Stage 0 and retain `gpt-5.6-terra` as the default.
-  The reproducible golden gate in `scripts/stage0_golden_intents.py` evaluated
-  supported-ready, ambiguous/needs-clarification, and unsupported requests.
-  Terra and the cheaper Luna alternative both matched all expected statuses;
-  Terra remains selected because this project prioritizes interpretation
-  reliability over minimum token price. Final configuration: CrewAI `1.15.6`,
-  OpenAI provider, model `gpt-5.6-terra`, low reasoning effort, temperature unset,
-  strict Pydantic output. Status: done; Stage 1 unblocked.
-- **2026-07-26** — Pin CrewAI `1.15.6` in the Docker runtime only. To satisfy its
-  published dependency bounds, move Pydantic `2.13.4` → `2.12.5`,
-  pydantic-core `2.46.4` → `2.41.5`, and Rich `15.0.0` → `14.2.0`; regenerate the
-  full lock and accept the compatibility change only with the complete hardened
-  suite passing. Rollback recipe if later checks fail: remove CrewAI from
-  `pyproject.toml`, restore those three original pins, regenerate
-  `requirements/runtime.lock`, rebuild, and rerun all 107 tests. Reason: isolate
-  the learning framework in the reproducible project image without changing the
-  Mac's global Python environment. Status: installed; all 107 tests pass. A live
-  `gpt-5.6-terra` structured-output call passes with low reasoning effort,
-  temperature unset, and a Pydantic instance returned directly by CrewAI.
-- **2026-07-26** — Remove the completed tool-hardening workstream plan and
-  phase-by-phase history. Preserve the final contract in `docs/tool-reference.md`
-  and keep one consolidated completion decision here. Reason: completed
-  implementation scaffolding was obscuring the current Stage 0/1 handover.
-  Status: done.
-- **2026-07-26** — Freeze the hardened tool boundary at contract `4.0.0`, config
-  schema `1.1`, and manifest `1.0`. The agent surface is physics-only and typed;
-  validation is semantic, resource-aware, and mesh-backed; numerical success
-  requires converged finite sub-solves and consistent evaluated state; execution
-  uses contained credential-scrubbed child processes with lifecycle/idempotency;
-  direct/CLI/MCP transports are total and clean; and analysis consumes a
-  checksum-verified success manifest. Reason: give deterministic agentic
-  orchestration a trustworthy, exact handoff instead of compensating with prompts.
-  Status: implemented; all 107 pinned tests pass.
-- **2026-07-26** — Replace the 3-agent sequential tool pipeline with deterministic
-  orchestration. The LLM interprets `ProblemIntent` and may explain deterministic
-  analysis; typed application code owns compile→validate→run→analyze and exact
-  handoffs. Reason: tool boundaries are fixed dependencies, not independent
-  judgment tasks; LLM handoffs add mutation/retry risk. Status: decided, not
-  implemented.
-- **2026-07-26** — Keep one Docker image/container for demo simplicity but run each
-  solver invocation in a separate child process, with timeout/cancellation,
-  trusted paths/limits, captured transports, and no API key in the worker.
-  Status: implemented in the hardened tool layer.
-- **2026-07-26** — Free-text remains the only UI input, with
-  `ready | needs_clarification | unsupported` interpretation. Clarification for
-  missing/ambiguous physics is allowed and required; there is still no confirmation
-  gate for a ready request. Status: interpretation implemented; conversational
-  resume and UI remain.
-- **2026-07-26** — Replace the fixed `gpt-4.1-mini` default with current-generation
-  `gpt-5.6-terra`, environment-configurable and recorded/pinned for demo
-  reproducibility. Reliability is prioritized over minimizing token price for this
-  personal project. Status: implemented and verified with golden scenarios.
-- **2026-07-25** — Streamlit input is free-text chat only (no structured form, no
-  JSON-paste hybrid) — matches §1's vision and the tool layer's existing
-  natural-language design intent. Status: input-shape decision retained; its
-  accepted ambiguity risk was superseded 2026-07-26 by required clarification.
-- **2026-07-25** — Agentic layer design: 3 specialist agents (1:1 with the 3
-  tools), `Process.sequential`, no human-in-the-loop gate (relies on the existing
-  `safety.py` cost ceiling), interface will be a minimal Streamlit UI rather than a
-  CLI. Status: three-agent/process/safety portion superseded 2026-07-26;
-  Streamlit/no-confirmation portion retained with clarification.
-- **2026-07-25** — CrewAI runs inside the existing Docker container (same image as
-  the dolfinx solver), not as a split local-process setup. See §3 for full
-  reasoning. Status: same image/container retained; same-process implication
-  superseded 2026-07-26 by child-process execution.
-- **2026-07-25** — Made explicit that this repo is a demonstration/learning project,
-  not a production workflow (§2), and that `README.md` (not `docs/spec.md`) is the
-  document responsible for narrating understanding/architecture/reasoning to
-  outside readers (§2a). Status: principle recorded; README.md rewrite itself
-  deferred until the `agentic/` layer exists (tracked in §11 Stage 3).
-- **2026-07-25** — Create `docs/spec.md` as the living planning doc for this project.
-  Status: done.
-- **2026-07-25** — LLM brain: OpenAI `gpt-4.1-mini`, $5 prepaid cap, auto-recharge
-  off. Status: model/budget-as-driver decision superseded 2026-07-26; OpenAI
-  provider decision retained.
-- **2026-07-25** — New top-level package `agentic/` will hold all CrewAI
-  orchestration code, kept separate from `fenitop/` so the domain library stays
-  framework-agnostic. Status: decided; agent/task design now spec'd in §6a, folder
-  creation tracked in §11 Stage 1.
+- **2026-07-26 — Release cleanup**: consolidate documentation around the shipped
+  v1 architecture, remove superseded implementation/production planning, and add
+  the upstream GPL-3.0 license, authors, and paper citation. Reason: a release
+  should explain the product and obligations without carrying a build diary.
+- **2026-07-26 — Thin Streamlit UI**: keep typed workflow/job state in
+  `st.session_state`, poll durable lifecycle state, and derive cancellation
+  identity in trusted application code. Reason: UI reruns must not own side
+  effects.
+- **2026-07-26 — Fact-preserving explainer**: the model returns an evidence-ID
+  section plan only; deterministic code validates completeness and renders
+  immutable fact text. Reason: prompt-only anti-hallucination is insufficient.
+- **2026-07-26 — Deterministic orchestration**: replace the proposed three-agent
+  tool pipeline with typed application-owned transitions. Reason: fixed tool
+  handoffs and expensive side effects do not require model judgment.
+- **2026-07-26 — Visible geometry-derived defaults**: derive near-square meshes
+  around 2,500 cells, disclose every compiler choice, and proceed without a
+  confirmation gate. Reason: reduce user tuning while keeping assumptions visible.
+- **2026-07-26 — Contained execution**: use one pinned Docker image but launch each
+  solve in a credential-free child process. Reason: Python exceptions cannot
+  contain native PETSc/MPI failures.
+- **2026-07-26 — Model/runtime pin**: CrewAI `1.15.6`, Pydantic `2.12.5`,
+  Streamlit `1.60.0`, and `gpt-5.6-terra`; accept dependency compatibility changes
+  only after the complete numerical suite passes.
+- **2026-07-25 — Learning/demo scope**: this is not a production engineering or
+  hosted service. Favor clear, testable learning boundaries over platform scale.
 
-## 10. Open Questions / Next Checkpoint
+## 10. Open Questions
 
-The planned v1 stages are complete. Further work should begin only after selecting
-a post-v1 objective. Current candidates:
-
-- Confirm the original FEniTop source license and attribution before public
-  distribution or presentation.
-- Add an optional recorded/cached UI scenario if a live demo must survive API or
-  network failure. The deterministic harness is the current offline fallback.
-- Consider future physics only as explicit contract/version changes: for example
-  roller supports, nonzero prescribed displacement, or agent-safe 3D.
-
-Retained technical boundaries:
-
-- The trusted iterative compliance and direct mechanism PETSc profiles pass
-  convergence/residual checks, finite differences, and isolated-worker
-  calibration; retain them unless testing finds a profile-specific issue.
-- Component-wise/roller supports and nonzero prescribed displacement are explicitly
-  rejected in agent-safe v1. A future implementation must add correct
-  lifting/subspace behavior and tests before changing that capability.
-- The public catalog currently exposes `gpt-5.6-terra` without a distinct dated
-  snapshot. That exact ID and the rest of the recorded Stage 0 configuration in
-  §6 are the reproducibility baseline.
-
-The v1 interpreter prompt is now versioned in
-`agentic/prompts/intent_system_v1.txt`; changes to supported physics must remain
-aligned with the final contract in `docs/tool-reference.md`.
+None for v1. Post-v1 objectives must be selected before implementation.
 
 ## 11. Implementation Checklist
 
-Completed tool capabilities and their verification commands are maintained in
-`docs/tool-reference.md` and README. This checklist tracks only remaining work.
-
-**Stage 0 — model environment & secrets** (complete):
-
-- [x] Create/configure the OpenAI API account and generate an API key; cost alerts
-      or prepaid limits are optional personal-account policy, not architecture.
-- [x] Exclude local `.env` files from Git and Docker build contexts.
-- [x] Create an untracked `.env` and committed `.env.example` containing
-      `OPENAI_API_KEY=` and `OPENAI_MODEL=gpt-5.6-terra`.
-- [x] Add/pin CrewAI only after its exact deterministic Flow/tool API is verified
-      against the pinned Pydantic/runtime stack; rebuild the image once.
-- [x] Wire `.env` into the parent application process and prove the solver worker
-      environment does not inherit `OPENAI_API_KEY`.
-- [x] Verify outbound API access and run a throwaway structured-output smoke test.
-- [x] Run golden intent scenarios and record/pin the final model ID/config (§6).
-
-**Stage 1 — deterministic `agentic/` build** (complete):
-
-- [x] `intent.py` — typed `ProblemIntent` and
-      `ready | needs_clarification | unsupported`.
-- [x] `interpreter.py` and prompts — LLM interpretation only; structured output,
-      bounded retries, capability-aware clarification.
-- [x] `compiler.py` — deterministic intent-to-config mapping, geometry-derived
-      near-square mesh/filter defaults, and complete user-visible defaults ledger.
-- [x] First `orchestrator.py` slice — typed clarification/unsupported/validation
-      states, contextual resume, ordered event trace, and exact validator handoff.
-- [x] `orchestrator.py` — deterministic typed state machine; exact
-      validated→worker→analyze handoffs and idempotent job resume.
-- [x] Optional `explainer.py` — explains Tool 3 evidence without changing facts.
-- [x] `tests/agentic/` — canned interpreter outputs, clarification/resume,
-      unsupported case, no duplicate solve, and full mocked-LLM flow.
-- [x] Verify via a plain harness before touching Streamlit.
-
-**Stage 2 — Streamlit UI** (complete):
-
-- [x] Single free-text chat input; clarification stays in chat; no form/JSON escape
-      hatch and no confirmation gate for `ready`.
-- [x] Thin UI over orchestrator/job state; refresh/rerun cannot duplicate a solve.
-- [x] Show structured event/evidence trace and progress/cancel state, not hidden
-      chain-of-thought.
-
-**Stage 3 — documentation/showcase**:
-
-- [x] Rewrite README narrative once the hardened tools and `agentic/` flow exist.
-- [x] Add demo scenarios, known capability limits, architecture rationale, and
-      reproducible run/test instructions.
+- [x] Stage 0 — pinned Docker model/runtime and protected API secret.
+- [x] Stage 1 — typed intent, compiler, orchestrator, tools, and explainer.
+- [x] Stage 2 — chat UI, progress/cancellation, and inspectable evidence.
+- [x] Stage 3 — release narrative, scenarios, limits, rationale, and commands.
+- [x] Release cleanup — compact docs, upstream attribution/license, metadata,
+      verification, and clean tracked tree.

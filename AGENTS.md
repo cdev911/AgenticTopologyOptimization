@@ -18,6 +18,5 @@ next step back to the user before taking any action.
 
 When you finish work in a session, update `docs/spec.md` yourself: check off the
 relevant `§11 Implementation Checklist` items, add a dated `§9 Decision Log` entry
-for any new decision, and refresh `§0 Current Status` at the top. That file — not
-chat history — is what carries context into the next session, possibly in a
-different tool (Claude Code, Codex, Copilot, ...).
+for any new decision, and refresh `§0 Current Status` at the top. That file—not
+chat history—carries context into the next session.
