@@ -1,0 +1,488 @@
+{
+  "version": "boundary-condition-evals-v1",
+  "description": "Provider-independent semantic targets for natural-language supports and boundary loads. These cases grade retained meaning and safety behavior; they never authorize a solver run.",
+  "global_forbidden_behaviors": [
+    "solver_start",
+    "discard_partial_boundary_condition",
+    "invent_boundary_extent",
+    "invent_load_direction",
+    "invent_load_magnitude",
+    "invent_units",
+    "merge_distinct_boundary_conditions",
+    "overwrite_unrelated_boundary_condition",
+    "pin_to_clamp",
+    "point_to_traction_silently",
+    "resultant_to_traction_silently",
+    "roller_to_clamp"
+  ],
+  "scenarios": [
+    {
+      "id": "clamp_entire_left_edge",
+      "family": "support_aliases",
+      "purpose": "Recognize an explicit full-vector clamp on a whole edge.",
+      "turns": ["Fully clamp the entire left edge."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "left", "selector_kind": "whole_edge"}]},
+      "tags": ["fixed", "whole-edge"]
+    },
+    {
+      "id": "cantilever_root_is_left_edge",
+      "family": "support_aliases",
+      "purpose": "Resolve root language only when cantilever orientation is established.",
+      "context": "The beam extends from x=0 to x=10 and its free end is on the right.",
+      "turns": ["Fix the cantilever at its root."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "left", "selector_kind": "whole_edge"}]},
+      "tags": ["cantilever", "relative-edge"]
+    },
+    {
+      "id": "encastre_left_boundary",
+      "family": "support_aliases",
+      "purpose": "Recognize the engineering synonym encastre as a clamp.",
+      "turns": ["Use an encastre boundary condition on the left side."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "left", "selector_kind": "whole_edge"}]},
+      "tags": ["synonym"]
+    },
+    {
+      "id": "fix_bottom_edge",
+      "family": "support_aliases",
+      "purpose": "Retain a whole bottom-edge clamp.",
+      "turns": ["Set both displacement components to zero along the bottom boundary."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "bottom", "selector_kind": "whole_edge"}]},
+      "tags": ["components", "whole-edge"]
+    },
+    {
+      "id": "clamp_top_side",
+      "family": "support_aliases",
+      "purpose": "Recognize side and boundary terminology.",
+      "turns": ["Clamp the complete top side."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "top", "selector_kind": "whole_edge"}]},
+      "tags": ["whole-edge"]
+    },
+    {
+      "id": "two_distinct_clamped_edges",
+      "family": "support_aliases",
+      "purpose": "Keep two supports as separate stable entities.",
+      "turns": ["Clamp the left edge and also clamp the bottom edge."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [
+        {"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "left", "selector_kind": "whole_edge"},
+        {"bc_id": "S2", "kind": "support", "support_kind": "fixed_all", "edge": "bottom", "selector_kind": "whole_edge"}
+      ]},
+      "tags": ["multiple"]
+    },
+    {
+      "id": "generic_supported_on_left_is_ambiguous",
+      "family": "support_aliases",
+      "purpose": "Do not guess clamp, roller, or pin from the generic word supported.",
+      "turns": ["The plate is supported on the left."],
+      "expected": {"semantic_state": "ambiguous", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "partial", "edge": "left", "selector_kind": "whole_edge"}], "clarifications": ["support_kind"]},
+      "tags": ["ambiguous-support"]
+    },
+
+    {
+      "id": "centered_twenty_percent_left_clamp",
+      "family": "support_segments",
+      "purpose": "Capture a centered fractional clamp segment.",
+      "turns": ["Clamp the middle 20 percent of the left edge."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "left", "selector_kind": "centered_fraction", "center": 0.5, "span": 0.2}]},
+      "tags": ["fraction", "centered"]
+    },
+    {
+      "id": "upper_half_left_clamp",
+      "family": "support_segments",
+      "purpose": "Map upper-half language to an along-edge fraction interval.",
+      "turns": ["Fix the upper half of the left boundary."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "left", "selector_kind": "fraction_interval", "start": 0.5, "end": 1.0}]},
+      "tags": ["fraction", "upper"]
+    },
+    {
+      "id": "lower_third_right_clamp",
+      "family": "support_segments",
+      "purpose": "Map lower-third language without coordinate arithmetic.",
+      "turns": ["Clamp the bottom third of the right edge."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "right", "selector_kind": "fraction_interval", "start": 0.0, "end": 0.3333333333333333}]},
+      "tags": ["fraction", "lower"]
+    },
+    {
+      "id": "left_clamp_between_y_coordinates",
+      "family": "support_segments",
+      "purpose": "Retain explicit coordinate endpoints on a vertical edge.",
+      "turns": ["Clamp the left edge only from y=1 to y=2."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "left", "selector_kind": "coordinate_interval", "start": 1.0, "end": 2.0}]},
+      "tags": ["coordinates"]
+    },
+    {
+      "id": "right_clamp_centered_physical_width",
+      "family": "support_segments",
+      "purpose": "Preserve a physical segment width independently from fractions.",
+      "turns": ["Clamp a 1 mm high segment centered on the right edge."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "right", "selector_kind": "centered_width", "center": 0.5, "width": 1.0, "unit": "mm"}]},
+      "tags": ["physical-width", "units"]
+    },
+    {
+      "id": "top_clamp_between_x_coordinates",
+      "family": "support_segments",
+      "purpose": "Retain coordinate endpoints on a horizontal edge.",
+      "turns": ["Fix the top boundary between x=2 and x=8."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "top", "selector_kind": "coordinate_interval", "start": 2.0, "end": 8.0}]},
+      "tags": ["coordinates", "horizontal"]
+    },
+    {
+      "id": "left_clamp_offset_from_lower_corner",
+      "family": "support_segments",
+      "purpose": "Retain an offset and span measured from a named corner.",
+      "turns": ["On the left edge, start 1 mm above the lower-left corner and clamp the next 2 mm."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "left", "selector_kind": "distance_from_corner", "from_corner": "lower_left", "start": 1.0, "span": 2.0, "unit": "mm"}]},
+      "tags": ["corner-offset", "units"]
+    },
+    {
+      "id": "support_near_lower_left_needs_extent",
+      "family": "support_segments",
+      "purpose": "Retain the known vicinity without inventing a segment extent.",
+      "turns": ["Clamp the boundary near the lower-left corner."],
+      "expected": {"semantic_state": "ambiguous", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "partial", "support_kind": "fixed_all", "selector_kind": "unspecified_extent"}], "clarifications": ["boundary_edge", "boundary_extent"]},
+      "tags": ["vague-location"]
+    },
+
+    {
+      "id": "whole_right_traction_vector",
+      "family": "distributed_loads",
+      "purpose": "Capture an explicit traction vector on a whole edge.",
+      "turns": ["Apply distributed traction [0, -1] on the entire right edge."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "load_kind": "traction_vector", "edge": "right", "selector_kind": "whole_edge", "vector": [0.0, -1.0], "distribution": "uniform"}]},
+      "tags": ["traction", "vector"]
+    },
+    {
+      "id": "downward_traction_magnitude",
+      "family": "distributed_loads",
+      "purpose": "Keep magnitude and direction semantics without requiring a vector.",
+      "turns": ["Put a uniform downward traction of 3 MPa over the right edge."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "load_kind": "traction_magnitude", "edge": "right", "selector_kind": "whole_edge", "magnitude": 3.0, "direction": "down", "unit": "MPa", "distribution": "uniform"}]},
+      "tags": ["traction", "direction", "units"]
+    },
+    {
+      "id": "centered_ten_percent_right_traction",
+      "family": "distributed_loads",
+      "purpose": "Capture the common centered percentage load segment.",
+      "turns": ["Apply traction [0,-1] over the centered 10% of the right face."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "load_kind": "traction_vector", "edge": "right", "selector_kind": "centered_fraction", "center": 0.5, "span": 0.1, "vector": [0.0, -1.0], "distribution": "uniform"}]},
+      "tags": ["reported-failure", "fraction"]
+    },
+    {
+      "id": "reported_coordinate_segment_complete_prompt",
+      "family": "distributed_loads",
+      "purpose": "Preserve the BC from the previously failing 10 by 5 complete prompt.",
+      "turns": ["Minimize compliance of a rectangular 10 by 5 plane-strain domain starting at [0, 0]. Use Young's modulus 10 and Poisson ratio 0.499. Fully clamp the entire left edge. Apply a distributed traction [0, -1] on the right edge x=10, limited to the centered segment from y=2.25 to y=2.75. Use 33 percent material."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [
+        {"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "left", "selector_kind": "whole_edge"},
+        {"bc_id": "L1", "kind": "load", "load_kind": "traction_vector", "edge": "right", "selector_kind": "coordinate_interval", "start": 2.25, "end": 2.75, "vector": [0.0, -1.0], "distribution": "uniform"}
+      ]},
+      "tags": ["reported-failure", "near-incompressible"]
+    },
+    {
+      "id": "reported_whole_edge_complete_prompt",
+      "family": "distributed_loads",
+      "purpose": "Preserve the BC from the previously failing 10 by 4 whole-edge prompt.",
+      "turns": ["Minimize compliance of a rectangular 10 by 4 plane-strain domain starting at [0, 0]. Use Young's modulus 100 and Poisson ratio 0.3. Fully clamp the entire left edge and apply a distributed traction [0, -1] on the entire right edge. Use 40 percent material."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [
+        {"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "left", "selector_kind": "whole_edge"},
+        {"bc_id": "L1", "kind": "load", "load_kind": "traction_vector", "edge": "right", "selector_kind": "whole_edge", "vector": [0.0, -1.0], "distribution": "uniform"}
+      ]},
+      "tags": ["reported-failure", "whole-edge"]
+    },
+    {
+      "id": "upper_quarter_right_traction",
+      "family": "distributed_loads",
+      "purpose": "Resolve an upper-quarter load interval.",
+      "turns": ["Use traction [2,0] on the upper quarter of the right edge."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "load_kind": "traction_vector", "edge": "right", "selector_kind": "fraction_interval", "start": 0.75, "end": 1.0, "vector": [2.0, 0.0], "distribution": "uniform"}]},
+      "tags": ["fraction", "upper"]
+    },
+    {
+      "id": "rightward_tangential_top_traction",
+      "family": "distributed_loads",
+      "purpose": "Resolve a tangential direction only after the edge is known.",
+      "turns": ["Apply a uniform tangential traction of 2 to the right along the top edge."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "load_kind": "traction_magnitude", "edge": "top", "selector_kind": "whole_edge", "magnitude": 2.0, "direction": "right", "distribution": "uniform"}]},
+      "tags": ["tangential", "direction"]
+    },
+    {
+      "id": "inward_pressure_right_edge",
+      "family": "distributed_loads",
+      "purpose": "Retain pressure and inward edge-normal semantics.",
+      "turns": ["Apply an inward pressure of 5 MPa on the right boundary."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "load_kind": "pressure", "edge": "right", "selector_kind": "whole_edge", "magnitude": 5.0, "direction": "inward", "unit": "MPa", "distribution": "uniform"}]},
+      "tags": ["pressure", "normal"]
+    },
+    {
+      "id": "outward_pressure_top_edge",
+      "family": "distributed_loads",
+      "purpose": "Retain outward pressure semantics on a horizontal edge.",
+      "turns": ["The full top edge has outward pressure 1.5 MPa."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "load_kind": "pressure", "edge": "top", "selector_kind": "whole_edge", "magnitude": 1.5, "direction": "outward", "unit": "MPa", "distribution": "uniform"}]},
+      "tags": ["pressure", "normal"]
+    },
+    {
+      "id": "load_on_right_without_kind_or_value",
+      "family": "distributed_loads",
+      "purpose": "Retain the known edge while asking for quantity, magnitude, and direction.",
+      "turns": ["Put a load on the right side."],
+      "expected": {"semantic_state": "incomplete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "completeness": "partial", "edge": "right", "selector_kind": "unspecified_extent"}], "clarifications": ["boundary_extent", "load_direction", "load_magnitude", "load_quantity_kind"]},
+      "tags": ["partial"]
+    },
+
+    {
+      "id": "resultant_ten_newtons_centered_ten_percent",
+      "family": "resultant_loads",
+      "purpose": "Represent a total resultant separately from effective traction.",
+      "turns": ["Distribute a total downward force of 10 N uniformly over the centered 10% of the right edge."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "load_kind": "resultant_magnitude", "edge": "right", "selector_kind": "centered_fraction", "center": 0.5, "span": 0.1, "magnitude": 10.0, "direction": "down", "unit": "N", "distribution": "uniform"}]},
+      "tags": ["resultant", "fraction"]
+    },
+    {
+      "id": "resultant_whole_right_edge",
+      "family": "resultant_loads",
+      "purpose": "Represent a whole-edge resultant vector.",
+      "turns": ["Spread the total force [0,-100] N uniformly over the full right edge."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "load_kind": "resultant_vector", "edge": "right", "selector_kind": "whole_edge", "vector": [0.0, -100.0], "unit": "N", "distribution": "uniform"}]},
+      "tags": ["resultant", "vector"]
+    },
+    {
+      "id": "supplied_cantilever_transcript_retains_partial_resultant",
+      "family": "resultant_loads",
+      "purpose": "Prevent the supplied multi-turn conversation from losing known load facts or inventing downward direction.",
+      "context": "The conversation starts with no canonical facts.",
+      "turns": [
+        "I want to optimize a cantilever beam with tip load. I want to have volume constraint of 33%. Can you run this problem",
+        "yes the objective is to min compliance and the domain can mesh can be 100 x 50 and use toy material properties of 1 MPa and 0.45. So this is a cantilever beam with tip load, i.e. left edge fixed and load of 1N on the right face center.",
+        "bounds can be 0,0 and 100,50 and external load is 1N",
+        "external_load is 10",
+        "the fraction on the right face where the load is applied in 10 percent",
+        "total force load"
+      ],
+      "expected": {"semantic_state": "incomplete", "boundary_conditions": [
+        {"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "left", "selector_kind": "whole_edge"},
+        {"bc_id": "L1", "kind": "load", "completeness": "partial", "load_kind": "resultant_magnitude", "edge": "right", "selector_kind": "centered_fraction", "center": 0.5, "span": 0.1, "magnitude": 10.0, "unit": "N"}
+      ], "clarifications": ["load_direction", "unit_system"]},
+      "tags": ["supplied-transcript", "correction", "units"]
+    },
+    {
+      "id": "resultant_correction_one_to_ten",
+      "family": "resultant_loads",
+      "purpose": "Update only the existing resultant magnitude.",
+      "context": "L1 is a uniform downward total resultant of 1 N over the centered 10% of the right edge.",
+      "turns": ["Change L1 from 1 N to 10 N; leave its direction and segment alone."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "load_kind": "resultant_magnitude", "edge": "right", "selector_kind": "centered_fraction", "center": 0.5, "span": 0.1, "magnitude": 10.0, "direction": "down", "unit": "N", "distribution": "uniform"}]},
+      "tags": ["correction", "stable-id"]
+    },
+    {
+      "id": "resultant_without_extent",
+      "family": "resultant_loads",
+      "purpose": "Retain resultant magnitude, direction, and edge while asking for its distribution extent.",
+      "turns": ["Apply a total downward force of 50 N somewhere on the right edge."],
+      "expected": {"semantic_state": "incomplete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "completeness": "partial", "load_kind": "resultant_magnitude", "edge": "right", "selector_kind": "unspecified_extent", "magnitude": 50.0, "direction": "down", "unit": "N"}], "clarifications": ["boundary_extent", "confirm_uniform_distribution"], "assumptions": ["uniform_distribution"]},
+      "tags": ["partial", "assumption"]
+    },
+    {
+      "id": "resultant_without_direction",
+      "family": "resultant_loads",
+      "purpose": "Do not invent direction for a scalar total force.",
+      "turns": ["Use a total force of 10 N over the middle fifth of the right edge."],
+      "expected": {"semantic_state": "incomplete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "completeness": "partial", "load_kind": "resultant_magnitude", "edge": "right", "selector_kind": "centered_fraction", "center": 0.5, "span": 0.2, "magnitude": 10.0, "unit": "N"}], "clarifications": ["load_direction", "confirm_uniform_distribution"], "assumptions": ["uniform_distribution"]},
+      "tags": ["partial", "direction"]
+    },
+    {
+      "id": "point_force_requires_finite_patch",
+      "family": "resultant_loads",
+      "purpose": "Negotiate a finite patch instead of silently converting a point load.",
+      "turns": ["Apply a 100 N downward point load at the center of the free right edge."],
+      "expected": {"semantic_state": "needs_reformulation", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "completeness": "capability_limited", "load_kind": "point_force", "edge": "right", "selector_kind": "boundary_point", "center": 0.5, "magnitude": 100.0, "direction": "down", "unit": "N", "distribution": "point"}], "clarifications": ["confirm_finite_patch"], "assumptions": ["finite_patch_span", "uniform_distribution"], "capability_limits": ["mathematical_point_load"]},
+      "tags": ["point-load", "reformulation"]
+    },
+    {
+      "id": "n_mm_mpa_unit_context_must_be_confirmed",
+      "family": "resultant_loads",
+      "purpose": "Treat an inferred N-mm-MPa system as an assumption.",
+      "turns": ["The beam is 100 by 50, E is 1 MPa, and L1 is a uniform total force [0,-10] N on the centered 10% of the right edge."],
+      "expected": {"semantic_state": "incomplete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "load_kind": "resultant_vector", "edge": "right", "selector_kind": "centered_fraction", "center": 0.5, "span": 0.1, "vector": [0.0, -10.0], "unit": "N", "distribution": "uniform"}], "clarifications": ["unit_system"], "assumptions": ["unit_system_n_mm_mpa"]},
+      "tags": ["units", "assumption"]
+    },
+
+    {
+      "id": "two_distinct_boundary_loads",
+      "family": "multiple_and_corrections",
+      "purpose": "Keep two loads separate and ordered.",
+      "turns": ["Apply [0,-1] on the whole right edge and [2,0] on the upper half of the left edge."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [
+        {"bc_id": "L1", "kind": "load", "load_kind": "traction_vector", "edge": "right", "selector_kind": "whole_edge", "vector": [0.0, -1.0], "distribution": "uniform"},
+        {"bc_id": "L2", "kind": "load", "load_kind": "traction_vector", "edge": "left", "selector_kind": "fraction_interval", "start": 0.5, "end": 1.0, "vector": [2.0, 0.0], "distribution": "uniform"}
+      ]},
+      "tags": ["multiple", "stable-id"]
+    },
+    {
+      "id": "move_l1_upward",
+      "family": "multiple_and_corrections",
+      "purpose": "Change a referenced selector without altering load value.",
+      "context": "L1 is traction [0,-1] over a centered 10% segment on the right edge.",
+      "turns": ["Move L1 upward so it is centered three quarters of the way up; keep its 10% span and traction."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "load_kind": "traction_vector", "edge": "right", "selector_kind": "centered_fraction", "center": 0.75, "span": 0.1, "vector": [0.0, -1.0], "distribution": "uniform"}]},
+      "tags": ["correction", "stable-id"]
+    },
+    {
+      "id": "change_only_l1_vector",
+      "family": "multiple_and_corrections",
+      "purpose": "Change one field while retaining the selected segment.",
+      "context": "L1 is traction [0,-1] on the centered 10% of the right edge.",
+      "turns": ["Make L1 twice as strong downward, but do not move it."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "load_kind": "traction_vector", "edge": "right", "selector_kind": "centered_fraction", "center": 0.5, "span": 0.1, "vector": [0.0, -2.0], "distribution": "uniform"}]},
+      "tags": ["correction", "retention"]
+    },
+    {
+      "id": "remove_l2_only",
+      "family": "multiple_and_corrections",
+      "purpose": "Delete one named load without deleting the other.",
+      "context": "L1 is traction [0,-1] on the right edge. L2 is traction [1,0] on the top edge.",
+      "turns": ["Remove L2 and leave L1 unchanged."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "load_kind": "traction_vector", "edge": "right", "selector_kind": "whole_edge", "vector": [0.0, -1.0], "distribution": "uniform"}]},
+      "tags": ["delete", "stable-id"]
+    },
+    {
+      "id": "other_load_reference_is_ambiguous",
+      "family": "multiple_and_corrections",
+      "purpose": "Ask which load is meant when a relative reference has no unique antecedent.",
+      "context": "L1, L2, and L3 are three existing boundary loads.",
+      "turns": ["Make the other load point upward."],
+      "expected": {"semantic_state": "ambiguous", "boundary_conditions": [], "clarifications": ["target_boundary_condition"]},
+      "tags": ["reference", "ambiguous"]
+    },
+    {
+      "id": "load_correction_preserves_support",
+      "family": "multiple_and_corrections",
+      "purpose": "Do not overwrite an unrelated support while correcting a load.",
+      "context": "S1 clamps the left edge. L1 is traction [0,-1] over the full right edge.",
+      "turns": ["Change L1 to [0,-3]. Everything else stays as it is."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [
+        {"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "left", "selector_kind": "whole_edge"},
+        {"bc_id": "L1", "kind": "load", "load_kind": "traction_vector", "edge": "right", "selector_kind": "whole_edge", "vector": [0.0, -3.0], "distribution": "uniform"}
+      ]},
+      "tags": ["correction", "fact-preservation"]
+    },
+    {
+      "id": "add_second_support_without_merging",
+      "family": "multiple_and_corrections",
+      "purpose": "Add a support while retaining the prior support identity.",
+      "context": "S1 clamps the left edge.",
+      "turns": ["Also clamp the lower quarter of the right edge."],
+      "expected": {"semantic_state": "complete", "boundary_conditions": [
+        {"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "left", "selector_kind": "whole_edge"},
+        {"bc_id": "S2", "kind": "support", "support_kind": "fixed_all", "edge": "right", "selector_kind": "fraction_interval", "start": 0.0, "end": 0.25}
+      ]},
+      "tags": ["multiple", "support"]
+    },
+
+    {
+      "id": "ten_percent_width_on_vertical_edge",
+      "family": "ambiguity_and_conflicts",
+      "purpose": "Clarify whether width means edge span or horizontal domain width.",
+      "turns": ["Apply the load over a width of 10% on the right edge."],
+      "expected": {"semantic_state": "ambiguous", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "completeness": "partial", "edge": "right", "selector_kind": "unspecified_extent"}], "clarifications": ["clarify_width_axis", "load_direction", "load_magnitude", "load_quantity_kind"]},
+      "tags": ["width", "vertical-edge"]
+    },
+    {
+      "id": "tip_load_without_distribution",
+      "family": "ambiguity_and_conflicts",
+      "purpose": "Do not decide whether tip load means point force or finite distributed load.",
+      "context": "The free end is the right edge.",
+      "turns": ["Put a downward tip load of 10 N on it."],
+      "expected": {"semantic_state": "ambiguous", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "completeness": "partial", "edge": "right", "selector_kind": "unspecified_extent", "magnitude": 10.0, "direction": "down", "unit": "N"}], "clarifications": ["boundary_extent", "load_quantity_kind"]},
+      "tags": ["tip-load", "quantity"]
+    },
+    {
+      "id": "conflicting_top_and_right_location",
+      "family": "ambiguity_and_conflicts",
+      "purpose": "Detect contradictory edge descriptions.",
+      "turns": ["Apply L1 on the top edge, specifically on the right edge at x=10."],
+      "expected": {"semantic_state": "ambiguous", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "completeness": "partial", "selector_kind": "unspecified"}], "clarifications": ["conflicting_boundary_location", "load_direction", "load_magnitude", "load_quantity_kind"]},
+      "tags": ["conflict"]
+    },
+    {
+      "id": "conflicting_fixed_and_roller_support",
+      "family": "ambiguity_and_conflicts",
+      "purpose": "Do not choose between mutually different support semantics.",
+      "turns": ["The left edge is fully fixed, but make that same edge a horizontal roller."],
+      "expected": {"semantic_state": "ambiguous", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "partial", "edge": "left", "selector_kind": "whole_edge"}], "clarifications": ["conflicting_support_kind"]},
+      "tags": ["conflict", "roller"]
+    },
+    {
+      "id": "scalar_load_ten_has_unknown_quantity",
+      "family": "ambiguity_and_conflicts",
+      "purpose": "Ask whether a scalar means traction, pressure, or resultant.",
+      "turns": ["The load on the right is 10."],
+      "expected": {"semantic_state": "incomplete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "completeness": "partial", "edge": "right", "selector_kind": "unspecified_extent", "magnitude": 10.0}], "clarifications": ["boundary_extent", "load_direction", "load_quantity_kind", "unit_system"]},
+      "tags": ["quantity", "units"]
+    },
+    {
+      "id": "pressure_without_orientation",
+      "family": "ambiguity_and_conflicts",
+      "purpose": "Ask whether a named pressure acts inward or outward.",
+      "turns": ["Put pressure 2 MPa over the whole right edge."],
+      "expected": {"semantic_state": "incomplete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "completeness": "partial", "load_kind": "pressure", "edge": "right", "selector_kind": "whole_edge", "magnitude": 2.0, "unit": "MPa", "distribution": "uniform"}], "clarifications": ["pressure_orientation"]},
+      "tags": ["pressure", "direction"]
+    },
+
+    {
+      "id": "roller_support_requires_component_contract",
+      "family": "capability_boundaries",
+      "purpose": "Recognize roller semantics without converting them to a clamp.",
+      "turns": ["Use a vertical roller support along the bottom edge."],
+      "expected": {"semantic_state": "requires_capability", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "capability_limited", "support_kind": "roller_normal", "edge": "bottom", "selector_kind": "whole_edge"}], "capability_limits": ["component_support"]},
+      "tags": ["roller", "phase-two"]
+    },
+    {
+      "id": "symmetry_boundary_requires_component_contract",
+      "family": "capability_boundaries",
+      "purpose": "Recognize a symmetry constraint as component-wise support physics.",
+      "turns": ["Make the left edge a symmetry boundary."],
+      "expected": {"semantic_state": "requires_capability", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "capability_limited", "support_kind": "symmetry", "edge": "left", "selector_kind": "whole_edge"}], "capability_limits": ["component_support"]},
+      "tags": ["symmetry", "phase-two"]
+    },
+    {
+      "id": "true_corner_pin_requires_node_selector",
+      "family": "capability_boundaries",
+      "purpose": "Recognize a true point pin without clamping a finite facet.",
+      "turns": ["Pin the lower-left corner at [0,0]."],
+      "expected": {"semantic_state": "requires_capability", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "capability_limited", "support_kind": "pin", "selector_kind": "boundary_point", "point": [0.0, 0.0]}], "capability_limits": ["point_node_pin"]},
+      "tags": ["pin", "phase-two"]
+    },
+    {
+      "id": "nonzero_prescribed_displacement_remains_unsupported",
+      "family": "capability_boundaries",
+      "purpose": "Identify nonzero displacement as outside the planned BC increments.",
+      "turns": ["Prescribe ux=0.5 mm on the right edge."],
+      "expected": {"semantic_state": "requires_capability", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "capability_limited", "edge": "right", "selector_kind": "whole_edge", "direction": "x", "magnitude": 0.5, "unit": "mm"}], "capability_limits": ["nonzero_prescribed_displacement"]},
+      "tags": ["nonzero-displacement", "backlog"]
+    },
+    {
+      "id": "mathematical_point_load_capability",
+      "family": "capability_boundaries",
+      "purpose": "Identify a mathematical point force and offer only explicit reformulation.",
+      "turns": ["Apply force [0,-10] N at exactly the point [10,2.5]."],
+      "expected": {"semantic_state": "needs_reformulation", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "completeness": "capability_limited", "load_kind": "point_force", "selector_kind": "boundary_point", "point": [10.0, 2.5], "vector": [0.0, -10.0], "unit": "N", "distribution": "point"}], "clarifications": ["confirm_finite_patch"], "assumptions": ["finite_patch_span", "uniform_distribution"], "capability_limits": ["mathematical_point_load"]},
+      "tags": ["point-load", "reformulation"]
+    },
+    {
+      "id": "applied_boundary_moment_is_not_a_traction",
+      "family": "capability_boundaries",
+      "purpose": "Do not turn an applied couple into a force vector.",
+      "turns": ["Apply a clockwise moment of 20 N mm at the free end."],
+      "expected": {"semantic_state": "requires_capability", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "completeness": "capability_limited", "load_kind": "moment", "selector_kind": "unspecified_extent", "magnitude": 20.0, "unit": "N mm"}], "capability_limits": ["applied_moment"]},
+      "tags": ["moment", "backlog"]
+    },
+    {
+      "id": "linearly_varying_traction_requires_new_load_contract",
+      "family": "capability_boundaries",
+      "purpose": "Recognize a varying traction without replacing it by its average.",
+      "turns": ["Use a downward traction on the right edge that increases linearly from zero at the bottom to 4 MPa at the top."],
+      "expected": {"semantic_state": "requires_capability", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "completeness": "capability_limited", "load_kind": "varying_traction", "edge": "right", "selector_kind": "whole_edge", "magnitude": 4.0, "direction": "down", "unit": "MPa", "distribution": "varying"}], "capability_limits": ["varying_traction"]},
+      "tags": ["varying-load", "backlog"]
+    }
+  ]
+}
