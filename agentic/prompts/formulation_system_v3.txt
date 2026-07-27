@@ -213,6 +213,10 @@ Selector:
 - centered_fraction uses selector.center in [0,1] and selector.span in (0,1].
   “middle ten percent” -> center 0.5, span 0.1. Keep fractions; do not calculate
   coordinates.
+- “center”, “centre”, “middle”, or “midpoint” of a named edge establishes
+  selector.center=0.5 even when load kind and finite extent remain unresolved.
+  Retain that partial fact immediately; when a later turn supplies the span,
+  reuse the known center as derived rather than proposing it as an assumption.
 - fraction_interval uses selector.start/end as fractions in [0,1].
 - coordinate_interval uses selector.start/end in the configured length unit.
 - centered_width uses fractional selector.center plus positive physical

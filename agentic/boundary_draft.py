@@ -7,6 +7,7 @@ provider-independent and intentionally does not compile BCs into solver physics.
 from __future__ import annotations
 
 import math
+import re
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -661,6 +662,48 @@ def _derive_constant_traction_distribution(
     })
 
 
+def _retain_named_edge_center(
+    condition: BoundaryConditionDraft,
+    *,
+    turn_number: int,
+) -> BoundaryConditionDraft:
+    """Retain a named edge center even while selector extent is unresolved."""
+    if condition.fact("selector.center") is not None:
+        return condition
+    source = next(
+        (
+            fact
+            for fact in condition.facts
+            if fact.source_turn == turn_number
+            and fact.source_quote
+            and re.search(
+                r"\b(?:center|centre|midpoint|middle)\b",
+                fact.source_quote,
+                re.IGNORECASE,
+            )
+        ),
+        None,
+    )
+    if source is None or condition.fact("selector.edge") is None:
+        return condition
+    facts = {fact.field: fact for fact in condition.facts}
+    facts["selector.center"] = BoundaryFieldFact(
+        field="selector.center",
+        value=0.5,
+        basis="derived",
+        source_turn=turn_number,
+        source_quote=source.source_quote,
+        rationale=(
+            "A named edge center fixes the along-edge fractional position at 0.5."
+        ),
+    )
+    return condition.model_copy(update={
+        "facts": tuple(
+            facts[name] for name in BOUNDARY_FIELDS if name in facts
+        )
+    })
+
+
 def _fact_from_input(
     item: BoundaryFieldInput,
     *,
@@ -813,6 +856,13 @@ def merge_boundary_patch(
             continue
         facts = {item.field: item for item in condition.facts}
         previous = facts.get(update.field)
+        if (
+            previous is not None
+            and previous.basis != "assumption"
+            and fact.basis == "assumption"
+            and previous.value == fact.value
+        ):
+            fact = previous
         facts[update.field] = fact
         conditions[update.bc_id] = condition.model_copy(update={
             "facts": tuple(
@@ -943,7 +993,10 @@ def merge_boundary_patch(
 
     conditions = {
         bc_id: _derive_constant_traction_distribution(
-            condition,
+            _retain_named_edge_center(
+                condition,
+                turn_number=turn_number,
+            ),
             turn_number=turn_number,
         )
         for bc_id, condition in conditions.items()

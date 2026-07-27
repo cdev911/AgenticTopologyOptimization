@@ -265,6 +265,77 @@ class BoundaryDraftMergeTests(unittest.TestCase):
             assess_boundary_state(result.state).conditions[0].ready
         )
 
+    def test_named_edge_center_survives_unresolved_extent_and_same_assumption(self):
+        first_message = "Put a 1 N load on the right face center."
+        first = merge_boundary_patch(
+            BoundaryDraftState(),
+            BoundaryPatch(creates=(
+                BoundaryCreate(
+                    local_ref="new_load",
+                    kind="load",
+                    fields=(
+                        field("load.magnitude", 1, "1 N"),
+                        field("load.unit", "N", "1 N"),
+                        field(
+                            "selector.kind",
+                            "unspecified_extent",
+                            "right face center",
+                            basis="derived",
+                        ),
+                        field(
+                            "selector.edge",
+                            "right",
+                            "right face center",
+                            basis="derived",
+                        ),
+                    ),
+                ),
+            )),
+            user_message=first_message,
+            turn_number=1,
+        )
+        center = first.state.condition("L1").fact("selector.center")
+        self.assertEqual(center.value, 0.5)
+        self.assertEqual(center.basis, "derived")
+
+        second_message = "Use 10 percent of that edge."
+        second = merge_boundary_patch(
+            first.state,
+            BoundaryPatch(updates=(
+                BoundaryUpdate(
+                    bc_id="L1",
+                    field="selector.kind",
+                    value="centered_fraction",
+                    basis="assumption",
+                    source_quote=None,
+                    rationale="Propose the centered finite selector.",
+                ),
+                BoundaryUpdate(
+                    bc_id="L1",
+                    field="selector.center",
+                    value=0.5,
+                    basis="assumption",
+                    source_quote=None,
+                    rationale="Model repeated the already known center.",
+                ),
+                BoundaryUpdate(
+                    bc_id="L1",
+                    field="selector.span",
+                    value=0.1,
+                    basis="derived",
+                    source_quote="10 percent",
+                    rationale="Convert the stated percentage.",
+                ),
+            )),
+            user_message=second_message,
+            turn_number=2,
+        )
+
+        center = second.state.condition("L1").fact("selector.center")
+        self.assertEqual(center.value, 0.5)
+        self.assertEqual(center.basis, "derived")
+        self.assertEqual(center.source_turn, 1)
+
     def test_generic_yes_confirms_exactly_one_assumption(self):
         initial = merge_boundary_patch(
             BoundaryDraftState(),

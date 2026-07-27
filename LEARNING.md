@@ -856,14 +856,19 @@ and timeout failures, up to three attempts, and never retries a semantic miss.
 Usage is accumulated across attempts.
 
 The next clean post-fix run reached 52/53 with zero solver starts. Its sole
-difference was a redundant `direction=down` label beside vector `[0,-1]`. The
-grader now ignores that label only when the axis-aligned vector proves it;
-`[0,-1]` plus `up` remains a failing contradiction. The following full attempt
-passed 29 cases before 24 persistent provider rate-limit responses, and a
-one-case recovery probe failed immediately. The complete Docker suite passed 293
-tests plus 194 subtests. We record this as strong implementation evidence, but
-not as a 53/53 release pass: a clean full invocation is still required. Honest
-release bookkeeping is part of the learning.
+difference was a redundant `direction=down` label beside vector `[0,-1]`; the
+grader now ignores that label only when the vector proves it and still rejects
+`[0,-1]` plus `up`. Another valid 52/53 run showed that “right face center” had
+not survived until the user later supplied “10 percent.” The durable correction
+retains a named edge center as `0.5` while type/extent remain unresolved and
+prevents an identical later assumption from weakening the derived fact.
+
+One otherwise successful run then encountered a single provider internal-server
+error. The release harness now retries bounded provider 5xx failures just like
+connection/timeouts, but never semantic misses. The final clean run passed 53/53
+with zero solver starts, zero context recoveries, and no retries; the complete
+Docker suite passed 294 tests plus 194 subtests. Honest failure classification and
+application-owned partial memory were both necessary to close the gate.
 
 ## 17. How we will continue learning
 
@@ -943,8 +948,7 @@ This condensed trail connects the lessons above to the implementation order:
   evaluator representational defects, separated provider retry from semantic
   grading, strengthened the v3 BC prompt/IR, and made constant-traction
   uniformity deterministic in application code. The local gate passes; the clean
-  live gate reached 52/53 after the final product fix; the sole redundant-vector
-  grading difference is now covered, but the next full attempt hit a persistent
-  provider rate limit.
-- **Next** — rerun the clean post-fix first-increment billed gate, including the
-  fixed billed BC conversations, without starting the solver.
+  live gate ultimately passed 53/53 after adding deterministic named-center
+  retention and bounded provider-5xx retry, with zero solver starts.
+- **Next** — execute the explicit component-support checkpoint before versioning
+  roller, symmetry, or point-pin solver physics.

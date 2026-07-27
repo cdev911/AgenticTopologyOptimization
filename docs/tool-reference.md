@@ -115,6 +115,10 @@ length/offset from a corner on the named edge, and expert region. Boundary
 points, unspecified extents, invalid corner/edge pairs, and intervals outside
 the edge fail before tool validation.
 
+A named center/middle/midpoint of an identified edge is retained immediately as
+fractional `selector.center=0.5`, even if selector kind or finite extent remains
+unresolved. A later identical assumption cannot downgrade that derived fact.
+
 A constant traction vector or magnitude plus a complete finite selector
 deterministically implies `load.distribution=uniform`; the application upgrades
 any model-proposed uniform assumption to a derived fact. Resultants do not use
