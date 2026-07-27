@@ -17,6 +17,8 @@ Reference:
   Struct Multidisc Optim 67, 140 (2024).
   https://doi.org/10.1007/s00158-024-03818-7
 """
+import logging
+
 import numpy as np
 import dolfinx.fem
 import dolfinx.io
@@ -26,6 +28,8 @@ from petsc4py import PETSc
 from scipy.spatial import cKDTree
 
 from fenitop.numerics import check_ksp, require_finite
+
+logger = logging.getLogger(__name__)
 
 
 def create_mechanism_vectors(func_space, in_spring, out_spring):
@@ -240,6 +244,6 @@ class XDMFTimeSeries:
                 xdmf.write_mesh(self.mesh_obj)
                 self.initialized = True
                 if self.comm.rank == 0:
-                    print(f"[info] Created XDMF time series file: {self.filename}")
+                    logger.info("Created XDMF time series file: %s", self.filename)
             rho.name = self.field_name
             xdmf.write_function(rho, t)

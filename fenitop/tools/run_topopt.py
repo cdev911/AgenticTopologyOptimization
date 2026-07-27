@@ -14,7 +14,6 @@ from __future__ import annotations
 import math
 import sys
 import time
-import traceback
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,11 +41,6 @@ logger = get_logger(__name__)
 def _make_run_id(output_prefix: str) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"{output_prefix}_{stamp}_{uuid.uuid4().hex[:6]}"
-
-
-def _truncated_traceback(exc: BaseException, limit_chars: int = 4000) -> str:
-    text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-    return text[-limit_chars:] if len(text) > limit_chars else text
 
 
 def _list_partial_artifacts(output_dir: Path) -> List[Dict[str, Any]]:
@@ -326,12 +320,12 @@ def _run_topopt_in_process(
             error={
                 "exception_type": type(exc).__name__,
                 "message": failure.message,
-                "traceback": _truncated_traceback(exc),
                 "code": failure.code,
                 "component": failure.component,
                 "iteration": failure.iteration,
                 "reason": failure.reason,
                 "residual_norm": residual_norm,
+                "debug_artifact_role": "run_log",
             },
             last_known_good_metrics=(
                 last_known_good[0] if last_known_good else None
@@ -342,9 +336,20 @@ def _run_topopt_in_process(
         logger.exception("run_topopt: solver raised during run_id=%s", run_id)
         last_known_good = read_history(run_log_path)[-1:]
         return _response(error_envelope(
-            "run_topopt", [], stage="solve", run_id=run_id, validation=check,
-            error={"exception_type": type(exc).__name__, "message": str(exc),
-                   "traceback": _truncated_traceback(exc)},
+            "run_topopt",
+            [FieldError(
+                "solver",
+                "unexpected_solver_error",
+                "The solver failed unexpectedly; inspect the local run log.",
+                retryable=True,
+            )],
+            stage="solve", run_id=run_id, validation=check,
+            error={
+                "exception_type": "SolverExecutionError",
+                "message": "The solver failed unexpectedly.",
+                "code": "unexpected_solver_error",
+                "debug_artifact_role": "run_log",
+            },
             last_known_good_metrics=(last_known_good[0] if last_known_good else None),
             artifacts=_list_partial_artifacts(output_dir)))
     wall_time = time.perf_counter() - start
@@ -433,8 +438,8 @@ def _terminal_process_error(
         error={
             "exception_type": code,
             "message": message,
-            "traceback": "",
             "code": code,
+            "debug_artifact_role": "worker_stderr",
         },
         last_known_good_metrics=(history[-1] if history else None),
         artifacts=_list_partial_artifacts(output_dir),
@@ -497,6 +502,14 @@ def _existing_job_response(
         try:
             response = read_json(response_path)
             _validate_worker_artifacts(response, run_dir)
+            if response["status"] == "ok":
+                from fenitop.tools.contracts import RunManifest
+                from fenitop.tools.manifest import verify_durable_manifest
+
+                verify_durable_manifest(
+                    RunManifest.model_validate(response.get("run_manifest")),
+                    expected_run_dir=run_dir,
+                )
             response["idempotent_replay"] = True
             response["lifecycle"] = lifecycle
             return _response(response)
@@ -535,7 +548,7 @@ def _existing_job_response(
     ))
 
 
-def run_topopt_tool(
+def _run_topopt_impl(
     request: Dict[str, Any] | RunTopoptRequest,
     *,
     policy: TrustedRunPolicy | None = None,
@@ -568,6 +581,7 @@ def run_topopt_tool(
         sanitized_worker_environment,
     )
     from fenitop.tools.worker_protocol import SolverWorkerRequest, SolverWorkerResult
+    from fenitop.tools.manifest import build_run_manifest, write_run_manifest
 
     run_policy = policy or TrustedRunPolicy()
     try:
@@ -912,6 +926,24 @@ def run_topopt_tool(
                     "complete": True,
                 },
             ])
+            manifest = build_run_manifest(
+                run_dir=run_dir,
+                output_prefix=output_prefix,
+                request_hash=request_hash,
+                response=response,
+                lifecycle=lifecycle,
+                artifacts=response["artifacts"],
+            )
+            manifest_path = write_run_manifest(run_dir, manifest)
+            response["run_manifest"] = manifest.model_dump(mode="json")
+            response["artifacts"].append(
+                {
+                    "role": "run_manifest",
+                    "format": "json",
+                    "path": str(manifest_path),
+                    "complete": True,
+                }
+            )
             response = _response(response)
         except Exception as exc:
             lifecycle = update_lifecycle(
@@ -937,9 +969,35 @@ def run_topopt_tool(
     return response
 
 
+def run_topopt_tool(
+    request: Dict[str, Any] | RunTopoptRequest,
+    *,
+    policy: TrustedRunPolicy | None = None,
+) -> Dict[str, Any]:
+    """Total public boundary for one contained topology-optimization run."""
+    try:
+        return _run_topopt_impl(request, policy=policy)
+    except Exception:
+        logger.exception("run_topopt: unexpected public-boundary failure")
+        return _response(error_envelope(
+            "run_topopt",
+            [FieldError(
+                "<root>",
+                "internal_error",
+                "Solver orchestration failed unexpectedly; inspect local logs.",
+                retryable=True,
+            )],
+            stage="internal",
+        ))
+
+
 def main() -> int:
     from fenitop.tools.cli import run_cli
-    return run_cli(run_topopt_tool, "Run a fenitop topology optimization from a validated config.")
+    return run_cli(
+        run_topopt_tool,
+        "Run a fenitop topology optimization from a validated config.",
+        tool_name="run_topopt",
+    )
 
 
 if __name__ == "__main__":

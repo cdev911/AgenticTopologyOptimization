@@ -90,10 +90,10 @@ policy. Generated output files are ignored by Git.
 
 ## Agent-tool layer
 
-Beyond the example scripts, `fenitop/tools/` exposes the config-driven workflow as three composable tools for an agent (or any script) to call, each usable as a plain Python function, a `--input`/`--output` JSON CLI, or an MCP tool — one implementation behind all three. The tool wrappers send their own logging to stderr so stdout can be reserved for machine-readable responses; the hardening note below records a remaining solver-level violation of that contract.
+Beyond the example scripts, `fenitop/tools/` exposes the config-driven workflow as three composable tools for an agent (or any script) to call, each usable as a plain Python function, a `--input`/`--output` JSON CLI, or an MCP tool — one implementation behind all three. Logs and solver progress stay on stderr or in captured run files; CLI stdout is exactly one JSON response and real stdio MCP composition is tested.
 
-> **Hardening status (2026-07-26):** TH-0 through TH-4 are complete. The runtime
-> and numerical baselines are pinned; the public tools now use contract `3.0.0`
+> **Hardening status (2026-07-26):** TH-0 through TH-6 are complete. The runtime
+> and numerical baselines are pinned; the public tools now use contract `4.0.0`
 > and physics-only config schema `1.1`. Source strings and execution controls are
 > absent from the agent surface, semantic/mesh-backed validation covers every
 > current solver input, independent resource ceilings are calibrated in the
@@ -101,8 +101,10 @@ Beyond the example scripts, `fenitop/tools/` exposes the config-driven workflow 
 > bounded states, explicit optimizer success, and consistent evaluated artifacts.
 > Solves now run serially in credential-scrubbed child process groups with contained
 > per-run paths, idempotent lifecycle state, one-solve admission, and tested
-> timeout/cancel/crash/orphan handling. Clean public exception/CLI/MCP boundaries
-> and the final verified analysis manifest remain. Agentic development stays paused
+> timeout/cancel/crash/orphan handling. Public boundaries are total and
+> transport-clean, and successful runs carry a durable, checksum-verified
+> `RunManifest` consumed directly by deterministic analysis. The final TH-7
+> documentation/gate review remains. Agentic development stays paused
 > until the full blocking [tool-hardening plan](docs/tool-hardening-plan.md) passes;
 > `docs/spec.md` is the live status source.
 
@@ -151,14 +153,17 @@ entity report.
   running, succeeded, failed, timed-out, cancelled, and orphaned jobs; parent-side
   crash translation records exit/signal state and marks partial artifacts
   incomplete. On success it returns convergence state, key metrics, validation
-  evidence, lifecycle state, and typed artifact records.
-- **`analyze_results`** — accepts the exact typed successful `run_topopt` envelope,
-  so no model copies filesystem paths or resupplies a config. It derives
-  convergence diagnostics, design-quality flags, plots, and a deterministic
-  narrative without dolfinx/MPI for its core metrics. Artifact paths are resolved
-  and rejected unless they remain under application-owned allowed roots. A checksum-verified,
-  self-contained `RunManifest` and stronger artifact integrity checks remain TH-6
-  work.
+  evidence, lifecycle state, typed artifact records, and a self-contained
+  `RunManifest`. The manifest embeds normalized config/evidence/runtime versions
+  and uses relative artifact paths with sizes and SHA-256 checksums.
+- **`analyze_results`** — accepts only the exact successful `RunManifest`, so no
+  model copies paths or resupplies a config. Before reading results it verifies the
+  manifest hash, durable manifest file, trusted run root, and every artifact's
+  path, size, completeness, and checksum. It rejects empty/inconsistent history,
+  summary mismatches, and malformed density grids; reports convergence,
+  continuation, constraints, checkerboards, disconnected material, and per-load/
+  spring connectivity; and produces a deterministic narrative without dolfinx/MPI
+  for its core metrics.
 
 All serialized boundary/load markers, solid/void zones, and mechanism spring
 regions use the strict declarative JSON region DSL:
@@ -181,13 +186,13 @@ Run a tool from the CLI (JSON request in, JSON response out):
 ```bash
 python -c 'import json; print(json.dumps({"config": json.load(open("config/beam_2d.json"))}))' > request.json
 docker compose run --rm -T fenitop python -m fenitop.tools.validate_config --input request.json
-docker compose run --rm -T fenitop python -m fenitop.tools.run_topopt --input request.json
-docker compose run --rm -T fenitop python -m fenitop.tools.analyze_results --input request.json
+docker compose run --rm -T fenitop python -m fenitop.tools.run_topopt --input request.json --output run-response.json
+python -c 'import json; r=json.load(open("run-response.json")); print(json.dumps({"run_manifest": r["run_manifest"]}))' > analysis-request.json
+docker compose run --rm -T fenitop python -m fenitop.tools.analyze_results --input analysis-request.json
 ```
 
-The analyzer request is different: its `run_topopt_envelope` field must contain the
-exact Tool 2 response. Clean stdout/stdio framing is still a TH-5 gate, so direct
-Python calls are the verified integration surface at this checkpoint.
+The analyzer request's `run_manifest` field contains the exact manifest returned by
+Tool 2. Direct Python, CLI, and stdio MCP surfaces all validate the same models.
 
 Or start the MCP server (the `-T` disables the pty; stdio-transport MCP needs clean, unbuffered JSON-RPC framing on stdin/stdout, which `docker-compose.yml`'s default `tty: true` would otherwise corrupt):
 
@@ -212,9 +217,10 @@ now exits nonzero. The suite includes fast real solves for compliance and
 compliant-mechanism modes with tolerance-based references in
 `tests/fixtures/numerical_baselines.json`, directional finite-difference
 sensitivity checks, injected numerical failures, initial/final-state consistency,
-and cleanup checks, path/idempotency adversarial cases, and real isolated-worker
-timeout/cancellation/signal recovery. The TH-4 checkpoint runs all 95 tests and 54
-subtests successfully.
+cleanup checks, path/idempotency adversarial cases, real isolated-worker timeout/
+cancellation/signal recovery, generated malformed inputs, corrupt artifacts,
+calibrated heuristics, CLI purity, and real MCP composition. The combined TH-5+TH-6
+checkpoint runs all 103 tests and 99 subtests successfully with `pytest -q`.
 
 ## Repository layout
 

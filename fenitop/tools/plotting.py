@@ -107,8 +107,8 @@ def plot_density_grid_fallback(npz_path: Union[str, Path], output_path: Union[st
     older run, or render_snapshot=false was passed to Tool 2)."""
     import numpy as np
 
-    data = np.load(npz_path)
-    grid = data["density"]
+    with np.load(npz_path, allow_pickle=False) as data:
+        grid = data["density"]
     height = 6.0 * grid.shape[0] / max(grid.shape[1], 1)
     fig, ax = plt.subplots(figsize=(6, max(height, 1.0)), facecolor=_SURFACE)
     ax.imshow(grid, cmap="gray_r", vmin=0.0, vmax=1.0, origin="lower")

@@ -20,6 +20,8 @@ Reference:
 import sys
 import json
 import logging
+import os
+import tempfile
 import time
 from pathlib import Path
 
@@ -40,6 +42,26 @@ class FlushFileHandler(logging.FileHandler):
         self.flush()
 
 
+def _atomic_write_json(path: Path, value) -> None:
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        directory_descriptor = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _configure_logger(log_path, file_prefix, comm):
     logger = logging.getLogger(f"fenitop_{file_prefix}")
     logger.setLevel(logging.INFO)
@@ -49,7 +71,7 @@ def _configure_logger(log_path, file_prefix, comm):
     if comm.rank == 0:
         formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
 
-        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler = logging.StreamHandler(sys.stderr)
         stream_handler.setFormatter(formatter)
         logger.addHandler(stream_handler)
 
@@ -352,8 +374,7 @@ def topopt(fem, opt):
                 component="summary", iteration=opt_iter, comm=MPI.COMM_SELF,
             )
             summary_path = output_dir / f"{file_prefix}_summary.json"
-            with open(summary_path, "w", encoding="utf-8") as handle:
-                json.dump(summary, handle, indent=2)
+            _atomic_write_json(summary_path, summary)
             logger.info("Wrote summary to %s", summary_path)
 
         return {

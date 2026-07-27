@@ -373,7 +373,7 @@ def _response(data: dict) -> dict:
     return data
 
 
-def validate_config_tool(
+def _validate_config_impl(
     request: dict | ValidateConfigRequest,
     *,
     policy: TrustedValidationPolicy | None = None,
@@ -485,12 +485,37 @@ def validate_config_tool(
     )
 
 
+def validate_config_tool(
+    request: dict | ValidateConfigRequest,
+    *,
+    policy: TrustedValidationPolicy | None = None,
+) -> dict:
+    """Total public boundary for structural/resource/geometry validation."""
+    try:
+        return _validate_config_impl(request, policy=policy)
+    except Exception:
+        logger.exception("validate_config: unexpected public-boundary failure")
+        return _response(error_envelope(
+            "validate_config",
+            [FieldError(
+                "<root>",
+                "internal_error",
+                "Validation failed unexpectedly; inspect local logs.",
+                retryable=True,
+            )],
+            stage="internal",
+            checked={"structural": False, "resource": False, "geometry": False},
+            normalized_config=None,
+        ))
+
+
 def main() -> int:
     from fenitop.tools.cli import run_cli
 
     return run_cli(
         validate_config_tool,
         "Validate a versioned AgentSafeConfig JSON request.",
+        tool_name="validate_config",
     )
 
 

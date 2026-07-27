@@ -99,6 +99,7 @@ class SerialNumericalBaselineTests(unittest.TestCase):
             "worker_stdout",
             "worker_stderr",
             "job_manifest",
+            "run_manifest",
         }
         self.assertEqual(set(artifact_by_role), expected_roles)
         for role, path in artifact_by_role.items():
@@ -116,6 +117,31 @@ class SerialNumericalBaselineTests(unittest.TestCase):
         )
         self.assertAlmostEqual(
             history[-1]["objective"], result["metrics"]["final_objective"], places=12
+        )
+
+        from fenitop.tools.analyze_results import analyze_results_tool
+        from fenitop.tools.contracts import TrustedAnalysisPolicy
+
+        analysis = analyze_results_tool(
+            {"run_manifest": result["run_manifest"]},
+            policy=TrustedAnalysisPolicy(
+                allowed_roots=(Path(self.tmp_dir),),
+                make_plots=False,
+            ),
+        )
+        self.assertEqual(analysis["status"], "ok", analysis["errors"])
+        self.assertEqual(
+            analysis["source"]["manifest_hash"],
+            result["run_manifest"]["manifest_hash"],
+        )
+        constraints = analysis["metrics"]["constraints"]
+        self.assertEqual(
+            constraints["volume_satisfied"],
+            expected["analysis"]["volume_satisfied"],
+        )
+        self.assertEqual(
+            constraints["compliance_bound_satisfied"],
+            expected["analysis"]["compliance_bound_satisfied"],
         )
         return result
 

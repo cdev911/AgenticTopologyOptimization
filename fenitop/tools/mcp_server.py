@@ -21,6 +21,7 @@ from fenitop.tools.config_models import AgentSafeConfig
 from fenitop.tools.contracts import (
     AnalyzeResultsRequest,
     AnalyzeResultsResponse,
+    RunManifest,
     RunTopoptRequest,
     RunTopoptResponse,
     ValidateConfigRequest,
@@ -57,9 +58,9 @@ def run_topopt(config: AgentSafeConfig) -> RunTopoptResponse:
     Always re-validates the config first. Run IDs, output roots, rendering,
     solver profiles, and safety ceilings are application-owned policy and are
     intentionally absent from this schema.
-    Never raises past this boundary: solver failures come back as a
-    structured error with the last known-good metrics rather than a bare
-    traceback. On success, returns converged/stop_reason (and *why* a run
+    Solver failures come back as a structured error with the last known-good
+    metrics and a local debug-artifact reference. On success, returns
+    converged/stop_reason (and *why* a run
     stopped, not just that it did), the key metrics, and every output
     artifact -- XDMF/H5 time series, the run log, summary.json, a rendered
     density-field PNG, and a coordinate-binned density .npz grid for
@@ -70,16 +71,17 @@ def run_topopt(config: AgentSafeConfig) -> RunTopoptResponse:
 
 
 @mcp.tool()
-def analyze_results(run_topopt_envelope: RunTopoptResponse) -> AnalyzeResultsResponse:
+def analyze_results(run_manifest: RunManifest) -> AnalyzeResultsResponse:
     """Analyze a completed fenitop run and summarize it for a human.
 
-    Pass the exact result envelope from run_topopt. Reports convergence
+    Pass the exact RunManifest from a successful run_topopt response. The
+    analyzer verifies its canonical hash and every artifact size/checksum before
+    reading results. Reports convergence
     (including *why* a run didn't converge, e.g.
     the design change was pinned at the move limit rather than genuinely
     stalling), design-quality flags (grayness/binarization score,
     disconnected material via a connected-component check, a checkerboard
-    heuristic, and -- if the original config is also supplied -- whether the
-    support and load regions are connected through the same material),
+    heuristic, and per-load/spring connectivity to fixed supports),
     convergence plots, and a deterministic English-language narrative. Needs
     no dolfinx/MPI for its core metrics; the design-quality checks degrade
     gracefully (with a warning, not a failure) if no density-grid artifact is
@@ -87,7 +89,7 @@ def analyze_results(run_topopt_envelope: RunTopoptResponse) -> AnalyzeResultsRes
     """
     from fenitop.tools.analyze_results import analyze_results_tool
     return analyze_results_tool(
-        AnalyzeResultsRequest(run_topopt_envelope=run_topopt_envelope)
+        AnalyzeResultsRequest(run_manifest=run_manifest)
     )
 
 
