@@ -103,8 +103,16 @@ Last updated: 2026-07-27
   Compose, dependency, complete test, and UI-health boundaries. The unchanged
   live contract retains Package 8's clean 53/53 v7 result rather than spending
   API credit to repeat the same measurement.
+- **Acceptance preparation**: `docs/acceptance-scenarios.md` now defines five
+  realistic review-first journeys spanning both optimization types, distributed
+  traction, pressure, resultant conversion, component supports, multi-load
+  correction, and four distinct mesh/default interactions. It separates
+  formulation review from later execution, records expected evidence rather than
+  invented numerical outcomes, publishes a coverage/gap matrix, and includes
+  no-run capability-limit probes.
 - **Next action**: use the released workflow for broader user-led acceptance and
-  turn any newly observed failure into a versioned regression case.
+  finalize these prompts before billed calls or solves; then turn every observed
+  semantic or numerical failure into a versioned regression case.
 
 ## 1. Product
 
@@ -512,6 +520,16 @@ contract, prompt update, numerical tests, and an explicit decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — Separate realistic acceptance journeys from semantic and
+  capability-limit probes**: keep five main scenarios readable as engineering
+  problems while deliberately varying automatic defaults, exact axis-specific
+  mesh controls, casual long/short mesh language, and post-proposal numerical
+  correction. Publish expected typed/evidence behavior and explicit coverage
+  gaps, but do not claim objective values or topology images before reviewed real
+  runs. Keep unsupported 3D, point-load, nonzero-displacement, varying-traction,
+  and moment prompts as separate no-run probes. Reason: end-to-end education,
+  isolated language grading, and numerical benchmarking require different forms
+  of evidence; combining them into overloaded prompts weakens all three.
 - **2026-07-27 — Close the BC program at the verified Package 9 boundary**:
   treat release bookkeeping as a contract audit rather than another physics
   increment. Keep older schema/prompt numbers where they accurately describe
@@ -846,3 +864,6 @@ Reverse chronological; final decisions only.
       v7 live gate.
 - [x] BC Work Package 9 — shipped-behavior documentation, learning record, and
       release verification.
+- [x] User acceptance preparation — five realistic review-first scenarios,
+      varied mesh/default interaction, expected evidence, coverage/gap matrix,
+      and separate capability-limit probes.

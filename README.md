@@ -256,6 +256,9 @@ docker compose stop ui
 
 These prompts exercise formulation, approval, and capability behavior. Model
 wording may vary, but typed draft state and side-effect behavior are authoritative.
+For broader user-led testing, including five realistic reviewed scenarios, a
+coverage matrix, mesh-customization variants, and capability-limit probes, see
+[`docs/acceptance-scenarios.md`](docs/acceptance-scenarios.md).
 
 ### 1. Ready request with visible defaults
 
@@ -660,6 +663,8 @@ tests/                    agentic, transport, lifecycle, and numerical verificat
   fixtures/               baselines, resource calibration, and artifact fixtures
 docs/spec.md              living status and decision log
 docs/tool-reference.md    exact tool contracts and developer reference
+docs/acceptance-scenarios.md
+                          realistic user acceptance prompts and coverage
 LEARNING.md               chronological engineering lessons and failed approaches
 NOTICE.md                 upstream authorship and modification notice
 CITATION.cff              software and FEniTop paper citation metadata
@@ -673,6 +678,9 @@ results/                  generated, gitignored run artifacts
   handoff for future development sessions.
 - [`docs/tool-reference.md`](docs/tool-reference.md) is the detailed tool
   contract, including fields, failure behavior, and focused verification commands.
+- [`docs/acceptance-scenarios.md`](docs/acceptance-scenarios.md) contains the
+  review-first user acceptance journeys, expected evidence, coverage matrix, and
+  explicit gaps.
 - [`LEARNING.md`](LEARNING.md) records what the project learned from preparing the
   solver as an agent-safe tool, building the orchestration, and repairing real
   failures.
