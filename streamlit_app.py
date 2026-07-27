@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
@@ -12,6 +13,12 @@ from agentic.explainer import ExplanationError, FactPreservingExplainer
 from agentic.approval import (
     classify_run_approval,
     format_run_approval_request,
+)
+from agentic.boundary_presentation import (
+    BoundaryCard,
+    boundary_preview_svg,
+    draft_boundary_cards,
+    validated_boundary_cards,
 )
 from agentic.formulation import (
     ConversationFormulator,
@@ -339,10 +346,62 @@ def _render_results(outcome) -> None:
             )
 
 
+def _render_boundary_card(card: BoundaryCard) -> None:
+    with st.container(border=True):
+        st.markdown(
+            f"#### {card.bc_id} · {card.title}  \n"
+            f"**{card.physics}**  \n"
+            f"{card.location}"
+        )
+        st.caption(f"Status: {card.status}")
+        for detail in card.details:
+            st.write(detail)
+        if card.warning:
+            st.warning(card.warning)
+        st.caption(card.correction_hint)
+
+
+def _validated_boundary_view(outcome) -> bool:
+    validation = getattr(outcome, "validation", None)
+    compilation = getattr(outcome, "compilation", None)
+    if (
+        validation is None
+        or compilation is None
+        or validation.status != "ok"
+        or validation.geometry_report is None
+    ):
+        return False
+
+    st.markdown("**Validated boundary conditions**")
+    st.caption(
+        "Orange dashed spans are the requested continuous locations; solid "
+        "spans are the facets the mesh will actually use."
+    )
+    preview = boundary_preview_svg(compilation.config, validation).encode("utf-8")
+    st.image(
+        "data:image/svg+xml;base64," + base64.b64encode(preview).decode("ascii"),
+        width="stretch",
+    )
+    for card in validated_boundary_cards(compilation.config, validation):
+        _render_boundary_card(card)
+    return True
+
+
 def _render_formulation() -> None:
     session = st.session_state.formulation_session
     step = st.session_state.formulation_step
-    if step is None and not session.draft.facts:
+    boundary_state = session.draft.boundary_state
+    outcome = st.session_state.outcome
+    has_validated_boundary_view = (
+        getattr(getattr(outcome, "validation", None), "status", None) == "ok"
+        and getattr(outcome, "compilation", None) is not None
+    )
+    if (
+        step is None
+        and not session.draft.facts
+        and not boundary_state.conditions
+        and not has_validated_boundary_view
+    ):
         return
 
     st.subheader("Current problem formulation")
@@ -357,6 +416,8 @@ def _render_formulation() -> None:
     if session.draft.facts:
         st.markdown("**Accepted facts**")
         for fact in session.draft.facts:
+            if fact.path in {"supports", "support_edges", "tractions"}:
+                continue
             value = json.dumps(
                 fact.value,
                 ensure_ascii=False,
@@ -364,17 +425,34 @@ def _render_formulation() -> None:
             )
             st.write(f"`{fact.path}` = `{value}` — {fact.basis}")
 
-    assumptions = [
+    ordinary_assumptions = [
         fact for fact in session.draft.facts if fact.basis == "assumption"
     ]
-    if assumptions:
+    boundary_assumptions = boundary_state.pending_confirmations()
+    if ordinary_assumptions or boundary_assumptions:
+        assumption_labels = [
+            f"{fact.path}={json.dumps(fact.value, ensure_ascii=False)}"
+            for fact in ordinary_assumptions
+        ]
+        assumption_labels.extend(
+            f"{item.bc_id}.{item.field}="
+            f"{json.dumps(item.value, ensure_ascii=False)}"
+            for item in boundary_assumptions
+        )
         st.warning(
             "These model-proposed assumptions still require your confirmation: "
-            + ", ".join(
-                f"{fact.path}={json.dumps(fact.value, ensure_ascii=False)}"
-                for fact in assumptions
-            )
+            + ", ".join(assumption_labels)
         )
+
+    shown_validated = _validated_boundary_view(outcome)
+    if not shown_validated and boundary_state.conditions:
+        st.markdown("**Boundary conditions being formulated**")
+        st.caption(
+            "Use the stable label in your next message—for example, "
+            "“Change L1 to the upper half of the right edge.”"
+        )
+        for card in draft_boundary_cards(boundary_state):
+            _render_boundary_card(card)
 
     if session.unsupported_features:
         st.warning(
@@ -412,6 +490,14 @@ def _render_formulation() -> None:
                 "revisions": [
                     revision.model_dump(mode="json")
                     for revision in session.draft.revisions
+                ],
+                "boundary_conditions": [
+                    condition.model_dump(mode="json")
+                    for condition in boundary_state.conditions
+                ],
+                "boundary_revisions": [
+                    revision.model_dump(mode="json")
+                    for revision in boundary_state.revisions
                 ],
             }
         )

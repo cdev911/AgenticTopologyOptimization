@@ -152,11 +152,21 @@ consistent.
 ### 2.4 Approval evidence
 
 The approval renderer accepts only an `ok` validation response with a geometry
-report. For every stable BC ID it pairs the requested canonical selector with the
+report. For every stable BC ID it pairs a human-readable requested selector with the
 mesh-resolved facet count, extent, measure, centroid, outward normal, and any
 resolution warning. Load rows additionally show quantity kind, input vector,
 effective traction, integrated resultant, explicit unit labels, and the
 one-length-unit thickness when available. Missing per-BC evidence fails closed.
+
+The Streamlit pre-run view consumes the same successful config/report pair. It
+renders stable-ID cards and a deterministic SVG rectangle: dashed orange
+segments are requested continuous extents; solid blue/red segments are resolved
+support/load facets; arrows use the validated effective-traction direction.
+Expert region evidence is shown when it can be associated with a rectangle edge.
+Partial draft cards instead show retained semantics, missing fields, pending
+confirmations, and capability limits without claiming mesh resolution. Detailed
+field facts and revisions remain available in the provenance expander.
+
 This presentation does not authorize execution; only the separate
 application-owned approval transition created by an unambiguous user green light
 does so.

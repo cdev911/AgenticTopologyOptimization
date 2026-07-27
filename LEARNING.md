@@ -767,6 +767,42 @@ scenarios over ten calls with no solver starts. This still is not the 53-case
 first-increment release gate; Package 7 remains responsible for that broader
 claim.
 
+### 16.6 A preview should visualize evidence, not recreate mechanics
+
+Package 6 could have calculated edge spans again inside Streamlit. That would
+have created a second geometry policy and allowed the picture to disagree with
+validation or execution. Instead, a provider-independent presentation module
+accepts the compiled config plus the successful `GeometryReport`. It draws the
+requested interval from the report, the actual facet extent from the same
+resolver used by FEM, and the arrow direction from validated effective traction.
+It fails closed when successful per-BC evidence is absent.
+
+This separation makes the preview an explanation of deterministic evidence, not
+a fourth engineering tool. Streamlit only chooses layout. Readiness, facet
+selection, unit conversion, approval, and execution remain outside the UI.
+
+### 16.7 Human cards need both semantic and discretized truth
+
+A card shown during conversation should preserve what the user meant even while
+direction, magnitude, extent, units, or confirmation are incomplete. A card
+shown after validation must add what the mesh will actually do. Stable `S…`/`L…`
+labels connect the two views and give the user precise correction language.
+Detailed source quotes and revisions still belong in an expander rather than in
+the main engineering summary.
+
+The coarse-mesh resultant test made the value of this split concrete. A requested
+one-unit segment resolved to two one-unit facets. The desired `100 N` resultant
+therefore became an effective `50 Pa` traction under the configured one-metre
+thickness, then integrated back to `100 N`. Showing only the requested span,
+only the traction, or only the final force would each hide an important part of
+the calculation.
+
+The first SVG integration also failed because Streamlit passed raw SVG bytes
+through Pillow, which did not recognize them. A browser-native SVG data URL
+preserved the deterministic vector artifact without adding a rasterization
+dependency. The lesson is small but reusable: test the presentation transport,
+not just the generated content.
+
 ## 17. How we will continue learning
 
 We will use these rules for the remaining work:
@@ -837,5 +873,9 @@ This condensed trail connects the lessons above to the implementation order:
   first-class BC operations, stable-ID corrections and confirmations,
   deterministic legacy-session migration, semantic grader fixes, and a passing
   six-scenario Sol/medium v3 gate with zero solver starts.
-- **Next** — render human BC cards and a deterministic requested/resolved boundary
-  preview, then exercise precise correction language through the UI.
+- **2026-07-27** — added partial and validated human BC cards, stable-ID
+  correction guidance, deterministic requested/resolved SVG preview, visible
+  load conversion, complete BC provenance in the UI expander, and human-readable
+  approval rows.
+- **Next** — run the complete first-increment release gate, including the fixed
+  billed BC conversations, without starting the solver.

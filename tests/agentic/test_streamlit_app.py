@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import unittest
 from types import SimpleNamespace
 from tempfile import TemporaryDirectory
@@ -8,6 +9,11 @@ from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
 
+from agentic.boundary_draft import (
+    BoundaryCreate,
+    BoundaryFieldInput,
+    BoundaryPatch,
+)
 from agentic.compiler import compile_intent
 from agentic.formulation import (
     ConversationFormulator,
@@ -205,6 +211,74 @@ class StreamlitAppTests(unittest.TestCase):
             "Do you approve these parameters",
             app.chat_message[-1].markdown[0].value,
         )
+        self.assertEqual(len(app.image), 1)
+        self.assertTrue(
+            any("S1 · Support" in item.value for item in app.markdown)
+        )
+        self.assertTrue(
+            any("L1 · Load" in item.value for item in app.markdown)
+        )
+        self.assertTrue(
+            any("Change L1" in item.value for item in app.caption)
+        )
+
+    def test_partial_first_class_bc_has_human_card_and_provenance(self):
+        app = AppTest.from_file(
+            REPO_ROOT / "streamlit_app.py",
+            default_timeout=10,
+        ).run()
+        user = "Put a 10 N resultant on the right edge."
+
+        def bc_field(name, value):
+            return BoundaryFieldInput(
+                field=name,
+                value=value,
+                basis="explicit",
+                source_quote=user,
+                rationale="Canned BC presentation rationale.",
+            )
+
+        turn = FormulationTurn(
+            assistant_message=(
+                "I retained the partial load as L1 and need its direction and "
+                "extent."
+            ),
+            boundary_patch=BoundaryPatch(
+                creates=(
+                    BoundaryCreate(
+                        local_ref="new_load",
+                        kind="load",
+                        fields=(
+                            bc_field("load.kind", "resultant_magnitude"),
+                            bc_field("load.magnitude", 10),
+                            bc_field("load.unit", "N"),
+                            bc_field("selector.kind", "unspecified_extent"),
+                            bc_field("selector.edge", "right"),
+                        ),
+                    ),
+                )
+            ),
+            questions=("What direction and right-edge extent should L1 use?",),
+        )
+        app.session_state["formulator"] = ConversationFormulator(
+            CannedFormulationAgent([turn])
+        )
+
+        app.chat_input[0].set_value(user).run()
+
+        self.assertEqual(len(app.exception), 0)
+        self.assertTrue(
+            any("L1 · Load" in item.value for item in app.markdown)
+        )
+        self.assertTrue(
+            any("extent not yet specified" in item.value for item in app.markdown)
+        )
+        self.assertTrue(
+            any("Change L1" in item.value for item in app.caption)
+        )
+        provenance = json.loads(app.json[-1].value)
+        self.assertEqual(provenance["boundary_conditions"][0]["bc_id"], "L1")
+        self.assertEqual(provenance["boundary_revisions"][0]["action"], "create")
 
     def test_multi_turn_formulation_retains_draft_then_prepares_when_ready(self):
         app = AppTest.from_file(
