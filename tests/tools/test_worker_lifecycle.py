@@ -1,4 +1,4 @@
-"""TH-4 filesystem, idempotency, and solver-process containment tests."""
+"""Filesystem, idempotency, and solver-process containment tests."""
 from __future__ import annotations
 
 import json

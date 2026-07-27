@@ -1,4 +1,4 @@
-"""TH-3 numerical trust checks in the pinned Dolfinx/PETSc runtime."""
+"""Numerical trust checks in the pinned Dolfinx/PETSc runtime."""
 from __future__ import annotations
 
 import copy

@@ -11,6 +11,9 @@ htmlcov/
 .venv/
 venv/
 env/
+.env
+.env.*
+!.env.example
 *.egg-info/
 build/
 dist/
