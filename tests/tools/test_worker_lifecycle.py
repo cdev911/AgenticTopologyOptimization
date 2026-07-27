@@ -264,6 +264,53 @@ class WorkerLifecycleTests(unittest.TestCase):
                 outcome.terminating_signal,
             )
 
+    def test_parent_preserves_a_typed_worker_failure(self):
+        from fenitop.tools.contracts import RunTopoptResponse
+        from fenitop.tools.lifecycle import atomic_write_json
+        from fenitop.tools.run_topopt import run_topopt_tool
+        from fenitop.tools.schema import FieldError, error_envelope
+        from fenitop.tools.worker_process import ProcessOutcome
+        from fenitop.tools.worker_protocol import SolverWorkerResult
+
+        def return_typed_failure(command, **kwargs):
+            request_path = Path(command[-1])
+            response = error_envelope(
+                "run_topopt",
+                [
+                    FieldError(
+                        "solver.elasticity",
+                        "linear_solve_diverged",
+                        "Injected typed worker failure.",
+                    )
+                ],
+                stage="numerical",
+                run_id=request_path.parent.name,
+            )
+            atomic_write_json(
+                request_path.parent / "worker_result.json",
+                SolverWorkerResult(
+                    worker_api_key_present=False,
+                    response=RunTopoptResponse.model_validate(response),
+                ).model_dump(mode="json"),
+            )
+            kwargs["on_started"](4321)
+            return ProcessOutcome(4321, 0, None, False, False, 0.1)
+
+        with mock.patch(
+            "fenitop.tools.worker_process.launch_worker_process",
+            side_effect=return_typed_failure,
+        ):
+            result = run_topopt_tool(
+                {"config": _config()},
+                policy=self._policy(idempotency_key="typed-worker-failure"),
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["stage"], "numerical")
+        self.assertEqual(result["errors"][0]["code"], "linear_solve_diverged")
+        self.assertEqual(result["lifecycle"]["state"], "failed")
+        self.assertIsNone(result["run_manifest"])
+
     def test_parent_rejects_symlinked_and_escaped_worker_artifacts(self):
         from fenitop.tools.run_topopt import _validate_worker_artifacts
 
