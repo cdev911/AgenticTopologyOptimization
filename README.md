@@ -14,7 +14,10 @@ The project combines:
 - **Streamlit** for a small chat interface and inspectable workflow trace.
 
 This is a personal demonstration and learning repository, not a production or
-multi-user engineering service.
+multi-user engineering service. “Learning project” does not mean an intentionally
+simplified toy: within its recorded scope, the goal is a dependable, well-tested
+tool, and the engineering lessons from making it work are recorded in
+[`LEARNING.md`](LEARNING.md).
 
 It is a modified derivative of
 [FEniTop](https://github.com/missionlab/fenitop) by Yingqi Jia, Chao Wang, and
@@ -455,6 +458,7 @@ tests/                    agentic, transport, lifecycle, and numerical verificat
   fixtures/               baselines, resource calibration, and artifact fixtures
 docs/spec.md              living status and decision log
 docs/tool-reference.md    exact tool contracts and developer reference
+LEARNING.md               chronological engineering lessons and failed approaches
 NOTICE.md                 upstream authorship and modification notice
 CITATION.cff              software and FEniTop paper citation metadata
 LICENSE                   GPL-3.0 license text
@@ -467,5 +471,8 @@ results/                  generated, gitignored run artifacts
   handoff for future development sessions.
 - [`docs/tool-reference.md`](docs/tool-reference.md) is the detailed tool
   contract, including fields, failure behavior, and focused verification commands.
+- [`LEARNING.md`](LEARNING.md) records what the project learned from preparing the
+  solver as an agent-safe tool, building the orchestration, and repairing real
+  failures.
 - [`NOTICE.md`](NOTICE.md) records upstream authorship and this derivative's major
   changes.
