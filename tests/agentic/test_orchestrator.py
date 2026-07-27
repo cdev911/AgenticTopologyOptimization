@@ -13,6 +13,7 @@ from agentic.intent import InterpretationEnvelope
 from agentic.orchestrator import (
     AnalysisFailedWorkflow,
     AwaitingClarification,
+    AwaitingRunApproval,
     CompletedWorkflow,
     DeterministicOrchestrator,
 )
@@ -129,6 +130,13 @@ class FakeInterpreter:
         return self.results.pop(0)
 
 
+def approved(orchestrator, request="request"):
+    awaiting = orchestrator.start(request)
+    if not isinstance(awaiting, AwaitingRunApproval):
+        raise AssertionError(f"expected approval state, got {awaiting.status}")
+    return orchestrator.approve(awaiting)
+
+
 class RecordingValidator:
     def __init__(self, status="ok", timeline=None):
         self.status = status
@@ -233,10 +241,16 @@ class OrchestratorTests(unittest.TestCase):
 
         outcome = orchestrator.start("Optimize my square beam")
 
-        self.assertEqual(outcome.status, "validated")
+        self.assertEqual(outcome.status, "awaiting_run_approval")
         self.assertEqual(
             timeline,
-            ["interpreted", "defaults_applied", "validator", "validated"],
+            [
+                "interpreted",
+                "defaults_applied",
+                "validator",
+                "validated",
+                "approval_requested",
+            ],
         )
         self.assertEqual(len(validator.requests), 1)
         self.assertIsInstance(validator.requests[0], ValidateConfigRequest)
@@ -271,7 +285,7 @@ class OrchestratorTests(unittest.TestCase):
 
         outcome = orchestrator.resume(waiting, "Use E=100 and nu=0.3")
 
-        self.assertEqual(outcome.status, "validated")
+        self.assertEqual(outcome.status, "awaiting_run_approval")
         self.assertEqual(len(compile_calls), 1)
         self.assertEqual(len(validator.requests), 1)
         self.assertIn("Original request:\nOptimize a beam", interpreter.requests[1])
@@ -287,6 +301,50 @@ class OrchestratorTests(unittest.TestCase):
             [event.sequence for event in outcome.events],
             list(range(1, len(outcome.events) + 1)),
         )
+
+    def test_solver_is_blocked_until_explicit_approval(self):
+        runner = RecordingRunner()
+        orchestrator = DeterministicOrchestrator(
+            FakeInterpreter([ready_result()]),
+            validator=RecordingValidator(),
+            runner=runner,
+            analyzer=RecordingAnalyzer(),
+        )
+
+        awaiting = orchestrator.start("Optimize a beam")
+
+        self.assertIsInstance(awaiting, AwaitingRunApproval)
+        self.assertEqual(runner.calls, [])
+        with self.assertRaises(TypeError):
+            orchestrator.execute(awaiting)
+        self.assertEqual(runner.calls, [])
+
+        validated = orchestrator.approve(awaiting)
+        completed = orchestrator.execute(validated)
+
+        self.assertEqual(completed.status, "completed")
+        self.assertEqual(len(runner.calls), 1)
+        self.assertEqual(validated.events[-1].stage, "run_approved")
+
+    def test_parameter_change_reinterprets_and_requires_fresh_approval(self):
+        interpreter = FakeInterpreter([ready_result(), ready_result()])
+        runner = RecordingRunner()
+        orchestrator = DeterministicOrchestrator(
+            interpreter,
+            validator=RecordingValidator(),
+            runner=runner,
+        )
+        first = orchestrator.start("Optimize a beam")
+
+        revised = orchestrator.revise(first, "Use a 40 x 20 element mesh")
+
+        self.assertIsInstance(revised, AwaitingRunApproval)
+        self.assertEqual(runner.calls, [])
+        self.assertIn(
+            "User answer: Use a 40 x 20 element mesh",
+            interpreter.requests[-1],
+        )
+        self.assertEqual(revised.events[-1].stage, "approval_requested")
 
     def test_unsupported_is_terminal_without_compilation_or_validation(self):
         validator = RecordingValidator()
@@ -337,7 +395,7 @@ class OrchestratorTests(unittest.TestCase):
             runner=runner,
             analyzer=analyzer,
         )
-        validated = orchestrator.start("Optimize a beam")
+        validated = approved(orchestrator, "Optimize a beam")
 
         outcome = orchestrator.execute(validated)
 
@@ -368,7 +426,7 @@ class OrchestratorTests(unittest.TestCase):
             runner=runner,
             analyzer=analyzer,
         )
-        validated = orchestrator.start("same request")
+        validated = approved(orchestrator, "same request")
         completed = orchestrator.execute(validated)
 
         refreshed = orchestrator.execute(completed)
@@ -388,7 +446,7 @@ class OrchestratorTests(unittest.TestCase):
             runner=runner,
             analyzer=analyzer,
         )
-        validated = orchestrator.start("request")
+        validated = approved(orchestrator)
 
         failed = orchestrator.execute(validated)
         completed = orchestrator.execute(failed)
@@ -412,7 +470,7 @@ class OrchestratorTests(unittest.TestCase):
             analyzer=analyzer,
         )
 
-        outcome = orchestrator.execute(orchestrator.start("request"))
+        outcome = orchestrator.execute(approved(orchestrator))
 
         self.assertEqual(outcome.status, "run_failed")
         self.assertEqual(len(runner.calls), 1)
@@ -429,7 +487,7 @@ class OrchestratorTests(unittest.TestCase):
                 runner=runner,
                 analyzer=RecordingAnalyzer(),
             )
-            orchestrator.execute(orchestrator.start("stable request"))
+            orchestrator.execute(approved(orchestrator, "stable request"))
             keys.append(runner.calls[0][1].idempotency_key)
 
         self.assertEqual(keys[0], keys[1])
@@ -443,7 +501,7 @@ class OrchestratorTests(unittest.TestCase):
             analyzer=RecordingAnalyzer(),
             explainer=explainer,
         )
-        completed = orchestrator.execute(orchestrator.start("request"))
+        completed = orchestrator.execute(approved(orchestrator))
 
         explained = orchestrator.explain(completed)
         refreshed = orchestrator.explain(explained)
@@ -460,7 +518,7 @@ class OrchestratorTests(unittest.TestCase):
             FakeInterpreter([ready_result()]),
             validator=RecordingValidator(),
         )
-        validated = orchestrator.start("stable request")
+        validated = approved(orchestrator, "stable request")
         identity = orchestrator.execution_identity(validated)
 
         self.assertTrue(identity.idempotency_key.startswith("agentic-workflow-v1:"))
@@ -488,7 +546,7 @@ class OrchestratorTests(unittest.TestCase):
             runner=RecordingRunner(),
             analyzer=RecordingAnalyzer(),
         )
-        completed = orchestrator.execute(orchestrator.start("request"))
+        completed = orchestrator.execute(approved(orchestrator))
 
         with self.assertRaises(RuntimeError):
             orchestrator.explain(completed)

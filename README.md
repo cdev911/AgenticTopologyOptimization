@@ -31,13 +31,15 @@ language. The workflow then:
 2. asks focused questions if required physics is missing;
 3. applies and discloses deterministic numerical defaults;
 4. validates physics, geometry, mesh entities, and estimated resource use;
-5. runs the FEniCSx solver in an isolated child process;
-6. verifies and analyzes the resulting manifest and artifacts; and
-7. presents a fact-preserving explanation with inspectable evidence.
+5. shows the exact validated proposal and waits for explicit user approval;
+6. runs the FEniCSx solver in an isolated child process;
+7. verifies and analyzes the resulting manifest and artifacts; and
+8. presents a fact-preserving explanation with inspectable evidence.
 
-Unsupported requests stop before compilation or execution. A valid request does
-not require a confirmation click: the selected defaults are shown, the user is
-invited to request changes, and the workflow proceeds automatically.
+Unsupported requests stop before compilation or execution. A valid request also
+stops before execution: the user must reply with an unambiguous green light such
+as `yes`. A rejection keeps the proposal stopped, while requested changes are
+reinterpreted, revalidated, and presented for fresh approval.
 
 ## Architecture: judgment at the edges, authority in the middle
 
@@ -49,7 +51,9 @@ flowchart LR
     I -->|unsupported| X[Capability explanation]
     I -->|typed ready intent| D[Deterministic compiler]
     D --> V[Validate config]
-    V --> R[Credential-free solver worker]
+    V --> Q[User approval gate]
+    Q -->|request changes| I
+    Q -->|explicit approval| R[Credential-free solver worker]
     R --> M[Checksum-verified run manifest]
     M --> A[Deterministic analysis]
     A --> E[LLM evidence organizer]
@@ -66,7 +70,7 @@ The workflow passes exact Pydantic objects through a deterministic state machine
 
 ```text
 interpret → clarify | unsupported | compile
-          → validate → run → analyze → explain
+          → validate → await approval → run → analyze → explain
 ```
 
 This split makes the useful flexibility of language models visible while keeping
@@ -97,6 +101,12 @@ defaults. For mesh resolution, it targets an element size of
 `sqrt(domain area) / 50`: a square becomes approximately `50 × 50`, while a
 rectangle remains near 2,500 cells with nearly square elements. The default filter
 radius is 1.5 times the larger element edge.
+
+Strict output validates structure, but it does not prove where a value came from.
+The interpreter therefore applies a deterministic provenance guard after model
+output: mesh divisions, cell type, filter radius, and iteration limit are retained
+only when the request explicitly mentions that preference. Otherwise they are
+reset to `None`, selected by the compiler, and disclosed as defaults.
 
 Relative boundary phrases are also kept semantic. For example, “the centered 10%
 of the right edge” is represented as `edge=right`, `center_fraction=0.5`, and
@@ -194,7 +204,9 @@ Expected behavior:
   were not provided and were selected by the compiler;
 - the derived mesh is approximately `79 × 32`, giving near-square cells and about
   2,500 elements;
-- validation and solver execution continue automatically; and
+- validation succeeds and the UI asks whether the user approves the displayed
+  parameters;
+- no solver process starts until the user replies `yes`; and
 - the final response cites deterministic convergence, metric, constraint, and
   quality evidence.
 
@@ -240,8 +252,9 @@ docker compose run --rm -T fenitop \
   python scripts/stage1_workflow_harness.py
 ```
 
-The canned request uses an `8 × 4` mesh and five iterations. Run it twice: the
-second invocation should report the same run ID and
+The canned request uses an `8 × 4` mesh and five iterations. The harness performs
+an explicit developer-owned approval transition before execution. Run it twice:
+the second invocation should report the same run ID and
 `idempotent_replay=true`.
 
 ## Model checks
@@ -346,7 +359,7 @@ docker compose run --rm -T fenitop python -m pip check
 docker compose run --rm -T fenitop pytest -q
 ```
 
-Current checkpoint: **160 tests plus 103 numerical subtests pass**. The suite
+Current checkpoint: **168 tests plus 103 numerical subtests pass**. The suite
 includes schema and adversarial-input tests, real compliance/mechanism baselines,
 finite-difference sensitivities, geometry validation, resource calibration,
 process timeout/cancellation/crash behavior, secret scrubbing, path and
@@ -387,8 +400,11 @@ their outputs beneath `results/`.
 - **Structured output is a boundary, not a guarantee by itself.** Strict Pydantic
   models, semantic validation, bounded retries, and deterministic handoffs are
   still necessary.
-- **Make defaults visible.** A user should know which values they supplied and
-  which values the application selected, even when execution does not pause.
+- **Make defaults visible and approval explicit.** A user should know which values
+  they supplied, which values the application selected, and be able to change
+  either before any expensive solve starts.
+- **Structured shape is not provenance.** Nullable model fields still need a
+  deterministic check that an optional value was actually requested.
 - **Idempotency belongs below the UI.** Rerun-prone interfaces should display job
   state, while application/tool layers own durable duplicate protection.
 - **Contain native numerical work.** Python exceptions cannot reliably contain

@@ -13,6 +13,9 @@ import numpy as np
 from mpi4py import MPI
 
 
+FILTER_DENSITY_ROUNDOFF_TOLERANCE = 1e-5
+
+
 @dataclass
 class NumericalFailure:
     code: str
@@ -86,6 +89,31 @@ def require_density_bounds(
                 f"(observed [{global_min}, {global_max}])."
             ),
         ))
+
+
+def clamp_density_roundoff(
+    name: str,
+    values: Any,
+    *,
+    component: str,
+    iteration: int | None = None,
+    lower: float = 0.0,
+    upper: float = 1.0,
+    tolerance: float = FILTER_DENSITY_ROUNDOFF_TOLERANCE,
+    comm=MPI.COMM_WORLD,
+) -> None:
+    """Clip solver-scale density roundoff after rejecting real bound violations."""
+    require_density_bounds(
+        name,
+        values,
+        component=component,
+        iteration=iteration,
+        lower=lower,
+        upper=upper,
+        tolerance=tolerance,
+        comm=comm,
+    )
+    np.clip(values, lower, upper, out=values)
 
 
 def check_ksp(

@@ -170,7 +170,7 @@ class InterpreterTests(unittest.TestCase):
     def test_prompt_documents_capability_and_default_authority(self):
         prompt = load_system_prompt()
 
-        self.assertEqual(PROMPT_VERSION, "intent-system-v2")
+        self.assertEqual(PROMPT_VERSION, "intent-system-v3")
         self.assertIn("needs_clarification", prompt)
         self.assertIn("component-wise or roller supports", prompt)
         self.assertIn("Deterministic", prompt)
@@ -178,6 +178,58 @@ class InterpreterTests(unittest.TestCase):
         self.assertIn("centered 10% of the right edge", prompt)
         self.assertIn("center_fraction=0.5", prompt)
         self.assertIn("Never add paths", prompt)
+        self.assertIn("removes any optional value", prompt)
+
+    def test_unstated_optional_values_are_removed_even_if_model_invents_them(self):
+        envelope = ready_envelope()
+        envelope["result"]["intent"]["mesh"] = {
+            "divisions": [120, 48],
+            "cell_type": "quadrilateral",
+        }
+        envelope["result"]["intent"]["optimization"] = {
+            "filter_radius": 0.15,
+            "max_iter": 100,
+        }
+        interpreter = IntentInterpreter(
+            FakeLLM([envelope]),
+            config=self.config(),
+            system_prompt="contract",
+        )
+
+        result = interpreter.interpret(
+            "Use a rectangular 10 by 4 domain with the stated physics."
+        )
+
+        self.assertIsNone(result.intent.mesh.divisions)
+        self.assertIsNone(result.intent.mesh.cell_type)
+        self.assertIsNone(result.intent.optimization.filter_radius)
+        self.assertIsNone(result.intent.optimization.max_iter)
+
+    def test_explicit_optional_preferences_survive_provenance_guard(self):
+        envelope = ready_envelope()
+        envelope["result"]["intent"]["mesh"] = {
+            "divisions": [40, 20],
+            "cell_type": "triangle",
+        }
+        envelope["result"]["intent"]["optimization"] = {
+            "filter_radius": 0.25,
+            "max_iter": 80,
+        }
+        interpreter = IntentInterpreter(
+            FakeLLM([envelope]),
+            config=self.config(),
+            system_prompt="contract",
+        )
+
+        result = interpreter.interpret(
+            "Use a 40 x 20 element mesh with triangles, filter radius 0.25, "
+            "and maximum iterations 80."
+        )
+
+        self.assertEqual(result.intent.mesh.divisions, (40, 20))
+        self.assertEqual(result.intent.mesh.cell_type, "triangle")
+        self.assertEqual(result.intent.optimization.filter_radius, 0.25)
+        self.assertEqual(result.intent.optimization.max_iter, 80)
 
     def test_environment_and_crewai_configuration_are_pinned(self):
         with mock.patch.dict(os.environ, {"OPENAI_MODEL": "chosen-model"}):

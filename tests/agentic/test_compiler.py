@@ -170,8 +170,8 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(result.config.opt.initial_density, 0.4)
         self.assertIn("values were not provided", result.defaults_notice)
         self.assertIn("mesh.divisions = (50, 50)", result.defaults_notice)
-        self.assertIn("Tell me if you want to change", result.defaults_notice)
-        self.assertIn("otherwise the workflow will proceed", result.defaults_notice)
+        self.assertIn("You can request changes", result.defaults_notice)
+        self.assertIn("Review these choices before approving", result.defaults_notice)
 
     def test_mechanism_mapping_uses_mma_profile_and_exact_springs(self):
         data = compliance_data()

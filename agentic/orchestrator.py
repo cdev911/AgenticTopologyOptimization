@@ -117,6 +117,8 @@ class WorkflowEvent(StrictWorkflowModel):
         "defaults_applied",
         "validation_failed",
         "validated",
+        "approval_requested",
+        "run_approved",
         "run_started",
         "run_failed",
         "run_succeeded",
@@ -158,6 +160,14 @@ class ValidationFailedWorkflow(StrictWorkflowModel):
 
 class ValidatedWorkflow(StrictWorkflowModel):
     status: Literal["validated"] = "validated"
+    conversation: ConversationContext
+    compilation: CompilationResult
+    validation: ValidateConfigResponse
+    events: tuple[WorkflowEvent, ...]
+
+
+class AwaitingRunApproval(StrictWorkflowModel):
+    status: Literal["awaiting_run_approval"] = "awaiting_run_approval"
     conversation: ConversationContext
     compilation: CompilationResult
     validation: ValidateConfigResponse
@@ -213,6 +223,7 @@ WorkflowOutcome = Annotated[
         AwaitingClarification,
         UnsupportedWorkflow,
         ValidationFailedWorkflow,
+        AwaitingRunApproval,
         ValidatedWorkflow,
         RunFailedWorkflow,
         AnalysisFailedWorkflow,
@@ -270,6 +281,43 @@ class DeterministicOrchestrator:
         )
         return self._advance(conversation, prior_events=prior.events)
 
+    def revise(
+        self,
+        prior: AwaitingRunApproval,
+        requested_changes: str,
+    ) -> WorkflowOutcome:
+        """Reinterpret the original request plus an explicit pre-run change."""
+        answer = requested_changes.strip()
+        if not answer:
+            raise ValueError("requested_changes must not be blank.")
+        conversation = ConversationContext(
+            original_request=prior.conversation.original_request,
+            clarifications=(
+                *prior.conversation.clarifications,
+                ClarificationExchange(
+                    missing_fields=("run_parameters",),
+                    questions=("What should change before the run?",),
+                    answer=answer,
+                ),
+            ),
+        )
+        return self._advance(conversation, prior_events=prior.events)
+
+    def approve(self, prior: AwaitingRunApproval) -> ValidatedWorkflow:
+        """Convert a reviewed proposal into the only state executable by a runner."""
+        events = list(prior.events)
+        self._emit(
+            events,
+            "run_approved",
+            "The user explicitly approved the validated parameters.",
+        )
+        return ValidatedWorkflow(
+            conversation=prior.conversation,
+            compilation=prior.compilation,
+            validation=prior.validation,
+            events=tuple(events),
+        )
+
     def execute(
         self,
         state: ValidatedWorkflow | AnalysisFailedWorkflow | CompletedWorkflow,
@@ -285,6 +333,14 @@ class DeterministicOrchestrator:
                 idempotency_key=state.idempotency_key,
                 run=state.run,
                 prior_events=state.events,
+            )
+        if not isinstance(state, ValidatedWorkflow):
+            raise TypeError(
+                "Solver execution requires an explicitly approved workflow."
+            )
+        if not state.events or state.events[-1].stage != "run_approved":
+            raise ValueError(
+                "Solver execution requires the run_approved transition."
             )
 
         events = list(state.events)
@@ -522,7 +578,12 @@ class DeterministicOrchestrator:
             "validated",
             "The compiled configuration passed validation.",
         )
-        return ValidatedWorkflow(
+        self._emit(
+            events,
+            "approval_requested",
+            "Solver execution is blocked until the user explicitly approves.",
+        )
+        return AwaitingRunApproval(
             conversation=conversation,
             compilation=compilation,
             validation=validation,

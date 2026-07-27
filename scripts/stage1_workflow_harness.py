@@ -61,7 +61,11 @@ class CannedInterpreter:
 
 def main() -> int:
     orchestrator = DeterministicOrchestrator(CannedInterpreter())
-    validated = orchestrator.start("stage1 deterministic workflow harness")
+    awaiting_approval = orchestrator.start(
+        "stage1 deterministic workflow harness with an explicit 8 x 4 element "
+        "mesh, quadrilateral cells, filter radius 0.6, and maximum iterations 5"
+    )
+    validated = orchestrator.approve(awaiting_approval)
     outcome = orchestrator.execute(validated)
 
     print(f"workflow_status={outcome.status}")

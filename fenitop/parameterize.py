@@ -25,7 +25,13 @@ from dolfinx.fem import Function, form
 from dolfinx.fem.petsc import create_matrix, assemble_matrix
 from petsc4py import PETSc
 
-from fenitop.numerics import check_ksp, require_density_bounds, require_finite
+from fenitop.numerics import (
+    FILTER_DENSITY_ROUNDOFF_TOLERANCE,
+    check_ksp,
+    clamp_density_roundoff,
+    require_density_bounds,
+    require_finite,
+)
 
 
 class DensityFilter():
@@ -84,11 +90,13 @@ class DensityFilter():
         self.solver.solve(self.vec_s, self.rho_tilde_wrap)
         check_ksp(self.solver, component="density_filter_forward", iteration=iteration)
         self.rho_tilde.x.scatter_forward()
-        require_density_bounds(
+        clamp_density_roundoff(
             "filtered density", self.rho_tilde.x.array,
             component="density_filter_forward", iteration=iteration,
-            tolerance=1e-8, comm=self.rho.function_space.mesh.comm,
+            tolerance=FILTER_DENSITY_ROUNDOFF_TOLERANCE,
+            comm=self.rho.function_space.mesh.comm,
         )
+        self.rho_tilde.x.scatter_forward()
         return self.rho_tilde
 
     def backward(self, sf_vectors, iteration=None):
