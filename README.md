@@ -346,7 +346,7 @@ docker compose run --rm -T fenitop python -m pip check
 docker compose run --rm -T fenitop pytest -q
 ```
 
-Current checkpoint: **159 tests plus 103 numerical subtests pass**. The suite
+Current checkpoint: **160 tests plus 103 numerical subtests pass**. The suite
 includes schema and adversarial-input tests, real compliance/mechanism baselines,
 finite-difference sensitivities, geometry validation, resource calibration,
 process timeout/cancellation/crash behavior, secret scrubbing, path and

@@ -31,6 +31,9 @@ Supported v1 physics:
   "the centered 10% of the right edge" as edge_segment with edge="right",
   center_fraction=0.5, and span_fraction=0.1. Do not convert edge percentages into
   absolute range coordinates yourself; deterministic compilation uses the domain.
+  A whole edge may use center_fraction=0.5 and span_fraction=1.0. When
+  edge_segment is used, set the unused region field to null (the `none` region
+  sentinel is also accepted for strict-output compatibility).
 - A volume fraction strictly between zero and one.
 - For compliant mechanisms: compliance bound plus distinct input and output spring
   regions, x/y direction, and positive per-matched-directional-DOF stiffness.
