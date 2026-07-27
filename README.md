@@ -12,6 +12,40 @@ versions so numerical baselines do not drift when an upstream `stable` tag moves
 
 - Docker Engine
 - Docker Compose
+- An OpenAI Platform API key with API billing/credit enabled for the agentic
+  workflow checks. A ChatGPT subscription does not include API credit.
+
+CrewAI is installed inside the project image at its pinned version. No global
+CrewAI or Python package installation is needed on the host Mac. Keeping the
+framework in Docker prevents one project's CrewAI/Pydantic versions from changing
+another project's environment.
+
+### Configure the local API environment
+
+Create the local environment file from the safe committed template:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set the key:
+
+```dotenv
+OPENAI_API_KEY=your-real-api-key
+OPENAI_MODEL=gpt-5.6-terra
+```
+
+Do not commit `.env` or paste its key into issues, logs, or chat. The secret has
+two separate protections:
+
+1. `.gitignore` prevents `.env` and `.env.*` files from entering Git, while
+   explicitly allowing the blank `.env.example` template.
+2. `.dockerignore` prevents those files from entering the Docker build context,
+   so `COPY . /workspace` cannot bake the key into an image layer.
+
+At runtime, Compose's `env_file:` injects the values into the parent application
+container. Solver jobs run as child processes with all `OPENAI_*` variables
+removed, because numerical code does not need model credentials.
 
 ### Pull the base image (optional)
 
@@ -27,6 +61,64 @@ available, so the explicit pull is normally unnecessary.
 ```bash
 docker compose build
 ```
+
+This installs the complete pinned dependency closure from
+`requirements/runtime.lock`, including CrewAI, inside `fenitop:local`. Rebuild
+after changing `pyproject.toml`, the lock file, Dockerfile, or base-image digest.
+Ordinary source changes are visible immediately through the repository bind mount.
+
+Check the installed environment without exposing the API key:
+
+```bash
+docker compose run --rm -T fenitop python -m pip check
+docker compose run --rm -T fenitop python -c \
+  'from importlib.metadata import version; print("crewai", version("crewai")); print("pydantic", version("pydantic"))'
+```
+
+Expected Stage 0 pins are CrewAI `1.15.6` and Pydantic `2.12.5`.
+
+### Verify the model environment
+
+Run the small structured-output smoke test:
+
+```bash
+docker compose run --rm -T fenitop python scripts/stage0_model_smoke.py
+```
+
+Expected output:
+
+```text
+crewai_structured_output=ok model=gpt-5.6-terra status=ok answer=4
+```
+
+Run the occasional golden intent comparison:
+
+```bash
+docker compose run --rm -T fenitop python scripts/stage0_golden_intents.py
+```
+
+The golden check exercises `ready`, `needs_clarification`, and `unsupported`
+classification against Terra and the cheaper Luna comparison. Both commands make
+real, billed API calls; they are manual checkpoints, not part of the default test
+suite or CI.
+
+If OpenAI reports `insufficient_quota`, the key can still be valid—the API account
+needs billing or prepaid credit. If the model rejects `temperature=0`, leave
+temperature unset; the pinned Terra integration uses low reasoning effort and
+strict Pydantic output instead.
+
+### CrewAI compatibility and rollback
+
+CrewAI `1.15.6` currently requires Pydantic below 2.13 and its structured-output
+stack requires Rich below 15. The verified image therefore pins Pydantic `2.12.5`,
+`pydantic-core 2.41.5`, and Rich `14.2.0`. All 107 hardened solver/tool tests pass
+with this combination.
+
+If a future CrewAI change breaks the hardened layer, roll back by removing CrewAI
+from `pyproject.toml`, restoring Pydantic `2.13.4`, `pydantic-core 2.46.4`, and
+Rich `15.0.0`, regenerating `requirements/runtime.lock`, rebuilding the image, and
+rerunning the full test suite. Never bypass dependency checks or accept changed
+contract/schema snapshots just to force an installation.
 
 ### Run the examples
 
