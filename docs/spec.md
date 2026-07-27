@@ -9,23 +9,24 @@ Last updated: 2026-07-26
 
 ## 0. Current Status (read this first; update it last, every session)
 
-- **Stage**: Stage 1 deterministic agentic workflow complete; Stage 2 UI unblocked.
+- **Stage**: Stage 2 Streamlit UI complete; Stage 3 documentation/showcase next.
 - **As of**: 2026-07-26.
-- **Just finished**: optional fact-preserving result explanation. Deterministic
-  code turns Tool 3 evidence into immutable required/supporting fact IDs; the LLM
-  may organize IDs under allowed headings but cannot author prose or values;
-  deterministic code validates completeness and renders original cited facts. A
-  live Terra check organized the replayed real harness evidence successfully. All
-  148 tests plus 103 subtests pass.
+- **Just finished**: thin Streamlit chat UI over the typed orchestrator. It keeps
+  clarification and job state in the session, displays the defaults notice before
+  automatic execution, runs the solver workflow in a background future, polls
+  lifecycle progress, supports cancellation through a trusted derived run ID, and
+  exposes structured events/evidence without hidden reasoning or browser-provided
+  paths/policies. The real container health check, dependency check, all 151 tests,
+  and 103 numerical subtests pass.
 - **Architecture decisions updated** (§3, §6, §6a): deterministic orchestration
   replaces the three-agent tool-calling pipeline; solver execution stays in the
   same image/container but moves to a child process without the API key;
   clarification is allowed for incomplete/ambiguous requests without adding a
   pre-run confirmation gate; and `gpt-5.6-terra` replaces the old
   `gpt-4.1-mini` default.
-- **Next action**: begin Stage 2 with a thin Streamlit chat UI over persisted typed
-  workflow state, preserving clarification context, default/evidence events, and
-  no-duplicate-solve behavior across Streamlit reruns.
+- **Next action**: Stage 3 documentation/showcase: rewrite the README narrative,
+  add reproducible demo scenarios and capability limits, and illustrate the final
+  architecture.
 - **If you're an AI assistant picking this up cold**: read this whole file before
   doing anything, then summarize your understanding of current state + proposed
   next step back to the user before acting. See `CLAUDE.md`/`AGENTS.md` at the
@@ -147,13 +148,9 @@ docs/spec.md              # this file
 docs/tool-reference.md    # final tool capabilities, contracts, and operations
 ```
 
-### Remaining planned addition
-```
-streamlit_app.py           # thin Stage 2 chat UI over typed workflow state
-```
-
-`agentic/` was created only after the Stage 0 environment/model checkpoint passed.
-New modules are added in checklist order rather than as empty shells.
+`streamlit_app.py` is the thin Stage 2 chat UI over typed workflow state.
+`agentic/` was created only after the Stage 0 environment/model checkpoint passed;
+modules were added in checklist order rather than as empty shells.
 
 ## 5. Tool Contract (the "hands" API)
 
@@ -401,6 +398,19 @@ Final tool review findings (2026-07-26):
 
 Reverse-chronological. Each entry: date, decision, why, status.
 
+- **2026-07-26** — Implement Stage 2 as a thin Streamlit `1.60.0` chat layer over
+  the existing typed orchestrator. Keep the orchestrator, current outcome,
+  conversation messages, validated job state, and background `Future` in
+  `st.session_state`; use a timed fragment to poll the durable lifecycle and
+  rerender progress. Automatically continue a validated request after displaying
+  its defaults notice. Derive cancellation identity inside the orchestrator and
+  keep the trusted `results/` root in application code, so the browser supplies
+  neither paths nor policy. Reason: Streamlit reruns are a presentation lifecycle,
+  not workflow authority; stable in-memory and durable tool idempotency continue
+  to own no-duplicate-solve behavior. Pinning Streamlit resolved PyArrow from
+  `25.0.0` to compatible `24.0.0`, so the image and full test suite were rebuilt.
+  Status: implemented; service health, `pip check`, 151 tests, and 103 numerical
+  subtests pass.
 - **2026-07-26** — Implement the optional explainer as a constrained evidence-ID
   planner, not a prose generator. Deterministic code extracts immutable facts from
   successful Tool 3 evidence, marks outcome/convergence/metrics/constraints/
@@ -610,12 +620,12 @@ Completed tool capabilities and their verification commands are maintained in
       unsupported case, no duplicate solve, and full mocked-LLM flow.
 - [x] Verify via a plain harness before touching Streamlit.
 
-**Stage 2 — Streamlit UI** (unblocked):
+**Stage 2 — Streamlit UI** (complete):
 
-- [ ] Single free-text chat input; clarification stays in chat; no form/JSON escape
+- [x] Single free-text chat input; clarification stays in chat; no form/JSON escape
       hatch and no confirmation gate for `ready`.
-- [ ] Thin UI over orchestrator/job state; refresh/rerun cannot duplicate a solve.
-- [ ] Show structured event/evidence trace and progress/cancel state, not hidden
+- [x] Thin UI over orchestrator/job state; refresh/rerun cannot duplicate a solve.
+- [x] Show structured event/evidence trace and progress/cancel state, not hidden
       chain-of-thought.
 
 **Stage 3 — documentation/showcase**:

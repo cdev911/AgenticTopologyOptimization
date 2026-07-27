@@ -16,6 +16,7 @@ dependencies = [
   "pydantic==2.12.5",
   "mcp==1.28.1",
   "crewai==1.15.6",
+  "streamlit==1.60.0",
 ]
 
 [project.scripts]
