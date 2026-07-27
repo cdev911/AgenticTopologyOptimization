@@ -1,1139 +1,215 @@
-# What We Learned Building Agentic Topology Optimization
-
-This is the engineering learning record for the project. `README.md` explains
-how to use the current system, `docs/spec.md` records current decisions and next
-steps, and `docs/tool-reference.md` defines the exact tool contract. This file
-explains what we learned while reaching the current state, including the
-approaches that failed and the reasons for changing them.
-
-The project is a learning project, but that does not mean deliberately building a
-toy. The learning comes from solving the real problem as well as we can,
-measuring the result, and documenting the architecture, failures, and tradeoffs.
-A framework or a simpler implementation is not a goal by itself. A dependable,
-understandable tool is the goal.
-
-## 1. The first lesson: the agent is only as capable as its tools
-
-Our first important realization was that the success of the agentic workflow
-depended on the quality of the tools available to it. A language model cannot make
-an unsafe, ambiguous scientific library into a reliable agent tool merely by
-receiving a better prompt.
+# Engineering Lessons
 
-We therefore prepared the topology-optimization solver before building the
-orchestration around it. The preparation was not just an API wrapper. It required
-an explicit contract, validation against real mesh entities, numerical-state
-checks, process isolation, durable execution state, and verifiable result
-artifacts.
-
-### 1.1 Expose a small operation surface
-
-The prepared tool has exactly three public operations:
-
-1. `validate_config` checks whether a proposed physical problem is meaningful,
-   supported, and affordable before a solve.
-2. `run_topopt` performs one validated, contained optimization and produces an
-   immutable run manifest.
-3. `analyze_results` verifies that manifest and derives deterministic facts and
-   plots from it.
-
-Separating these operations matters. Validation is cheap and safe to repeat.
-Execution is expensive and has side effects. Analysis consumes evidence but must
-not silently change the original result. Giving all three jobs to one unconstrained
-“run anything” function would hide these different trust levels.
-
-The Python API, JSON command-line interface, and MCP interface use the same
-Pydantic request and response models. Transport-specific code does not redefine
-the physics. Schema-hash and parity tests protect that promise.
-
-### 1.2 Give the model physics, not operational authority
-
-`AgentSafeConfig` describes physical intent. It does not allow an agent to choose:
-
-- filesystem paths or overwrite behavior;
-- run identifiers;
-- PETSc or MPI options;
-- resource ceilings;
-- timeouts or cancellation policy;
-- concurrency;
-- rendering policy; or
-- retry policy.
-
-Those values belong to trusted application policy. This reduced the prompt and
-schema surface while preventing a model-generated configuration from becoming an
-operational command.
-
-### 1.3 Replace executable selectors with a declarative region language
-
-The original scientific code could express boundary selections with Python
-callables. That is convenient for a human developer but unsuitable for an LLM
-tool boundary: generated code is hard to validate, serialize, compare, and
-sandbox.
-
-We replaced it at the agent boundary with a bounded two-dimensional region
-language: planes, ranges, circles, Boolean combinations, `all`, and `none`.
-Application code compiles this declarative form into the lower-level selector.
-The lesson is broader than geometry: agent-facing tools should accept data whose
-meaning can be validated, not code whose behavior must be trusted.
-
-### 1.4 Make failures machine-readable
-
-Tool failures carry a stage, a stable error code, a message, and whether retry
-could be useful. This lets the workflow distinguish invalid physics, resource
-rejection, native-solver failure, timeout, cancellation, and damaged evidence.
-
-“Retryable” is diagnostic information, not permission to spend more compute. The
-application still controls whether another run is allowed.
-
-## 2. Schema validation is necessary but far from sufficient
-
-A configuration can have the correct JSON shape and still describe an impossible
-or dangerous problem. We learned to validate in layers:
-
-1. strict parsing rejects unknown fields, invalid types, and non-finite values;
-2. cross-field checks enforce supported physics and consistent choices;
-3. pure admission checks estimate mesh size, degrees of freedom, memory, output,
-   and work before constructing a mesh;
-4. mesh-backed checks verify actual nodes, cells, boundary facets, loads,
-   constraints, and conflicts.
-
-The mesh-backed stage caught a particularly important class of failure: a region
-can be syntactically valid but match zero boundary facets. Without this check a
-request may reach the solver with no applied load or insufficient constraints.
-
-Resource validation also belongs before execution. An agent should not discover
-that its mesh request is unreasonable only after allocating the mesh or starting
-the optimizer.
+This project began with a simple idea: let an LLM operate a topology-optimization
+solver. The useful learning came from discovering why a prompt plus a Python
+function was not enough, then repairing each weak boundary until the complete
+workflow behaved like a dependable tool.
 
-## 3. Numerical correctness must be part of the tool contract
+## 1. The agent is only as capable as its tools
 
-Wrapping a numerical solver does not automatically make the wrapper correct. We
-needed pinned numerical baselines and checks for the solver state itself:
+The first priority was not orchestration. It was making the scientific solver
+safe and legible to an agent.
 
-- finite displacement, objective, volume, and sensitivity values;
-- successful linear-solver convergence;
-- bounded physical density;
-- consistent filtering and sensitivity calculations;
-- last-known-good metrics when a later step fails; and
-- regression baselines for representative configurations.
+The final tool surface has three operations:
 
-Two distinctions proved important.
+1. `validate_config` checks the schema, physics, resources, and actual mesh
+   entities without starting an optimization.
+2. `run_topopt` performs one validated solve in a contained process.
+3. `analyze_results` verifies the run manifest and derives result facts.
 
-First, a run can finish successfully at its iteration limit without satisfying
-the optimizer's convergence tolerance. The tool therefore distinguishes a valid
-completed run from `converged=true`. Hiding this distinction would turn an
-optimization status into a false claim.
+This separation is important. Validation is cheap and repeatable; execution is
+expensive and state-changing; analysis consumes evidence. A single “run anything”
+tool would hide those different trust levels.
 
-Second, numerical tolerances must reflect the algorithms being used. One real run
-produced a filtered density of approximately `-4.83e-7`. Mathematically the
-density should be in `[0, 1]`, but this tiny undershoot was discretization
-roundoff, not a failed physical state. We now accept and clip at most `1e-5` after
-a converged filter solve, while larger violations still fail. The lesson is not
-to relax validation casually; it is to encode a measured numerical tolerance and
-keep rejecting values outside it.
+The model receives a declarative physics contract, not operational control. Paths,
+run IDs, timeouts, retry policy, concurrency, PETSc settings, and resource ceilings
+remain application policy.
 
-## 4. Native numerical work needs process containment
-
-PETSc and MPI failures are not ordinary Python exceptions. A native library can
-abort the interpreter, exhaust memory, or leave a process unusable. A `try/except`
-around the solve is therefore not a sufficient safety boundary.
+## 2. Structured output does not guarantee semantic truth
 
-Every solve now runs in a separate child process. The trusted parent:
+A JSON response can match a Pydantic schema and still be physically wrong. The
+system therefore validates in layers:
 
-- revalidates the request;
-- allocates the run ID and paths;
-- enforces a single-solve capacity limit;
-- records queued and running state;
-- applies timeout and cancellation policy;
-- detects crashes and orphaned jobs; and
-- publishes success only after all evidence is complete.
-
-The worker is serial, receives a sanitized environment, and has all `OPENAI_*`
-credentials removed. The LLM process may know how to formulate a problem, but the
-native solver process never needs the model key.
-
-Durable idempotency was also necessary. Streamlit reruns its script frequently,
-so duplicate prevention cannot live only in a button handler or in process
-memory. It belongs below the interface, alongside lifecycle state.
+- strict types and versioned contracts;
+- cross-field physics rules;
+- resource admission before mesh construction;
+- mesh-backed checks for actual nodes and boundary facets; and
+- numerical invariants during the solve.
 
-## 5. Results need a trustworthy evidence handoff
+One early request described a centered load segment correctly but matched zero
+facets after discretization. The repair was not more prompting. It was a shared
+mesh-aware resolver used by both validation and FEM assembly, with requested and
+resolved extents shown to the user.
 
-A path to an output directory is not a reliable result contract. Files may be
-missing, partially written, replaced, or outside the trusted result root.
-
-A successful run therefore produces an immutable manifest containing relative
-artifact paths, sizes, SHA-256 hashes, and completion metadata. Analysis verifies:
+The broader lesson: a tool should validate the meaning of an action in the world,
+not only the shape of the request.
 
-- the manifest hash;
-- containment under the trusted results root;
-- symlink and path behavior;
-- each file's presence, size, and checksum; and
-- the expected content needed for deterministic analysis.
+## 3. Conversation needs application-owned memory
 
-Only then does analysis calculate convergence summaries, final metrics, quality
-flags, the final design image, and the objective-history plot.
+The first formulator expected a nearly complete, schema-shaped prompt. Real users
+describe a problem over several turns, correct themselves, and use different
+words for the same boundary condition.
 
-Checksums prove local evidence consistency, not authorship or protection against
-an actor who can rewrite the entire trusted root. Recording that limit is as
-important as recording what the check does guarantee.
+The live workflow now stores a typed partial draft outside the model. Every field
+records its value, source turn, basis (`explicit`, `derived`, `assumption`, or
+`confirmed`), and revision history. Boundary conditions are first-class entities
+with stable IDs such as `S1` and `L1`, so “move L1 upward” changes one load rather
+than replacing the entire list.
 
-We also learned to separate original and derived evidence. The solver's success
-manifest remains immutable. Later plots are derived, verified outputs and are not
-silently inserted into the original manifest.
+Provider continuation helps the model reason naturally, but the provider's hidden
+conversation state is never canonical. Every turn also receives the application
+draft, and deterministic code alone decides readiness.
 
-## 6. Reproducibility is part of correctness
+## 4. Preserve semantics until the right layer can resolve them
 
-CrewAI and the solver are installed in the project Docker image rather than in the
-MacBook's shared Python environment. This gives the numerical and agentic layers
-one repeatable runtime and prevents dependency changes for another project from
-altering this one.
+The model is good at understanding that “the middle 10% of the right edge” means a
+centered segment. It should not calculate its coordinates or guess which mesh
+facets represent it.
 
-This was not dependency-free. CrewAI required compatible Pydantic and Rich
-versions; Streamlit changed the selected PyArrow version. We pinned the complete
-environment and accepted compatibility changes only after rebuilding and running
-the full numerical and application test suite.
+The intermediate representation therefore keeps:
 
-The model key lives in an untracked `.env` file. Both Git and Docker build context
-rules exclude it. Compose injects the key into the application service at
-runtime; it is neither baked into the image nor passed to the numerical worker.
-
-The practical lesson is that “install the package” is only the beginning.
-Reproducibility includes the lock, image, secret boundary, dependency check,
-smoke test, deterministic tests, and numerical regression tests.
+- named rectangle edges;
+- fraction, coordinate, physical-width, and corner-offset selectors;
+- traction, pressure, and total-resultant meaning;
+- global and edge-relative directions; and
+- user units plus normalized units.
 
-## 7. Orchestration learning: use model judgment only where it helps
+Only deterministic geometry code converts those semantics using known bounds,
+mesh divisions, thickness, and units. This preserves intent and makes the
+conversion inspectable.
 
-The original idea of several autonomous agents passing tool outputs to one
-another was attractive, but it gave model judgment to steps that did not need it.
-Compilation, defaults, validation, lifecycle transitions, and expensive side
-effects have exact rules. They are safer and easier to test as deterministic
-application code.
+## 5. Boundary conditions deserve first-class design
 
-The current architecture therefore uses:
+Boundary descriptions were the hardest part of the language interface. A useful
+system had to understand clamps, rollers, symmetry, pins, pressures, tractions,
+resultants, partial edge spans, corners, corrections, and ambiguous words such as
+“width.”
 
-- an LLM to understand ordinary language and organize already-approved evidence;
-- deterministic code to compile intent and calculate geometry;
-- the prepared tools to validate, run, and analyze; and
-- an application-owned state machine to decide which transition is legal.
+The main design changes were:
 
-Exact Pydantic objects cross the boundaries. The LLM does not retype a normalized
-configuration or copy a run manifest into prose for the next component. This
-“judgment at the edges, authority in the middle” pattern kept creativity where it
-is useful without letting it control numerical truth or side effects.
+- stable support/load identities;
+- partial per-field state instead of monolithic lists;
+- explicit quantity semantics rather than a generic load vector;
+- true component constraints for rollers and symmetry;
+- a boundary-node selector for pins instead of approximating one with a tiny
+  clamp;
+- deterministic direction and pressure resolution;
+- unit-aware total-force distribution over the resolved boundary measure; and
+- approval evidence that shows what the mesh will actually receive.
 
-CrewAI remains a useful orchestration technology to learn, but it is not a
-requirement that overrides functional quality. If another supported API or model
-produces materially better conversational formulation, we should measure it
-against the same evaluation set and use the better architecture. What we learn
-from that comparison is more valuable than preserving a framework for its own
-sake.
+The resulting pattern applies to many agent systems: complex domain objects
+should have identities, partial state, provenance, and targeted operations.
 
-## 8. Defaults must be deterministic, visible, and editable
+## 6. Human approval is a state transition, not a phrase in a prompt
 
-The user should not need to specify every numerical preference. The application
-can select suitable defaults, but it must say which values were absent and which
-values it selected.
+A validated problem is not executable. The workflow stops in
+`awaiting_run_approval` and presents all defaults, warnings, resolved selectors,
+load conversions, and estimated cost.
 
-For an omitted mesh, the compiler targets nearly square elements at a resolution
-similar to `50 × 50` for a square:
+Only an unambiguous whole-message approval causes the application-owned
+transition to an executable state. A requested edit immediately revokes the
+previous proposal, even if the new model call later fails. Durable idempotency
+prevents UI reruns from launching a duplicate solve.
 
-```text
-h = sqrt(domain area) / 50
-nx = round(domain width / h)
-ny = round(domain height / h)
-```
+This is a general pattern for agents that send messages, spend money, modify
+records, or control physical/numerical tools: authorization belongs below the
+chat layer.
 
-This produces roughly 2,500 cells for ordinary rectangles while respecting
-aspect ratio. The default filter radius is 1.5 times the larger element edge.
-These are deterministic, versioned rules rather than values invented afresh by
-the model.
+## 7. Native computation needs containment
 
-Before execution, the workflow must present the interpreted problem and say, in
-substance: these values were not given, so the application selected them; ask for
-changes or approve the run.
+PETSc and MPI failures are not ordinary Python exceptions. Every optimization
+runs in a separate child process with:
 
-## 9. Human approval is a real state transition
+- a sanitized environment and no `OPENAI_*` credentials;
+- application-owned timeout and cancellation;
+- durable queued/running/terminal lifecycle state;
+- crash and orphan detection; and
+- success publication only after artifacts are complete.
 
-At first, a validated request could proceed directly to execution. That was wrong
-for an expensive numerical action and did not match the intended conversation.
+Docker provides the pinned scientific environment; the child-process boundary
+contains each solve inside that environment.
 
-A valid proposal now stops in `awaiting_run_approval`. Only an unambiguous
-whole-message approval such as `yes` or `start` moves it into a runnable state. A
-rejection stays stopped. A requested change returns to formulation, triggers
-fresh validation, and requires fresh approval.
+## 8. Evidence must survive the handoff
 
-Approval is not merely UI text. It is an application-owned transition tested at
-the orchestration layer so that another interface cannot bypass it accidentally.
+A directory path is not a trustworthy result. Successful runs produce a manifest
+with relative paths, sizes, hashes, and completion metadata. Analysis verifies
+containment and SHA-256 before deriving plots or facts.
 
-## 10. Fact-preserving explanation requires structural enforcement
+The explainer is also evidence-bound. The model may organize known fact IDs into
+allowed sections, but deterministic code checks completeness and renders the
+original fact text. Unknown, duplicated, or omitted required facts fail closed.
 
-Asking a model to “use only these facts” is not enough. A fluent model can still
-change a number, omit an important warning, or add an unsupported engineering
-claim.
+The useful split is:
 
-Deterministic analysis now assigns stable identifiers to immutable facts. The
-model may organize only those identifiers under allowed headings. Code then:
+- deterministic systems establish facts;
+- models organize and communicate those facts.
 
-- rejects unknown or duplicate identifiers;
-- requires all mandatory facts;
-- renders the original fact text and numbers; and
-- fails closed if the plan is invalid.
+## 9. Evaluate layers separately
 
-This preserves the model's useful ability to organize an explanation without
-letting it rewrite numerical evidence. The resulting analysis is still not proof
-of manufacturability, a load path, or suitability for real engineering use.
+No single test type proved the workflow.
 
-## 11. Real failures taught us where the abstractions leaked
+- deterministic tests covered schemas, merges, state transitions, validation,
+  approval, evidence, UI behavior, and adversarial inputs;
+- numerical baselines checked FEM construction and optimization behavior;
+- a fixed live corpus measured language understanding without solver execution;
+- realistic multi-turn acceptance scenarios tested the entire user journey.
 
-The most useful learning came from examples that failed after the first release.
+The first five-scenario acceptance run was especially valuable. Two scenarios
+completed end to end, while the others exposed a lost named-corner pin, an
+under-specified spring contract, warning/explanation gaps, and a numerical failure
+after a projection transition. These issues were repaired at their owning layers
+and converted into regressions. The exact numerical failure then completed 60
+iterations across the previously failing transition.
 
-| Observed failure | Root cause | Change made | General lesson |
-| --- | --- | --- | --- |
-| “Centered 10% of the right edge” matched zero boundary facets. | The model was effectively expected to translate relative language into exact coordinates, and mesh discretization made a narrow absolute selector fragile. | Added typed semantic edge segments with `edge`, `center_fraction`, and `span_fraction`; deterministic compilation performs the geometry arithmetic. | Let the model understand meaning, but let code calculate geometry. Validate against the actual mesh. |
-| A whole right-edge traction failed structured interpretation. | Strict output materialized `none` for an unused nullable region, and the contract rejected a span of exactly `1.0`. | Normalize `none` only as the unused sentinel beside a valid edge segment and allow `span_fraction=1.0`. | Strict structured output still needs semantic normalization at union boundaries. |
-| The model filled mesh, filter, or iteration preferences the user never stated. | Nullable fields and a strict schema guaranteed shape, not provenance. | Added a deterministic text/provenance guard and reset unrequested preferences so the compiler supplies and discloses them. | Structured shape is not evidence that a fact came from the user. |
-| A numerically valid run failed on a tiny negative filtered density. | An exact bound ignored measured floating-point/filter roundoff. | Added a narrow, tested post-filter tolerance and clipping rule. | Numerical validation needs justified tolerances, not blind exactness or broad relaxation. |
-| Users could not see the final design or objective history. | The tool contract preserved raw artifacts, but the interface had no constrained presentation path for derived plots. | Added verified design and objective plots with trusted path/role checks and downloads. | A functioning tool includes understandable outputs, not only a successful solver exit. |
-| Network/provider problems appeared as “could not interpret.” | Different failure stages were collapsed into one UI message. | Began separating provider, schema, semantic, validation, and execution failure semantics. | Error messages should identify the component that can actually repair the problem. |
-| Retrying the same failed interpretation produced the same result. | The retry had no structured feedback or changed state. | The conversational redesign includes typed draft state and is designed for error-specific repair patches. | A retry without new information is repetition, not reasoning. |
+Passing unit tests was evidence, not proof that the whole product worked.
 
-Each failure improved the contract. We should continue treating real user examples
-as regression cases rather than fixing only the prompt that exposed them.
+## 10. Report numerical status honestly
 
-## 12. Why the first conversational phase felt unintelligent
+A solver run can be valid without meeting its convergence tolerance. The result
+contract therefore distinguishes:
 
-The API model did not have the same environment or interaction pattern as a
-general web assistant or Codex session. The v1 interpreter received:
+- successful execution;
+- termination at the configured iteration limit;
+- completed continuation;
+- optimizer convergence; and
+- final quality metrics.
 
-- a one-shot request rather than a persistent problem-solving conversation;
-- an approximately 235,234-character generated schema;
-- a small structured answer target;
-- low reasoning effort;
-- two near-identical attempts; and
-- no retained partial draft or structured repair feedback.
+The showcased cantilever run is a good example: it produced a strong binary
+topology and completed projection continuation, but it reached its iteration
+limit, so the result remains `converged=false`.
 
-The measured trace showed that the model spent almost all of the interaction
-processing a very large contract while producing a tiny answer, with no useful
-reasoning loop. Calling the result “the API model is less smart” would hide the
-architectural cause. We asked the model to fill a huge form in one shot, then
-called the same operation again when it failed.
+Numerical tolerances also need measured justification. Tiny density undershoots
+from a converged filter solve are clipped only inside a narrow tested tolerance;
+larger violations still fail. A sensitivity safeguard uses a scale-aware
+noise threshold rather than deleting a physically important sign check.
 
-Prompt tuning alone cannot solve that design.
+## 11. Frameworks are means, not the architecture
 
-## 13. The conversational redesign
+CrewAI was useful for the first interpreter and the evidence-explanation
+integration. The OpenAI Responses API was a better fit for the live multi-turn
+formulation role. Deterministic Python remained the right tool for compilation,
+workflow authority, and safety.
 
-The new provider-independent formulation core is the first step toward an actual
-collaborative conversation.
+The important question was never “How can every step be an agent?” It was “Where
+does language judgment improve the system, and where must behavior remain exact?”
 
-`ProblemDraft` retains partial facts across turns. Every retained fact records:
+That decision produced a hybrid architecture with a clearer trust boundary and
+better testability than a chain of autonomous agents.
 
-- its value;
-- the source turn;
-- a short modeling rationale; and
-- whether it is explicit, derived, assumed, or confirmed.
+## 12. The final lesson
 
-A compact `FormulationTurn` carries the assistant's natural response, changed
-fields, up to three focused questions, and a state hint. Deterministic code
-validates the patch, records corrections, identifies missing or unconfirmed
-facts, and decides whether the draft is ready. A model cannot declare itself
-ready and bypass these checks.
+Calling this a learning project should not justify toy behavior. The learning is
+in solving a real problem, measuring failures, choosing the right abstraction,
+and documenting why the system changed.
 
-Assumptions are allowed because useful problem formulation sometimes requires
-creativity. They remain visible and block finalization until the user confirms
-them. Once complete, the draft converts into the existing strict
-`ProblemIntent`; the compiler, tool validation, and approval gate remain
-unchanged.
+The most transferable outcome is a development method:
 
-The strict live transport is 2,729 characters rather than 235,234—about a 99%
-reduction. Six multi-turn evaluation seeds cover disordered descriptions,
-corrections, load negotiation, unsupported reformulation, conflicts, and casually
-stated numerical preferences.
+1. prepare a small, safe tool contract;
+2. create typed intermediate state;
+3. keep side-effect authority deterministic;
+4. preserve uncertainty and provenance;
+5. require human approval for consequential actions;
+6. bind explanations to evidence; and
+7. let realistic acceptance failures drive the next repair.
 
-The provider-independent foundation and live Responses adapter are tested and now
-drive the released Streamlit entry path.
-
-## 14. What the live formulation implementation taught us
-
-### 14.1 A small Pydantic schema can still be an invalid provider schema
-
-The first live Responses call failed with HTTP 400 before the model ran.
-`DraftUpdate.value` used Pydantic's unconstrained `JsonValue`, which generated an
-empty `{}` definition. That was convenient for deterministic per-path validation,
-but OpenAI strict structured output requires a real type at every schema node.
-
-Expanding every possible support, traction, spring, and recursive region value
-back into the transport would have recreated the original huge schema. We instead
-added a separate strict transport: `value_json` is a string containing one JSON
-value. Application code decodes it immediately and sends the result through the
-existing path-specific Pydantic validator. This kept the API schema small without
-weakening the domain boundary.
-
-The general lesson is that domain models and provider transport models need not
-be identical. Their conversion must be explicit and tested.
-
-### 14.2 Conversation state needs a canonical truth anchor
-
-The live adapter uses the [OpenAI Responses API conversation-state
-mechanism](https://developers.openai.com/api/docs/guides/conversation-state) with
-`previous_response_id` and all-turn reasoning context. That lets later turns
-benefit from earlier model work. It does not make provider memory authoritative.
-
-Every request also contains the application-owned canonical draft. The response
-ID is stored as opaque adapter state. If it expires or is unavailable, the adapter
-makes exactly one recovery call with full application history. Generic SDK retries
-remain disabled.
-
-Responses are stored to support continuation under the provider's documented
-retention behavior. This is a conscious data-lifecycle tradeoff for the local
-learning tool; the typed local draft remains the durable project state.
-
-### 14.3 A conversational draft must be more granular than final solver input
-
-The first live disordered conversation exposed a design flaw. The user supplied
-“ten long and half as tall” on one turn and the lower-left origin on the next.
-Because the draft had only `domain.bounds`, the model had to either lose the
-dimensions or invent an origin. It invented an origin as an assumption and then
-asked the user to reconfirm dimensions and a clamp already supplied.
-
-The fix was to add formulation-only facts:
-
-- `domain.origin`, `domain.width`, and `domain.height`;
-- `support_edges` for relative full-vector clamps; and
-- `mesh.long_short_divisions` for orientation-independent mesh preferences.
-
-Deterministic finalization resolves these into the unchanged strict
-`ProblemIntent` only when enough geometry exists. It also detects conflicts
-between complete bounds and component geometry and detects ambiguous long/short
-counts for a square.
-
-The lesson is that the conversation's intermediate representation must match the
-order in which people naturally provide information. A strict final schema is not
-automatically a good partial-draft schema.
-
-### 14.4 Unsupported features are not always a terminal conversation
-
-For a requested point load, the model correctly explained that point and
-total-force semantics are unsupported, offered a finite distributed traction
-segment, and asked for width and traction magnitude. Our initial turn invariant
-rejected that response because it allowed `unsupported_features` only when
-`declared_state="unsupported"`.
-
-That confused “this feature is unsupported” with “this conversation must stop.”
-The draft now allows capability limits to remain visible while status stays
-`gathering`. A truly incompatible request can still use the terminal unsupported
-state, and a later user turn can reformulate it.
-
-### 14.5 Repair must receive new information
-
-When deterministic merge rejects a value, provenance, or confirmation, the model
-now receives:
-
-- the rejected complete turn;
-- stable issue codes and field paths;
-- deterministic error messages;
-- the same current user message; and
-- the unchanged canonical draft.
-
-It gets one bounded attempt to return a complete replacement patch for that user
-turn. This differs from the v1 retry, which repeated the identical request and
-therefore gave the model no reason to produce a better result.
-
-### 14.6 Evaluations must grade meaning, not internal storage
-
-After semantic `support_edges` were added, both models produced a valid left-edge
-clamp and passed real mesh validation. The first evaluator still reported failure
-because it looked only for the old absolute `supports` draft path. The grader was
-testing an implementation detail rather than the finalized strict intent.
-
-We corrected the grader to inspect semantic outcomes after deterministic
-resolution. Evaluation code can become stale just like application code; a
-failed check must be diagnosed before it is treated as a model failure.
-
-### 14.7 Model selection needs measured conversations
-
-The versioned v2 gate makes ten turns across six scenarios and never calls the
-solver. Ready drafts must compile and pass mesh-backed validation.
-
-Both GPT-5.6 Sol at medium reasoning and GPT-5.6 Terra at medium reasoning passed
-all six. The full comparison measured:
-
-| Setting | Input tokens | Output tokens | Reasoning tokens | Total latency |
-| --- | ---: | ---: | ---: | ---: |
-| Sol / medium | 30,938 | 4,576 | 1,613 | 75.347 s |
-| Terra / medium | 30,306 | 2,784 | 236 | 34.688 s |
-
-Terra is the measured lower-latency option on this suite. Sol remains the default
-because six scenarios establish a capability floor, not broad equivalence on
-unseen engineering conversations. This decision can change when a larger
-evaluation provides stronger evidence.
-
-This implementation follows the official guidance to use
-[Responses for multi-turn reasoning](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.6#migrate-to-gpt-56),
-[structured Pydantic output](https://developers.openai.com/api/docs/guides/structured-outputs),
-lean prompts, and explicit approval boundaries.
-
-## 15. What the UI migration taught us
-
-### 15.1 Connecting two correct subsystems still needs a typed boundary
-
-The formulator could already produce a strict `ProblemIntent`, and the
-orchestrator could already compile and validate one. Calling compiler functions
-directly from Streamlit would nevertheless have made the interface a new source
-of workflow authority.
-
-We added `DeterministicOrchestrator.prepare_formulation()`. It accepts a complete
-`FormulationStep`, verifies that deterministic status is `ready_for_review` and
-that a strict intent exists, then owns compilation and validation through the
-existing path. A partial, conflicted, assumed, or repair-needed draft cannot cross
-that method.
-
-The lesson is that integration code is a trust boundary, not just glue. Its input
-contract should express the state transition it is allowed to perform.
-
-### 15.2 “Ready for review” and “approved to execute” must remain different states
-
-The new UI can reach a ready formulation automatically after any user turn. It
-still only produces `AwaitingRunApproval`; it never submits a job. The later user
-message must independently match the deterministic whole-message approval
-classifier before the orchestrator creates `ValidatedWorkflow`.
-
-A subtler case appears when the user describes a change while an old proposal is
-awaiting approval. The UI now clears that approvable outcome before asking the
-model to interpret the revision. If the API times out or returns unusable output,
-the old parameters do not silently remain eligible for a later “yes.”
-
-The lesson is that invalidating stale authority is as important as granting new
-authority. A failed edit must fail closed.
-
-### 15.3 The canonical draft should be visible at the user's level
-
-Streamlit now shows accepted paths, values, and basis directly. Missing fields,
-unconfirmed assumptions, capability limits, semantic conflicts, and rejected
-patches are also visible without opening a diagnostic panel. Exact source quotes,
-concise modeling rationales, and revision records live in an inspectable expander.
-
-This gives the user enough information to correct the engineering formulation
-without presenting private chain-of-thought. Public provenance and private model
-reasoning are different things.
-
-### 15.4 Model prose should not determine run identity
-
-Responses can phrase the same question differently across otherwise equivalent
-conversations. If assistant prose were included in the durable idempotency
-material, those wording differences could create different run IDs for the same
-user turns and compiled configuration.
-
-`ConversationContext.from_formulation_session()` therefore retains ordered user
-turns for workflow identity and excludes assistant text. The normalized compiled
-configuration and defaults profile remain part of the idempotency key.
-
-The lesson is to keep nondeterministic presentation out of deterministic identity
-unless it carries required semantics.
-
-### 15.5 UI conversation behavior can be tested without API billing
-
-Streamlit application tests inject a canned `ConversationFormulator` while using
-the same typed turns, merge rules, readiness checks, and session state as the live
-path. They verify multi-turn retention, visible assumptions and capability limits,
-field-specific failures, ready-intent handoff, absence of job submission before
-approval, and stale-proposal invalidation.
-
-The model itself remains covered by the separate billed formulation evaluation.
-This separation keeps ordinary regression tests fast and deterministic while
-retaining a real-model quality gate.
-
-## 16. Boundary conditions are three coupled problems
-
-The first extended cantilever conversation showed that “understand the boundary
-condition” is not one task. It crosses three different interfaces:
-
-1. **Language semantics** — “tip load,” “middle of the right face,” “10 percent,”
-   “downward,” “total force,” “pressure,” “fixed,” “pinned,” and “roller” are not
-   interchangeable fields. They describe location, extent, direction, quantity
-   type, distribution, and constrained displacement components.
-2. **Continuum physics** — a total resultant is not a traction, a mathematical
-   point load is not a finite loaded patch, and a roller is not a full clamp. A
-   conversion needs the missing physical facts and explicit user agreement.
-3. **Mesh realization** — even a valid continuous interval can match zero facets
-   or resolve to a different physical length on a discrete mesh. The solver and
-   validator must use one selector implementation and show what was actually
-   selected.
-
-Our generic region DSL is a good safe execution language, but the monolithic
-`supports` and `tractions` formulation fields are a poor conversational memory.
-In the observed transcript the system knew the load edge, center, span, direction,
-and total magnitude at different times, yet none of those partial facts survived
-in the canonical draft because a complete traction object could not be formed.
-The assistant then repeated questions and proposed a numerical conversion only in
-prose, where it could not be confirmed reliably.
-
-The planned correction is to make each BC a stable, partially populated entity
-with field-level provenance. Semantic edge segments will remain continuous until
-a shared mesh resolver selects actual facets and reports their measure. Uniform
-resultant conversion will use that resolved measure and the declared
-unit-thickness model, then verify the integrated force. A deterministic diagram
-will show the interpretation before the separate run approval.
-
-This also clarified when a tool change is necessary. Better prompting is enough
-to recognize paraphrases, but it cannot create missing solver semantics.
-Segmented full clamps and uniform tractions already fit the physics; they need
-better selection and evidence. Rollers, symmetry constraints, and true
-point-node pins need component- or node-level Dirichlet support in the FEM
-contract and corresponding rigid-body/numerical tests. We must recognize those
-terms honestly before supporting them, and never approximate them as clamps
-without an explicit reformulation.
-
-Building the corpus before the runtime model exposed another useful boundary. A
-point described as “the center of the right edge” cannot honestly be stored as an
-absolute coordinate while domain bounds are still missing. The evaluation
-contract therefore permits a boundary point to retain `edge=right` plus a
-relative center until geometry is known. It also grades BC semantic state
-separately from whole-problem readiness: a boundary condition can be complete
-while material or optimization facts remain missing.
-
-The deterministic grader compares normalized BC entities and stable codes for
-clarifications, assumptions, and capability limits. It does not compare assistant
-sentences. This lets future prompts and models vary their wording while still
-failing on lost partial facts, invented units/directions/extents, silent
-point/resultant conversion, roller/pin-to-clamp substitution, unrelated BC
-overwrites, or any solver start. The initial version contains 53 cases, including
-the supplied six-turn transcript and both earlier complete-prompt failures.
-
-Implementing the partial draft showed why canonical BC IDs cannot come from the
-model. A model needs a temporary reference to group fields in one response, but
-the application allocates `S1`, `L1`, and later IDs monotonically. Deleting `L1`
-does not make that name available again; the next load is `L2`. This prevents a
-later correction or audit record from silently referring to a different physical
-condition.
-
-Confirmation is also a state operation, not another value update. It targets an
-existing assumption and preserves the exact value while changing its basis to
-confirmed. A bare “yes” is safe when one BC assumption is pending. When several
-are pending, the user must say “confirm all” or identify the intended fact. This
-avoids turning a vague acknowledgment into authority for several unrelated
-modeling choices.
-
-The field model distinguishes fractional span from physical offset and length.
-That distinction emerged while implementing readiness: “the centered 10%” and
-“start 1 mm from the corner and continue for 2 mm” cannot share one numeric field
-without losing dimensional meaning. Corpus-first development forced this issue
-to surface before unit conversion or mesh selection was implemented.
-
-At the Package 1 checkpoint, migration was explicit and non-destructive.
-Existing `supports`, `support_edges`, and `tractions` could be copied into
-first-class BC state with their provenance, while finalization still read the
-legacy facts. Running both representations side by side at that checkpoint gave
-us tests for the new state without silently changing live or numerical behavior.
-
-Package 2 made the distinction between unit syntax and physical meaning concrete.
-A library can prove that `kN` is a force and `MPa` is a stress, but it cannot
-decide whether the number the user supplied was a total force or a distributed
-traction. We therefore use Pint only inside deterministic normalization code and
-keep `traction` versus `resultant` as an explicit semantic type. JSON-safe models
-retain the original value and unit beside the normalized value; Pint objects
-never cross the formulation, approval, or solver boundaries.
-
-The unit system is itself conversational state. Length, force, and stress are
-three ordinary draft facts with the same explicit/derived/assumption/confirmed
-provenance as other parameters. A plausible N-mm-MPa system inferred from context
-is still pending until the user confirms it. Once confirmed, an omitted per-load
-unit can refer visibly to that mechanical context instead of triggering a silent
-conversion.
-
-Direction words also need deterministic semantics after language interpretation.
-Global `up`, `down`, `left`, and `right` map directly to vectors. `inward` and
-`outward` require a named rectangle edge and use its normal. Bare `normal`, `x`,
-`y`, or `tangential` remain ambiguous because they omit a sign or along-edge
-sense. Rejecting these states is more reliable than letting model prose conceal a
-guessed vector.
-
-Most importantly, normalization stops at the correct knowledge boundary. A
-traction has stress dimensions under the current unit-thickness plane-strain
-contract and can be normalized immediately. A total resultant has force
-dimensions; converting it requires the actual selected boundary measure times
-the one-length-unit thickness. Package 2 therefore marks it semantically ready
-but execution-deferred. Package 3 must provide the mesh-resolved measure and
-verify the integrated force before execution can become ready.
-
-Package 3 showed that “use the same selector” is stronger than “write the same
-selection logic twice.” Validation previously compiled a region and located
-facets in the tool layer, while FEM independently located them again. Even when
-both implementations looked equivalent, there was no structural guarantee that a
-future tolerance or discretization fix would reach both. The shared resolver now
-returns the exact facet indices and the evidence derived from them; validation
-and execution both call that one policy.
-
-Continuous intent and discrete realization must remain separate. A requested
-edge interval can be narrower than one facet and contain no facet midpoint. The
-old behavior rejected the load as matching zero facets, even though the user had
-described a valid positive segment. The new policy chooses the one closest facet
-and reports both extents plus the resolution error. This is not pretending the
-mesh exactly represents the request: the warning and evidence make the
-approximation reviewable before approval.
-
-Versioning also required separating compatibility from canonical meaning.
-Existing 1.1 configs contain unlabeled “consistent user units” and expert-region
-tractions. Inventing N, mm, and MPa during migration would create false physical
-facts. The migration therefore preserves an explicit `legacy_consistent`
-sentinel, assigns stable IDs in list order, and wraps old regions without changing
-their numerical meaning. Canonical 2.0 can express explicit mechanical units and
-total resultants, but a migrated unlabeled config cannot use resultant conversion.
-
-The resultant numerical gate compares two actual solves: one driven by an
-effective traction and one by the equivalent total force over the same resolved
-segment. Matching objective, compliance, and volume demonstrates more than a
-unit-function test—it verifies that schema, migration, resolver, compiler, FEM
-measure, and solver assembly agree end to end. The geometry report independently
-reintegrates the effective traction to the requested force, giving a second,
-cheaper check before execution.
-
-Finally, mathematical validity is not numerical reassurance. A Poisson ratio just
-below `0.5` is legal for the constitutive model, but low-order displacement
-elements in plane strain may lock as incompressibility is approached. We retained
-the strict `<0.5` range and added a visible warning from `0.49`, including the
-Lamé ratio, instead of silently rejecting the user's material or silently
-presenting a potentially over-stiff result.
-
-Package 4 exposed a less obvious migration trap: the old strict `ProblemIntent`
-cannot honestly represent the new finalization surface. A finite support segment
-does not fit its whole-region support abstraction, and a total resultant is
-explicitly not a traction. We considered reusing the legacy compiler with a
-temporary placeholder intent and replacing its BCs afterward. That would have
-produced the right final JSON in simple cases, but the intermediate audit object
-would state physics the user never requested. Instead, compilation now starts
-from a BC-independent typed problem definition and combines it with a separately
-finalized first-class BC list.
-
-Compatibility still belongs at a named boundary. Existing live prompts continue
-to emit legacy support/traction lists until the prompt package changes. When a
-draft has no first-class BC state, finalization migrates those lists once and
-then compiles the resulting stable entities. When first-class state exists, it is
-authoritative; stale list facts cannot overwrite a correction to `L1` or `S1`.
-This lets us ship and test the new deterministic authority before asking a model
-to produce it.
-
-Selector arithmetic also belongs in finalization, not in the model response.
-Centered fractions stay fractional, while centered physical widths and
-corner-offset lengths become coordinate intervals only after domain bounds are
-known. Finalization checks that a corner really lies on the named edge and that
-the resulting positive interval stays inside it. The mesh resolver then performs
-the distinct second mapping from continuous interval to actual facets. Keeping
-those two transformations separate preserves both requested and realized
-geometry.
-
-Approval became an evidence join keyed by stable BC ID. A config alone can show
-what was requested, but it cannot show which facets will carry the load. A
-geometry report alone can show selected facets, but without the config it loses
-the original selector and quantity semantics. The approval renderer now requires
-both successful objects, pairs them by ID, and fails closed if evidence is
-missing. For a resultant it shows the original force, effective traction, and
-reintegrated force together. This is a stronger review boundary than displaying
-a serialized input list, and it leaves the later explicit “yes” transition
-unchanged.
-
-Package 5 showed that a richer semantic model does not require sending the model
-the recursive solver contract. The live transport is a flat list of create,
-update, delete, and confirmation operations. Field values still use compact JSON
-strings, so the strict schema stays small and OpenAI-compatible while existing
-path-specific deterministic validators remain authoritative. Turn-local
-`new_load_1` references group a creation; only application merge code allocates
-durable `L1`. Later turns can update `L1` without replacing any sibling load.
-
-Versioning provider continuation state matters when the prompt contract changes.
-An old v1 response chain contains assumptions about legacy `supports` and
-`tractions`, so the v2 adapter ID intentionally declines that continuation and
-replays application history. There was a second migration hazard: if an old
-browser draft had legacy BC lists and the v2 model created one new first-class
-entity, first-class authority would correctly hide the unmigrated lists. The
-formulator now migrates the complete legacy set before the first turn only for an
-adapter that declares first-class BC support. This keeps migration and provenance
-in code rather than asking the model to reconstruct old facts.
-
-The live gate also reminded us to distinguish model failures from grader
-failures. Three initial failures were encoding/wording differences with preserved
-meaning: bounds versus origin/width/height, “patch length” versus “segment
-width,” and a derived semantic mesh path carrying an exact user quote. The
-graders were broadened to compare meaning. A fourth failure was real: the model
-treated newly stated edge coordinates as authority to overwrite an incompatible
-existing width, even though the user had not requested a correction. We retained
-that failure and added an explicit rule and example: a conflicting implication is
-evidence to ask a question, not correction authority. The focused rerun and final
-complete gate then passed.
-
-Prompt quality is now measured at two layers. Mocked tests prove transport
-decoding, stable IDs, bounded repair, partial-state confirmation, migration, and
-compile/mesh handoff without API cost. The billed v3 gate verifies that the actual
-Sol/medium model can use the contract conversationally. It passed all six
-scenarios over ten calls with no solver starts. This still is not the 53-case
-first-increment release gate; Package 7 remains responsible for that broader
-claim.
-
-### 16.6 A preview should visualize evidence, not recreate mechanics
-
-Package 6 could have calculated edge spans again inside Streamlit. That would
-have created a second geometry policy and allowed the picture to disagree with
-validation or execution. Instead, a provider-independent presentation module
-accepts the compiled config plus the successful `GeometryReport`. It draws the
-requested interval from the report, the actual facet extent from the same
-resolver used by FEM, and the arrow direction from validated effective traction.
-It fails closed when successful per-BC evidence is absent.
-
-This separation makes the preview an explanation of deterministic evidence, not
-a fourth engineering tool. Streamlit only chooses layout. Readiness, facet
-selection, unit conversion, approval, and execution remain outside the UI.
-
-### 16.7 Human cards need both semantic and discretized truth
-
-A card shown during conversation should preserve what the user meant even while
-direction, magnitude, extent, units, or confirmation are incomplete. A card
-shown after validation must add what the mesh will actually do. Stable `S…`/`L…`
-labels connect the two views and give the user precise correction language.
-Detailed source quotes and revisions still belong in an expander rather than in
-the main engineering summary.
-
-The coarse-mesh resultant test made the value of this split concrete. A requested
-one-unit segment resolved to two one-unit facets. The desired `100 N` resultant
-therefore became an effective `50 Pa` traction under the configured one-metre
-thickness, then integrated back to `100 N`. Showing only the requested span,
-only the traction, or only the final force would each hide an important part of
-the calculation.
-
-The first SVG integration also failed because Streamlit passed raw SVG bytes
-through Pillow, which did not recognize them. A browser-native SVG data URL
-preserved the deterministic vector artifact without adding a rasterization
-dependency. The lesson is small but reusable: test the presentation transport,
-not just the generated content.
-
-### 16.8 The evaluator is part of the product contract
-
-Package 7 began with a six-scenario live script, but the planned release claim
-covered 53 fixed conversations. We therefore built a separate evaluator that
-uses the real formulation adapter while importing neither orchestration nor the
-solver. Each case starts from a fresh session, normalizes the resulting
-application-owned draft, grades exact semantic and safety codes, records API
-usage, and reports `solver_executed=false`.
-
-The first clean attempt crashed because a partial centered selector contained an
-edge and span but no center. The application response was safely incomplete; the
-strict evaluation model simply could not represent it. Downgrading incomplete
-selectors to a typed unresolved selector—and turning that crash into a
-regression—taught an important lesson: a grader that cannot represent safe
-partial behavior will report false product failures.
-
-Other apparent failures came from stale or overly syntactic expectations:
-
-- a boundary point can be absolute coordinates or an edge-relative center;
-- upper-half `[0.5,1]` and center/span `(0.75,0.5)` are identical fractional
-  geometry;
-- an exact point may redundantly retain its consistent corner name; and
-- `unspecified_extent` has no distinct meaning from `unspecified` until an edge
-  is known.
-
-We canonicalized only these proven equivalences. We did not weaken comparison of
-load kind, value, direction, units, support kind, clarification, assumption,
-capability limit, silent conversion, or solver execution.
-
-### 16.9 Separate model semantics, deterministic derivation, and provider health
-
-The billed runs exposed three different failure classes that should not be fixed
-the same way.
-
-First, real model failures required prompt or intermediate-representation work:
-the model sometimes dropped a named corner, omitted a uniform-resultant proposal,
-or could not retain nonzero prescribed-displacement direction/magnitude/unit.
-Those became explicit v3 prompt rules and typed formulation-only fields.
-
-Second, constant-traction uniformity should not depend on model phrasing. A
-constant vector or magnitude over a complete finite selector is mathematically
-uniform. Some calls marked that fact derived while others proposed it as an
-assumption. The durable fix was application-owned normalization in the BC merger,
-not repeated prompt tuning. Resultants deliberately remain different because
-their distribution is a user-visible modeling assumption.
-
-Third, one run suffered a provider outage: after 27 cases, connection/timeouts
-replaced nearly every remaining response. Counting those as language failures
-would corrupt the measurement. The release harness now retries only connection
-and timeout failures, up to three attempts, and never retries a semantic miss.
-Usage is accumulated across attempts.
-
-The next clean post-fix run reached 52/53 with zero solver starts. Its sole
-difference was a redundant `direction=down` label beside vector `[0,-1]`; the
-grader now ignores that label only when the vector proves it and still rejects
-`[0,-1]` plus `up`. Another valid 52/53 run showed that “right face center” had
-not survived until the user later supplied “10 percent.” The durable correction
-retains a named edge center as `0.5` while type/extent remain unresolved and
-prevents an identical later assumption from weakening the derived fact.
-
-One otherwise successful run then encountered a single provider internal-server
-error. The release harness now retries bounded provider 5xx failures just like
-connection/timeouts, but never semantic misses. The final clean run passed 53/53
-with zero solver starts, zero context recoveries, and no retries; the complete
-Docker suite passed 294 tests plus 194 subtests. Honest failure classification and
-application-owned partial memory were both necessary to close the gate.
-
-### 16.10 A schema change is not implemented until every trusted layer preserves it
-
-Package 8 made roller and pin language executable only after defining an
-unambiguous solver contract. The schema does not store “roller direction,” which
-can mean either permitted travel or restrained motion. It stores exactly which
-zero-displacement components are constrained. Normal rollers and symmetry
-boundaries compile from the named rectangle edge to `x` or `y`; a true pin
-compiles to both components at one boundary node. Rigid-body rank is then
-calculated from the actual `(node, component)` rows rather than from support
-labels.
-
-The first real FEM test exposed a cross-layer bug immediately. The schema and
-solver compiler carried `components`, but the older trusted
-`normalize_boundary_conditions()` adapter discarded that field and supplied its
-default full-vector zero value. The solve succeeded, which made the bug more
-dangerous: rollers and pins had silently become clamps. Preserving `components`
-changed the component-model compliance from the accidental-clamp result
-`0.009116382135022602` to the intended baseline `0.009611586069889313`. A passing
-solve is not proof of correct semantics; a physics-specific baseline across every
-adapter is.
-
-Boundary-node selection created another useful distinction between requested and
-executed truth. A requested point must lie on the rectangle boundary, but it need
-not coincide with a mesh node. The resolver selects one nearest boundary node and
-shows the requested point, resolved point, and snap distance before approval. The
-approximation is deterministic and inspectable instead of hidden in the FEM
-assembly.
-
-The v7 live gate also refined a language policy. “The right side/edge/face” means
-the complete boundary, while “the load on the right” establishes only the side
-location. Qualifiers such as “somewhere,” “center,” or “segment” likewise prevent
-a whole-edge inference. Prompt guidance alone was variable, so the application
-now normalizes both sides of this convention. A capability-limited `N mm` moment
-also no longer causes an irrelevant global N-mm-MPa proposal. After focused
-regressions, the clean 53-case v7 run passed 53/53 with zero solver starts; the
-complete Docker suite passed 303 tests plus 197 subtests.
-
-### 16.11 Release bookkeeping is a contract audit
-
-Package 9 did not add another physics feature. Its purpose was to prove that the
-released explanation matched the behavior already exercised by schema,
-mesh-resolution, FEM, UI, and live-language gates. Historical Package 3–7
-descriptions still name schema 2.0 and earlier prompt versions because they
-explain the migration path; the current-version blocks in the README and tool
-reference name 2.1 and 5.1.0. Rewriting all history to the newest number would
-make the learning record less accurate, not more current.
-
-Writing a reproducible component-support example also exposed a useful modeling
-lesson. A normal roller on the bottom edge constrains `y` at every bottom node. A
-two-component pin placed on that edge would repeat the pin node's `y` constraint,
-so the validator correctly rejects it as a duplicate constrained degree of
-freedom. The release example therefore uses the bottom roller and a pin at the
-midpoint of the left edge. It is mechanically stable without relying on
-duplicate constraints, and its requested point is visible beside the
-mesh-resolved node.
-
-The final checkpoint treats release verification as more than a test count. It
-checks that the real `.env` is ignored and untracked, Compose parses, the locked
-container dependency set is consistent, the complete deterministic and
-numerical suite passes, and the Streamlit health endpoint responds. Billed model
-evaluation is not repeated merely for bookkeeping: the unchanged live contract
-keeps the clean 53/53 v7 result from Package 8 as its language-quality evidence.
-
-### 16.12 User acceptance scenarios are layered specifications
-
-A readable end-to-end example and a semantic unit test serve different purposes.
-The 53-case BC corpus isolates phrases and grades exact retained meaning; a user
-acceptance scenario should instead resemble a real engineering conversation and
-let a learner inspect formulation, defaults, approval, execution, and evidence as
-one journey. Overloading every example with every feature would improve a
-checkbox matrix while making the prompts less realistic.
-
-The first five-scenario draft already contained one fully customized mesh, but it
-did not vary mesh interaction enough. The revised guide deliberately tests four
-paths: geometry-derived defaults, exact axis-specific triangle divisions, casual
-long-side/short-side quadrilateral divisions, and replacement of defaults during
-a post-proposal correction. The mechanism keeps defaults because that makes the
-mesh dependence of per-DOF spring stiffness visible rather than hiding it.
-
-Coverage also needs an honest negative space. Five runnable problems cannot test
-every supported feature and every refusal path while remaining teachable. The
-guide therefore includes a coverage matrix, lists untested capabilities, and
-separates no-run probes for 3D geometry, mathematical point load, nonzero
-prescribed displacement, varying traction, and applied moment. A scenario becomes
-a numerical benchmark only after its formulation and real output have been
-reviewed; invented “expected” objective values or topology pictures would defeat
-the evidence boundary.
-
-### 16.13 Real user journeys expose contract seams that isolated gates miss
-
-The first five-scenario PDF review validated much of the architecture: natural
-compliance formulation, mesh-aware distributed loads, resultant conversion,
-visible defaults, explicit approval, contained execution, and plot artifacts all
-worked together. It also found defects that the 303-test and 53-case formulation
-gates had not exposed.
-
-The simply supported beam showed that understanding a phrase in model prose is
-not enough. “Lower-left corner” was recognized, but the typed boundary-point
-selector lost that semantic fact and readiness later requested an internal
-`point_or_edge_center` field. Semantic language must survive in canonical state
-until deterministic geometry can resolve it. Deterministic readiness must also
-own a human-question fallback; otherwise a good model turn can still produce an
-unusable conversation.
-
-The mechanism case revealed a broader version of the same seam. Supports and
-loads had gained first-class semantic edge selectors and unit-bearing values,
-while input and output springs still crossed the old raw-region/bare-number
-contract. The result was an assistant asking the user to calculate coordinates
-and interpret `N/m` versus `N/mm` for the implementation. A feature is not
-agentically supported merely because the solver has fields for it. Every
-user-facing physical entity needs semantic location, dimensional quantity,
-provenance, deterministic compilation, and review evidence.
-
-The mixed-load solve added a numerical lesson. A strict OC sign check correctly
-protects a square-root update from materially invalid sensitivities, but an
-absolute `1e-12` threshold rejected one tiny positive value after a projection
-beta transition while the dominant gradient remained eight orders of magnitude
-larger. Numerical safety checks need scale-aware tolerances and counterexamples:
-we should clip measured roundoff while continuing to reject a genuine sign
-failure. Removing the guard would be as wrong as keeping an unjustified absolute
-threshold.
-
-Finally, evidence can exist without being visible at the decision point. The
-near-incompressibility warning was correctly produced by validation but hidden in
-a collapsed trace during approval and omitted from the final fact ledger.
-Informed approval depends on presentation contracts as well as validation
-contracts.
-
-These failures do not justify simplifying the acceptance prompts. The prompts
-did their job: they represented credible engineering conversations and exposed
-where implementation layers did not yet compose. The repair process should keep
-the problems stable, add regressions at each failed seam, and then repeat the same
-journeys.
-
-### 16.14 Repair semantic seams at their owning layer
-
-The acceptance repair did not add special-case prompt arithmetic. Named pin
-corners became retained selector facts and deterministic bounds-to-point
-resolution. Mechanism springs joined the application-owned entity catalog with
-stable input/output identities, shared selectors, provenance, partial readiness,
-and force-per-length normalization. The solver still receives its established
-bounded region and scalar stiffness contract. This is the useful migration
-pattern: improve the user-facing intermediate representation, then compile into a
-trusted numerical surface instead of teaching the model an internal workaround.
-
-Question quality also needs deterministic redundancy. The model remains
-responsible for natural, context-sensitive questions, but readiness now maps any
-unanswered canonical gap to a human fallback. That fallback is stored in
-conversation history as well as displayed, so a model omission cannot strand the
-user or show only an internal field path.
-
-Numerical safety was preserved rather than disabled. The OC updater measures the
-largest positive sensitivity against the global gradient scale, clips only the
-`1e-7`-relative noise band, and still rejects a material positive gradient. A
-synthetic accept/reject pair protects the rule, and the exact failed bracket
-configuration passed through iteration 60 and the beta transition that had
-previously aborted.
-
-The test strategy followed the cost boundary. New regressions were written before
-execution, one focused 63-test checkpoint covered the changed seams, one exact
-contained numerical confirmation exercised the real failure, and the complete
-local suite ran only at the integration checkpoint (plus one necessary rerun
-after a minimal test-double compatibility repair). No billed live-model gate was
-used to prove deterministic behavior.
-
-## 17. How we will continue learning
-
-We will use these rules for the remaining work:
-
-1. Start from a real user outcome, not from a framework feature.
-2. Preserve numerical and side-effect authority in deterministic, tested code.
-3. Give the model enough context, state, and reasoning budget for the judgment it
-   is expected to perform.
-4. Compare adapters and models using the same representative conversations.
-5. Turn every real failure into a regression test when possible.
-6. Keep assumptions visible and require confirmation before finalization.
-7. Require explicit approval before an expensive solve.
-8. Record why an architecture changed, not merely which files changed.
-9. Keep `README.md` about the current product, `docs/spec.md` about current
-   decisions, and this file about accumulated learning.
-
-The next lesson should come from user-led live UI conversations and the failures
-they reveal—not from keeping the design artificially simple.
-
-## 18. Milestone trail
-
-This condensed trail connects the lessons above to the implementation order:
-
-- **2026-07-25** — restored and verified the numerical baseline; separated density
-  and displacement output behavior.
-- **2026-07-25 to 2026-07-26** — built and hardened the three agent-safe tools,
-  including contracts, validation, resource admission, numerical checks, process
-  containment, lifecycle state, transports, manifests, and analysis.
-- **2026-07-26** — pinned CrewAI/OpenAI inside Docker, protected `.env`, and added
-  smoke and golden model checks.
-- **2026-07-26** — implemented typed interpretation, deterministic compilation,
-  visible defaults, validation orchestration, contained execution, analysis, and
-  fact-preserving explanation.
-- **2026-07-26** — added the Streamlit interface, release documentation, explicit
-  run approval, relative edge segments, verified result plots, strict-output
-  normalization, provenance checks, and the measured numerical tolerance fix.
-- **2026-07-27** — diagnosed the limitations of the one-shot conversational
-  phase and added the provider-independent multi-turn draft, provenance, revision,
-  readiness, finalization, and evaluation foundation.
-- **2026-07-27** — implemented the live Responses adapter, persisted continuation,
-  bounded structured repair, strict transport conversion, semantic partial facts,
-  v2 live graders, and the measured Sol/Terra comparison.
-- **2026-07-27** — migrated Streamlit to the typed multi-turn formulation session,
-  added the ready-step orchestrator bridge, visible draft/provenance/error states,
-  stable user-turn workflow identity, and stale-approval invalidation.
-- **2026-07-27** — used the first extended live conversation to design the
-  first-class BC draft, mesh-aware selector evidence, unit/resultant semantics,
-  pre-run preview, and a separately gated component-support increment.
-- **2026-07-27** — added the provider-independent BC evaluation contract,
-  deterministic semantic/safety grader, and 53-case versioned corpus before
-  changing runtime behavior.
-- **2026-07-27** — implemented stable application-owned BC identities, partial
-  field facts, revisions, readiness, pending confirmations, typed patch
-  operations, and explicit legacy migration without switching the live path.
-- **2026-07-27** — pinned Pint in Docker, added provenance-bearing mechanical
-  unit facts, retained display/normalized quantities, deterministic
-  direction/pressure resolution, and explicit traction versus deferred-resultant
-  state without switching the live finalizer.
-- **2026-07-27** — versioned the safe config/tool contracts, added deterministic
-  1.1 migration, one validation/FEM facet resolver, enriched boundary evidence,
-  verified resultant conversion, near-incompressibility warnings, and a
-  traction/resultant numerical-equivalence gate.
-- **2026-07-27** — made complete confirmed first-class BCs authoritative at
-  finalization, compiled semantic selectors and explicit-unit
-  traction/resultants directly into schema 2.0, migrated legacy live facts once,
-  and joined requested/resolved boundary evidence in the unchanged approval gate.
-- **2026-07-27** — versioned the live Responses contract, added compact
-  first-class BC operations, stable-ID corrections and confirmations,
-  deterministic legacy-session migration, semantic grader fixes, and a passing
-  six-scenario Sol/medium v3 gate with zero solver starts.
-- **2026-07-27** — added partial and validated human BC cards, stable-ID
-  correction guidance, deterministic requested/resolved SVG preview, visible
-  load conversion, complete BC provenance in the UI expander, and human-readable
-  approval rows.
-- **2026-07-27** — built the 53-case formulation-only billed gate, repaired
-  evaluator representational defects, separated provider retry from semantic
-  grading, strengthened the v3 BC prompt/IR, and made constant-traction
-  uniformity deterministic in application code. The local gate passes; the clean
-  live gate ultimately passed 53/53 after adding deterministic named-center
-  retention and bounded provider-5xx retry, with zero solver starts.
-- **2026-07-27** — versioned zero-component support and boundary-node pin
-  physics, caught a trusted-normalizer semantic loss with a real FEM baseline,
-  added component-aware validation/UI/live behavior, and passed the v7 53/53
-  formulation gate with zero solver starts.
-- **2026-07-27** — closed Package 9 by auditing the shipped public contracts,
-  documenting a mechanically valid roller-plus-pin conversation and exact
-  rigid-body rows, verifying secret/Compose/dependency/test/UI boundaries, and
-  retaining the clean Package 8 v7 live result as the unchanged language gate.
-- **2026-07-27** — added five review-first user acceptance journeys with distinct
-  mesh interaction paths, multi-load correction, mechanism education, a coverage
-  matrix, explicit gaps, and separate no-run capability-limit probes.
-- **2026-07-27** — reviewed the five user-run PDF transcripts, confirmed the
-  working approval/resultant/default/output paths, reproduced the mixed-load OC
-  failure at a projection transition, and prioritized semantic springs,
-  named-corner pins, warning visibility, and objective-specific evidence.
-- **2026-07-27** — completed the acceptance repair: semantic/dimensioned springs,
-  named-corner pins, deterministic fallback questions, visible/inherited
-  warnings, objective-specific explanation, richer failure lifecycle messages,
-  and scale-aware OC handling. The exact failed transition and the 311-test plus
-  197-subtest local checkpoint pass without billed calls.
-- **Next** — repeat the same five UI journeys, including the Scenario 4
-  correction turn that was skipped in the first run.
+That is the agentic engineering demonstrated by this repository.

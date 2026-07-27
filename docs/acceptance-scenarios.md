@@ -1,10 +1,12 @@
 # User Acceptance Scenarios
 
-These five scenarios are realistic, plain-language journeys for learning the
-released workflow and testing it beyond the fixed semantic corpus. They are not
-golden numerical benchmarks yet: their prompts and expected interpretations must
-be reviewed before billed formulation calls or solver runs establish recorded
-outcomes.
+These five scenarios are realistic, plain-language journeys for demonstrating
+the released workflow beyond the fixed semantic corpus. The first manual run
+produced two complete end-to-end results and exposed integration defects in the
+other journeys. Those defects were repaired with deterministic and numerical
+regressions. The prompts remain reusable demonstrations, not golden numerical
+benchmarks: different meshes and stopping settings may produce different valid
+objective values.
 
 Run each scenario in a fresh Streamlit conversation. During formulation, stop at
 the approval request and compare the visible draft, boundary-condition cards,
@@ -57,8 +59,7 @@ For each scenario:
 
 ### Phase B — execution and evidence
 
-After the prompts and expected interpretations have been finalized, run one
-scenario at a time:
+When running the showcase, execute one scenario at a time:
 
 1. Approve the exact validated proposal with `yes`.
 2. Observe queued, running, and terminal lifecycle states.
@@ -69,8 +70,9 @@ scenario at a time:
 6. Compare the fact-preserving explanation with the deterministic analysis
    evidence rather than judging it only by fluency.
 
-Until Phase B is completed and recorded, these scenarios establish semantic
-expectations, not expected objective values or topology images.
+The repository records semantic expectations rather than fixed topology images
+for every case. The main README and `docs/project-story.md` show selected results
+from the reviewed run and describe the repairs it motivated.
 
 ## Scenario 1 — Lightweight equipment arm
 
