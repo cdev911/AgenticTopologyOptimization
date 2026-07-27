@@ -9,7 +9,7 @@ Last updated: 2026-07-27
 
 - **Release**: v1 numerical/execution behavior remains complete, and the post-v1
   conversational Phase 1 is now the released Streamlit entry path.
-- **Verification**: 271 tests plus 194 subtests pass in the pinned Docker
+- **Verification**: 275 tests plus 194 subtests pass in the pinned Docker
   image. Compose config, dependency checks, Streamlit health, the no-credit
   idempotent harness, and documentation links have also passed.
 - **Scope**: personal learning/demo workflow, not engineering design software or a
@@ -40,8 +40,8 @@ Last updated: 2026-07-27
   revision history, atomic create plus targeted update/delete/confirm operations,
   typed pending confirmations, basic BC readiness, and explicit migration from
   legacy list facts. `ProblemDraft` and `FormulationTurn` carry the new optional
-  state/patch; Package 4 now owns finalization, while the current OpenAI transport
-  continues to emit legacy BC facts until Package 5.
+  state/patch; Package 4 owns finalization and Package 5 now populates this state
+  from the live OpenAI transport.
 - **Just implemented**: BC Work Package 2 pins Pint 0.25.3 in Docker and adds
   provenance-bearing length/force/stress unit facts, typed dimensional
   normalization with retained display values, deterministic global/edge-local
@@ -65,8 +65,17 @@ Last updated: 2026-07-27
   geometry evidence and shows requested versus resolved selectors, measures,
   normals, conversions, integrated resultants, units, thickness, and warnings.
   The separate explicit run-approval transition is unchanged.
-- **Next action**: implement BC Work Package 5: teach the live Responses prompt
-  and compact adapter to create and refine first-class BC patches directly.
+- **Just implemented**: BC Work Package 5 versions the live contract as
+  `formulation-system-v2` / `openai-responses-v2`. Its 6,491-character strict
+  transport carries flat create/update/delete/confirm operations, compact JSON
+  field values, stable-ID corrections, partial BCs, and targeted confirmations
+  without exposing solver schemas. The prompt distinguishes traction, pressure,
+  resultant, and point semantics; retains semantic selectors; asks
+  highest-information questions; and recognizes gated supports honestly.
+  Deterministic code migrates a legacy browser-session draft before its first v2
+  turn. The v3 Sol/medium live gate passes 6/6 with zero solver starts.
+- **Next action**: implement BC Work Package 6: human-readable BC cards,
+  deterministic requested/resolved rectangle preview, and precise correction UX.
 
 ## 1. Product
 
@@ -92,7 +101,8 @@ Supported agent-safe physics:
 - rectangular 2D plane strain with unit thickness;
 - isotropic single-material compliance or compliant-mechanism optimization;
 - full-vector zero clamps;
-- distributed boundary traction and body force;
+- distributed boundary traction, pressure, uniform total resultant, and body
+  force;
 - volume fraction and declarative 2D selection regions;
 - relative centered/spanned rectangle-edge segments for tractions; and
 - explicit compliant-mechanism input/output springs.
@@ -101,8 +111,8 @@ Not supported in v1:
 
 - agent-safe 3D, non-rectangular domains, plane stress, nonlinear/dynamic/thermal
   physics, or multiple materials;
-- roller/component supports, nonzero prescribed displacement, point loads, or
-  total-force semantics;
+- roller/component supports, nonzero prescribed displacement, or mathematical
+  point loads;
 - parallel tool execution, multiple concurrent solves, or browser/LLM control of
   paths, solver profiles, limits, timeouts, or safety policy.
 
@@ -196,8 +206,9 @@ The live Streamlit formulation configuration is:
 - `gpt-5.6-sol` through `OPENAI_FORMULATION_MODEL`;
 - medium reasoning through `OPENAI_FORMULATION_REASONING_EFFORT`;
 - `reasoning.context=all_turns` and `previous_response_id`;
-- prompt `formulation-system-v1`;
-- strict `OpenAIFormulationTurn` output with a 2,823-character schema;
+- prompt `formulation-system-v2`;
+- strict `OpenAIFormulationTurn` output with a 6,491-character schema and flat
+  first-class BC operations;
 - SDK retries disabled, one application-owned deterministic patch repair, and one
   continuation-expiry full-history recovery; and
 - `store=true` for response continuation under provider retention, while the local
@@ -209,6 +220,12 @@ turns, Sol recorded 30,938 input, 4,576 output, and 1,613 reasoning tokens in
 in 34.688 seconds. Sol remains the default because the current suite establishes
 a minimum capability bar rather than broad out-of-distribution equivalence;
 Terra/medium is a measured lower-latency option.
+
+The v3 first-class BC gate was rerun on Sol/medium after Package 5. All six
+scenarios passed across ten calls with 51,726 input, 7,921 output, 3,578 reasoning,
+and 43,317 cached tokens in 147.888 seconds, with no context recoveries and zero
+solver starts. The earlier v2 comparison remains the evidence for the Sol/Terra
+default decision; v3 measures the changed BC contract.
 
 ## 7. Testing
 
@@ -410,6 +427,22 @@ contract, prompt update, numerical tests, and an explicit decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — Live BC language uses flat semantic operations**: version the
+  live prompt/continuation contract to v2 and replace legacy support/traction
+  updates with a strict flat transport for BC create, update, delete, and
+  confirmation operations. Carry arbitrary field values as compact JSON strings,
+  allocate canonical IDs only in deterministic merge code, include the current
+  boundary catalog and pending confirmations on every call, and migrate any
+  legacy browser-session facts before the first v2 turn. Teach the model to
+  preserve partial entities, distinguish traction/pressure/resultant/point
+  meaning, keep fraction/physical selector semantics without arithmetic, ask the
+  highest-information question, and name gated capabilities without aliasing
+  them. Treat a new conflicting implication as a conflict—not a correction—unless
+  the user signals correction intent or answers a prior conflict question.
+  Reason: a recursive solver schema is unnecessary and expensive, model-owned IDs
+  or migration would corrupt provenance, and the live v3 failure showed that
+  fluent language still needs an explicit correction-authority rule. The final
+  Sol/medium v3 gate passed 6/6 with zero solver starts.
 - **2026-07-27 — Finalization consumes first-class BC state, approval consumes
   mesh evidence**: make a ready `ProblemDraft`, not the legacy `ProblemIntent`,
   the conversational orchestrator handoff. Compile ordinary problem facts and
@@ -642,7 +675,10 @@ Reverse chronological; final decisions only.
       enriched evidence, and numerical warnings.
 - [x] BC Work Package 4 — first-class finalization, deterministic BC compilation,
       authoritative approval evidence, and unchanged explicit run gate.
-- [ ] BC Work Packages 5–6 — prompt adapter and human BC cards/preview.
+- [x] BC Work Package 5 — versioned live prompt, compact first-class BC adapter,
+      legacy-session migration, mocked regressions, and passing v3 live gate.
+- [ ] BC Work Package 6 — human BC cards, requested/resolved preview, and precise
+      correction UX.
 - [ ] BC Work Package 7 — complete deterministic, numerical, UI, and billed live
       first-increment gate.
 - [ ] BC Work Package 8 — explicit component-support checkpoint and optional

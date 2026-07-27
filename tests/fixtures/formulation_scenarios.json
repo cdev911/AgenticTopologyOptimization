@@ -1,12 +1,12 @@
 {
-  "version": "formulation-evals-v2",
+  "version": "formulation-evals-v3",
   "scenarios": [
     {
       "id": "disordered_cantilever_over_two_turns",
       "purpose": "Accumulate geometry, support, objective, material, and load when the user supplies them in a natural order over multiple turns.",
       "turns": [
-        "I need something like a cantilever, ten long and half as tall. Fix its left side and keep roughly one third of the material.",
-        "Put the lower-left corner at the origin. Minimize compliance with E 10 and nu 0.3. Push downward with traction [0,-1] over the middle ten percent of the right edge."
+        "I need something like a cantilever, ten millimetres long and half as tall. Fix its left side and keep roughly one third of the material.",
+        "Put the lower-left corner at the origin. Minimize compliance with E 10 MPa and nu 0.3, using mm, N, and MPa. Push downward with traction [0,-1] MPa over the middle ten percent of the right edge."
       ],
       "expected_final_status": "ready_for_review",
       "required_behaviors": [
@@ -21,7 +21,7 @@
       "id": "correction_overrides_prior_dimension",
       "purpose": "Honor a correction without losing unrelated confirmed facts.",
       "turns": [
-        "Use a 10 by 5 rectangular compliance domain at the origin, E 100, nu 0.3, left edge fixed, downward traction [0,-1] on the right, and 40 percent material.",
+        "Use a 10 by 5 mm rectangular compliance domain at the origin, E 100 MPa, nu 0.3, left edge fixed, downward traction [0,-1] MPa on the right, N as the force unit, and 40 percent material.",
         "Actually make it 12 long; keep everything else."
       ],
       "expected_final_status": "ready_for_review",
@@ -40,9 +40,9 @@
       "expected_final_status": "gathering",
       "required_behaviors": [
         "explain that point loads are unsupported",
-        "offer a centered distributed traction segment",
-        "ask for segment width and traction magnitude semantics",
-        "do not silently reinterpret total force as traction"
+        "offer a centered finite segment carrying a uniform resultant",
+        "ask for segment width and confirmation of uniform distribution",
+        "do not silently reinterpret a point force"
       ]
     },
     {
@@ -83,7 +83,7 @@
       ],
       "expected_final_status": "gathering",
       "required_behaviors": [
-        "record mesh.long_short_divisions as an explicit preference",
+        "record mesh.long_short_divisions with current-turn provenance",
         "cite the current user turn as provenance",
         "defer x/y mapping until the domain orientation is known",
         "do not invent missing physics"

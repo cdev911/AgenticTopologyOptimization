@@ -1110,14 +1110,24 @@ class ConversationFormulator:
         message = user_message.strip()
         if not message:
             raise ValueError("user_message must not be blank.")
-        turn_number = session.draft.turn_count + 1
+        starting_draft = session.draft
+        if (
+            getattr(self._agent, "first_class_boundary_patches", False)
+            and not starting_draft.boundary_state.conditions
+            and any(
+                starting_draft.fact(path) is not None
+                for path in ("supports", "support_edges", "tractions")
+            )
+        ):
+            starting_draft = migrate_legacy_boundary_facts(starting_draft)
+        turn_number = starting_draft.turn_count + 1
         model_state = session.model_state
         repair = None
         for attempt in range(1, self._max_repair_attempts + 2):
             request = FormulationRequest(
                 turn_number=turn_number,
                 user_message=message,
-                draft=session.draft,
+                draft=starting_draft,
                 history=session.messages,
                 model_state=model_state,
                 repair=repair,
@@ -1134,7 +1144,7 @@ class ConversationFormulator:
             turn = response.turn
             model_state = response.model_state
             merge = merge_formulation_turn(
-                session.draft,
+                starting_draft,
                 turn,
                 user_message=message,
                 turn_number=turn_number,

@@ -159,9 +159,11 @@ without weakening the solver boundary:
   `previous_response_id`, and persisted all-turn reasoning. The canonical draft
   is included on every call, and an expired continuation triggers exactly one
   full-history recovery; generic provider retries remain disabled.
-- The strict API transport is 2,823 characters versus 235,234 for the v1 one-shot
-  schema. Arbitrary field values travel as compact JSON strings and are decoded
-  immediately through the existing deterministic field validators.
+- The strict API transport is 6,491 characters versus 235,234 for the v1 one-shot
+  schema. Ordinary and boundary field values travel as compact JSON strings and
+  are decoded immediately through existing deterministic validators. Flat
+  create/update/delete/confirm BC operations avoid exposing the recursive solver
+  schema.
 - Streamlit stores the typed `FormulationSession` across reruns and shows accepted
   facts, fact basis, missing information, assumptions, capability limits, and
   deterministic conflicts. Exact provenance and revision history remain available
@@ -177,6 +179,12 @@ mesh preferences. Sol/medium and Terra/medium both pass all six; Sol/medium is t
 quality-first default while Terra/medium is a measured lower-latency option.
 Responses are stored to support continuation under OpenAI's default response
 retention; the application draft remains the durable source of truth.
+
+After the first-class BC adapter migration, the v3 Sol/medium gate again passes
+all six with zero solver starts. Its ten calls recorded 51,726 input, 7,921
+output, and 3,578 reasoning tokens in 147.888 seconds. The earlier v2
+Sol/Terra comparison remains the model-selection evidence; v3 specifically
+verifies the richer live BC transport.
 
 ### Execution boundary
 
@@ -252,10 +260,11 @@ wording may vary, but typed draft state and side-effect behavior are authoritati
 ### 1. Ready request with visible defaults
 
 ```text
-Minimize compliance of a rectangular 10 by 4 plane-strain domain starting at
-[0, 0]. Use Young's modulus 100 and Poisson ratio 0.3. Fully clamp the entire
-left edge and apply a distributed traction [0, -1] on the entire right edge.
-Use 40 percent material.
+Minimize compliance of a rectangular 10 by 4 mm plane-strain domain starting at
+[0, 0]. Use Young's modulus 100 MPa and Poisson ratio 0.3, with mm, N, and MPa
+as the mechanical unit system. Fully clamp the entire left edge and apply a
+distributed traction [0, -1] MPa on the entire right edge. Use 40 percent
+material.
 ```
 
 Expected behavior:
@@ -403,8 +412,16 @@ tractions or preserves total resultants; and keeps stable `S…`/`L…` IDs in s
 boundary. Approval now fails closed without successful mesh evidence and shows
 requested selectors beside resolved facets, extents, measures, normals, load
 conversions, integrated resultants, units, thickness, and warnings. The separate
-user green-light transition is unchanged. Package 5 will teach the live OpenAI
-adapter to populate the first-class BC patch directly.
+user green-light transition is unchanged.
+
+Package 5 moves the live Responses prompt and adapter onto that first-class path.
+The model now creates partial BC entities through turn-local references, updates
+or confirms existing stable IDs, distinguishes pressure/traction/resultant/point
+semantics, preserves semantic selectors without arithmetic, asks for missing
+units, and records unsupported rollers/pins/point loads without aliasing them.
+The application still owns IDs, migration of older browser-session facts,
+provenance validation, readiness, unit/geometry conversion, approval, and every
+side effect.
 
 ## Supported natural-language scope
 
@@ -415,7 +432,8 @@ The natural-language workflow supports:
 - compliance minimization and compliant-mechanism optimization;
 - one consistent user unit system;
 - full-vector zero clamps;
-- constant distributed boundary tractions and constant body force;
+- constant distributed boundary tractions, pressure, uniform total resultants,
+  and constant body force;
 - a volume-fraction constraint;
 - quadrilateral or triangular meshes;
 - declarative `plane`, `range`, `circle`, `all`, `none`, `and`, `or`, and `not`
@@ -430,9 +448,7 @@ This demo intentionally does not support:
 - 3D or non-rectangular geometry in the agent-safe workflow;
 - plane stress, nonlinear, dynamic, thermal, or multi-material physics;
 - roller/component-wise supports or nonzero prescribed displacement;
-- point loads, or total-force extraction through the current live OpenAI adapter
-  (first-class finalization and the 2.0 tool contract support a uniform
-  resultant);
+- mathematical point loads;
 - user-provided code/lambdas in serialized regions;
 - parallel/MPI execution through `run_topopt`;
 - multiple simultaneous solves; or
@@ -484,7 +500,7 @@ docker compose run --rm -T fenitop python -m pip check
 docker compose run --rm -T fenitop pytest -q
 ```
 
-Current checkpoint: **271 tests plus 194 subtests pass**. The suite
+Current checkpoint: **275 tests plus 194 subtests pass**. The suite
 includes schema and adversarial-input tests, real compliance/mechanism baselines,
 finite-difference sensitivities, geometry validation, resource calibration,
 process timeout/cancellation/crash behavior, secret scrubbing, path and

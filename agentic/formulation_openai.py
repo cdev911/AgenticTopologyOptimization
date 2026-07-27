@@ -12,10 +12,20 @@ from typing import Annotated, Literal, Protocol
 from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from agentic.boundary_draft import (
+    BoundaryConfirm,
+    BoundaryCreate,
+    BoundaryDelete,
+    BoundaryField,
+    BoundaryFieldInput,
+    BoundaryKind,
+    BoundaryPatch,
+    BoundaryUpdate,
+    BoundaryUpdateBasis,
+)
 from agentic.formulation import (
     DeclaredTurnState,
     DraftClear,
-    DraftPath,
     DraftUpdate,
     FactBasis,
     FormulationAgentResponse,
@@ -26,11 +36,33 @@ from agentic.formulation import (
 )
 
 
-PROMPT_VERSION = "formulation-system-v1"
-ADAPTER_ID = "openai-responses-v1"
+PROMPT_VERSION = "formulation-system-v2"
+ADAPTER_ID = "openai-responses-v2"
 DEFAULT_MODEL = "gpt-5.6-sol"
 ReasoningEffort = Literal["low", "medium", "high", "xhigh", "max"]
 ErrorKind = Literal["provider", "invalid_response", "refusal"]
+LiveDraftPath = Literal[
+    "problem_type",
+    "domain.bounds",
+    "domain.origin",
+    "domain.width",
+    "domain.height",
+    "material.young_modulus",
+    "material.poisson_ratio",
+    "units.length",
+    "units.force",
+    "units.stress",
+    "body_force",
+    "volume_fraction",
+    "compliance_bound",
+    "input_spring",
+    "output_spring",
+    "mesh.divisions",
+    "mesh.long_short_divisions",
+    "mesh.cell_type",
+    "optimization.filter_radius",
+    "optimization.max_iter",
+]
 
 
 class StrictOpenAIFormulationModel(BaseModel):
@@ -40,7 +72,7 @@ class StrictOpenAIFormulationModel(BaseModel):
 class OpenAIDraftUpdate(StrictOpenAIFormulationModel):
     """Compact transport update; value_json avoids an unconstrained JSON schema."""
 
-    path: DraftPath
+    path: LiveDraftPath
     value_json: str
     basis: FactBasis
     source_quote: str | None
@@ -54,14 +86,7 @@ class OpenAIDraftUpdate(StrictOpenAIFormulationModel):
         return value.strip()
 
     def to_domain(self) -> DraftUpdate:
-        try:
-            value = json.loads(self.value_json)
-        except json.JSONDecodeError:
-            # No draft field accepts null. Converting malformed inner JSON to
-            # null routes it through the normal deterministic invalid_value
-            # issue and bounded same-turn repair instead of accepting a raw
-            # string accidentally or aborting the whole conversation.
-            value = None
+        value = _decode_json_value(self.value_json)
         return DraftUpdate(
             path=self.path,
             value=value,
@@ -71,12 +96,128 @@ class OpenAIDraftUpdate(StrictOpenAIFormulationModel):
         )
 
 
+class OpenAIDraftClear(StrictOpenAIFormulationModel):
+    path: LiveDraftPath
+    source_quote: str
+    rationale: str
+
+    def to_domain(self) -> DraftClear:
+        return DraftClear(**self.model_dump())
+
+
+class OpenAIBoundaryFieldInput(StrictOpenAIFormulationModel):
+    """One compact create-field transport decoded by the domain validator."""
+
+    field: BoundaryField
+    value_json: str
+    basis: BoundaryUpdateBasis
+    source_quote: str | None
+    rationale: str
+
+    @field_validator("value_json", "rationale")
+    @classmethod
+    def _nonblank_text(cls, value):
+        if not value.strip():
+            raise ValueError("text must not be blank.")
+        return value.strip()
+
+    def to_domain(self) -> BoundaryFieldInput:
+        return BoundaryFieldInput(
+            field=self.field,
+            value=_decode_json_value(self.value_json),
+            basis=self.basis,
+            source_quote=self.source_quote,
+            rationale=self.rationale,
+        )
+
+
+class OpenAIBoundaryCreate(StrictOpenAIFormulationModel):
+    local_ref: str = Field(pattern=r"^new_[a-z0-9][a-z0-9_]*$")
+    kind: BoundaryKind
+    fields: Annotated[
+        tuple[OpenAIBoundaryFieldInput, ...],
+        Field(min_length=1),
+    ]
+
+    def to_domain(self) -> BoundaryCreate:
+        return BoundaryCreate(
+            local_ref=self.local_ref,
+            kind=self.kind,
+            fields=tuple(field.to_domain() for field in self.fields),
+        )
+
+
+class OpenAIBoundaryUpdate(StrictOpenAIFormulationModel):
+    bc_id: str = Field(pattern=r"^[SL][1-9][0-9]*$")
+    field: BoundaryField
+    value_json: str
+    basis: BoundaryUpdateBasis
+    source_quote: str | None
+    rationale: str
+
+    @field_validator("value_json", "rationale")
+    @classmethod
+    def _nonblank_text(cls, value):
+        if not value.strip():
+            raise ValueError("text must not be blank.")
+        return value.strip()
+
+    def to_domain(self) -> BoundaryUpdate:
+        return BoundaryUpdate(
+            bc_id=self.bc_id,
+            field=self.field,
+            value=_decode_json_value(self.value_json),
+            basis=self.basis,
+            source_quote=self.source_quote,
+            rationale=self.rationale,
+        )
+
+
+class OpenAIBoundaryDelete(StrictOpenAIFormulationModel):
+    bc_id: str = Field(pattern=r"^[SL][1-9][0-9]*$")
+    source_quote: str
+    rationale: str
+
+    def to_domain(self) -> BoundaryDelete:
+        return BoundaryDelete(**self.model_dump())
+
+
+class OpenAIBoundaryConfirm(StrictOpenAIFormulationModel):
+    bc_id: str = Field(pattern=r"^[SL][1-9][0-9]*$")
+    field: BoundaryField
+    source_quote: str
+    rationale: str
+
+    def to_domain(self) -> BoundaryConfirm:
+        return BoundaryConfirm(**self.model_dump())
+
+
+class OpenAIBoundaryPatch(StrictOpenAIFormulationModel):
+    """Flat strict transport; canonical IDs remain application-owned."""
+
+    creates: tuple[OpenAIBoundaryCreate, ...]
+    updates: tuple[OpenAIBoundaryUpdate, ...]
+    deletes: tuple[OpenAIBoundaryDelete, ...]
+    confirmations: tuple[OpenAIBoundaryConfirm, ...]
+
+    def to_domain(self) -> BoundaryPatch:
+        return BoundaryPatch(
+            creates=tuple(item.to_domain() for item in self.creates),
+            updates=tuple(item.to_domain() for item in self.updates),
+            deletes=tuple(item.to_domain() for item in self.deletes),
+            confirmations=tuple(
+                item.to_domain() for item in self.confirmations
+            ),
+        )
+
+
 class OpenAIFormulationTurn(StrictOpenAIFormulationModel):
     """Strict API transport converted immediately to the domain turn contract."""
 
     assistant_message: str
     updates: tuple[OpenAIDraftUpdate, ...]
-    clears: tuple[DraftClear, ...]
+    clears: tuple[OpenAIDraftClear, ...]
+    boundary_patch: OpenAIBoundaryPatch
     questions: Annotated[tuple[str, ...], Field(max_length=3)]
     declared_state: DeclaredTurnState
     unsupported_features: tuple[str, ...]
@@ -85,11 +226,22 @@ class OpenAIFormulationTurn(StrictOpenAIFormulationModel):
         return FormulationTurn(
             assistant_message=self.assistant_message,
             updates=tuple(update.to_domain() for update in self.updates),
-            clears=self.clears,
+            clears=tuple(clear.to_domain() for clear in self.clears),
+            boundary_patch=self.boundary_patch.to_domain(),
             questions=self.questions,
             declared_state=self.declared_state,
             unsupported_features=self.unsupported_features,
         )
+
+
+def _decode_json_value(value_json: str):
+    try:
+        return json.loads(value_json)
+    except json.JSONDecodeError:
+        # No ordinary or boundary field accepts null. Converting malformed inner
+        # JSON to null routes it through deterministic invalid_value feedback and
+        # the bounded same-turn repair instead of aborting the conversation.
+        return None
 
 
 class ResponsesAPI(Protocol):
@@ -169,7 +321,7 @@ def config_from_environment() -> OpenAIFormulationConfig:
 def load_system_prompt() -> str:
     prompt = (
         files("agentic.prompts")
-        .joinpath("formulation_system_v1.txt")
+        .joinpath("formulation_system_v2.txt")
         .read_text(encoding="utf-8")
         .strip()
     )
@@ -190,6 +342,8 @@ def build_openai_client(
 
 class OpenAIResponsesFormulationAgent:
     """Return a small typed patch while deterministic code owns canonical state."""
+
+    first_class_boundary_patches = True
 
     def __init__(
         self,
@@ -282,6 +436,16 @@ class OpenAIResponsesFormulationAgent:
             "turn_number": request.turn_number,
             "user_message": request.user_message,
             "canonical_draft": request.draft.model_dump(mode="json"),
+            "boundary_catalog": [
+                condition.model_dump(mode="json")
+                for condition in request.draft.boundary_state.conditions
+            ],
+            "pending_boundary_confirmations": [
+                item.model_dump(mode="json")
+                for item in (
+                    request.draft.boundary_state.pending_confirmations()
+                )
+            ],
             "readiness_before_turn": assess_draft(request.draft).model_dump(
                 mode="json"
             ),
