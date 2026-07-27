@@ -12,6 +12,16 @@ from agentic.intent import (
     ProblemIntent,
 )
 from fenitop.tools.contracts import ValidateConfigRequest, ValidateConfigResponse
+from fenitop.tools.contracts import (
+    AnalyzeResultsRequest,
+    AnalyzeResultsResponse,
+    RunTopoptRequest,
+    RunTopoptResponse,
+    TrustedRunPolicy,
+)
+from fenitop.tools.analyze_results import analyze_results_tool
+from fenitop.tools.lifecycle import canonical_json_hash
+from fenitop.tools.run_topopt import run_topopt_tool
 from fenitop.tools.validate_config import validate_config_tool
 
 
@@ -27,6 +37,21 @@ class Validator(Protocol):
     def __call__(
         self, request: ValidateConfigRequest
     ) -> dict | ValidateConfigResponse: ...
+
+
+class Runner(Protocol):
+    def __call__(
+        self,
+        request: RunTopoptRequest,
+        *,
+        policy: TrustedRunPolicy,
+    ) -> dict | RunTopoptResponse: ...
+
+
+class Analyzer(Protocol):
+    def __call__(
+        self, request: AnalyzeResultsRequest
+    ) -> dict | AnalyzeResultsResponse: ...
 
 
 class StrictWorkflowModel(BaseModel):
@@ -82,6 +107,11 @@ class WorkflowEvent(StrictWorkflowModel):
         "defaults_applied",
         "validation_failed",
         "validated",
+        "run_started",
+        "run_failed",
+        "run_succeeded",
+        "analysis_failed",
+        "completed",
     ]
     message: str
 
@@ -118,12 +148,47 @@ class ValidatedWorkflow(StrictWorkflowModel):
     events: tuple[WorkflowEvent, ...]
 
 
+class RunFailedWorkflow(StrictWorkflowModel):
+    status: Literal["run_failed"] = "run_failed"
+    conversation: ConversationContext
+    compilation: CompilationResult
+    validation: ValidateConfigResponse
+    idempotency_key: str
+    run: RunTopoptResponse
+    events: tuple[WorkflowEvent, ...]
+
+
+class AnalysisFailedWorkflow(StrictWorkflowModel):
+    status: Literal["analysis_failed"] = "analysis_failed"
+    conversation: ConversationContext
+    compilation: CompilationResult
+    validation: ValidateConfigResponse
+    idempotency_key: str
+    run: RunTopoptResponse
+    analysis: AnalyzeResultsResponse
+    events: tuple[WorkflowEvent, ...]
+
+
+class CompletedWorkflow(StrictWorkflowModel):
+    status: Literal["completed"] = "completed"
+    conversation: ConversationContext
+    compilation: CompilationResult
+    validation: ValidateConfigResponse
+    idempotency_key: str
+    run: RunTopoptResponse
+    analysis: AnalyzeResultsResponse
+    events: tuple[WorkflowEvent, ...]
+
+
 WorkflowOutcome = Annotated[
     Union[
         AwaitingClarification,
         UnsupportedWorkflow,
         ValidationFailedWorkflow,
         ValidatedWorkflow,
+        RunFailedWorkflow,
+        AnalysisFailedWorkflow,
+        CompletedWorkflow,
     ],
     Field(discriminator="status"),
 ]
@@ -138,12 +203,17 @@ class DeterministicOrchestrator:
         *,
         compiler: Compiler = compile_intent,
         validator: Validator = validate_config_tool,
+        runner: Runner = run_topopt_tool,
+        analyzer: Analyzer = analyze_results_tool,
         event_callback: Callable[[WorkflowEvent], None] | None = None,
     ):
         self._interpreter = interpreter
         self._compiler = compiler
         self._validator = validator
+        self._runner = runner
+        self._analyzer = analyzer
         self._event_callback = event_callback
+        self._run_cache: dict[str, RunTopoptResponse] = {}
 
     def start(self, user_request: str) -> WorkflowOutcome:
         return self._advance(ConversationContext(original_request=user_request))
@@ -169,6 +239,142 @@ class DeterministicOrchestrator:
         )
         return self._advance(conversation, prior_events=prior.events)
 
+    def execute(
+        self,
+        state: ValidatedWorkflow | AnalysisFailedWorkflow | CompletedWorkflow,
+    ) -> RunFailedWorkflow | AnalysisFailedWorkflow | CompletedWorkflow:
+        """Run and analyze once; resume analysis without repeating the solve."""
+        if isinstance(state, CompletedWorkflow):
+            return state
+        if isinstance(state, AnalysisFailedWorkflow):
+            return self._analyze(
+                conversation=state.conversation,
+                compilation=state.compilation,
+                validation=state.validation,
+                idempotency_key=state.idempotency_key,
+                run=state.run,
+                prior_events=state.events,
+            )
+
+        events = list(state.events)
+        idempotency_key = self._idempotency_key(state)
+        self._emit(
+            events,
+            "run_started",
+            "Launching the contained solver with an application-owned "
+            "idempotency key.",
+        )
+        run = self._run_cache.get(idempotency_key)
+        if run is None:
+            request = RunTopoptRequest(config=state.compilation.config)
+            raw_run = self._runner(
+                request,
+                policy=TrustedRunPolicy(idempotency_key=idempotency_key),
+            )
+            run = (
+                raw_run
+                if isinstance(raw_run, RunTopoptResponse)
+                else RunTopoptResponse.model_validate(raw_run)
+            )
+            self._run_cache[idempotency_key] = run
+
+        if run.status == "error":
+            self._emit(events, "run_failed", run.message or "Solver run failed.")
+            return RunFailedWorkflow(
+                conversation=state.conversation,
+                compilation=state.compilation,
+                validation=state.validation,
+                idempotency_key=idempotency_key,
+                run=run,
+                events=tuple(events),
+            )
+        if run.run_manifest is None:
+            raise RuntimeError("Successful run response is missing run_manifest.")
+
+        self._emit(
+            events,
+            "run_succeeded",
+            f"Solver run {run.run_manifest.run_id} succeeded.",
+        )
+        return self._analyze(
+            conversation=state.conversation,
+            compilation=state.compilation,
+            validation=state.validation,
+            idempotency_key=idempotency_key,
+            run=run,
+            prior_events=events,
+        )
+
+    def _analyze(
+        self,
+        *,
+        conversation: ConversationContext,
+        compilation: CompilationResult,
+        validation: ValidateConfigResponse,
+        idempotency_key: str,
+        run: RunTopoptResponse,
+        prior_events: Sequence[WorkflowEvent],
+    ) -> AnalysisFailedWorkflow | CompletedWorkflow:
+        if run.run_manifest is None:
+            raise RuntimeError("Analysis requires a successful run manifest.")
+        events = list(prior_events)
+        request = AnalyzeResultsRequest(run_manifest=run.run_manifest)
+        raw_analysis = self._analyzer(request)
+        analysis = (
+            raw_analysis
+            if isinstance(raw_analysis, AnalyzeResultsResponse)
+            else AnalyzeResultsResponse.model_validate(raw_analysis)
+        )
+        if analysis.status == "error":
+            self._emit(
+                events,
+                "analysis_failed",
+                analysis.message or "Deterministic analysis failed.",
+            )
+            return AnalysisFailedWorkflow(
+                conversation=conversation,
+                compilation=compilation,
+                validation=validation,
+                idempotency_key=idempotency_key,
+                run=run,
+                analysis=analysis,
+                events=tuple(events),
+            )
+
+        self._emit(
+            events,
+            "completed",
+            "The successful run manifest was analyzed deterministically.",
+        )
+        return CompletedWorkflow(
+            conversation=conversation,
+            compilation=compilation,
+            validation=validation,
+            idempotency_key=idempotency_key,
+            run=run,
+            analysis=analysis,
+            events=tuple(events),
+        )
+
+    @staticmethod
+    def _idempotency_key(state: ValidatedWorkflow) -> str:
+        material = {
+            "conversation": state.conversation.model_dump(mode="json"),
+            "config": state.compilation.config.model_dump(mode="json"),
+            "defaults_profile": state.compilation.defaults_profile,
+        }
+        return f"agentic-workflow-v1:{canonical_json_hash(material)}"
+
+    def _emit(self, events: list[WorkflowEvent], stage, message) -> None:
+        event = WorkflowEvent(
+            sequence=len(events) + 1,
+            stage=stage,
+            message=message,
+        )
+        events.append(event)
+        if self._event_callback is not None:
+            self._event_callback(event)
+
     def _advance(
         self,
         conversation: ConversationContext,
@@ -177,23 +383,18 @@ class DeterministicOrchestrator:
     ) -> WorkflowOutcome:
         events = list(prior_events)
 
-        def emit(stage, message) -> None:
-            event = WorkflowEvent(
-                sequence=len(events) + 1,
-                stage=stage,
-                message=message,
-            )
-            events.append(event)
-            if self._event_callback is not None:
-                self._event_callback(event)
-
         interpretation = self._interpreter.interpret(
             conversation.interpreter_request()
         )
-        emit("interpreted", f"Interpreter returned {interpretation.status}.")
+        self._emit(
+            events,
+            "interpreted",
+            f"Interpreter returned {interpretation.status}.",
+        )
 
         if interpretation.status == "needs_clarification":
-            emit(
+            self._emit(
+                events,
                 "clarification_requested",
                 "Required problem-defining information is still missing.",
             )
@@ -205,7 +406,7 @@ class DeterministicOrchestrator:
             )
 
         if interpretation.status == "unsupported":
-            emit("unsupported", interpretation.explanation)
+            self._emit(events, "unsupported", interpretation.explanation)
             return UnsupportedWorkflow(
                 conversation=conversation,
                 unsupported_features=tuple(interpretation.unsupported_features),
@@ -214,7 +415,7 @@ class DeterministicOrchestrator:
             )
 
         compilation = self._compiler(interpretation.intent)
-        emit("defaults_applied", compilation.defaults_notice)
+        self._emit(events, "defaults_applied", compilation.defaults_notice)
 
         request = ValidateConfigRequest(config=compilation.config)
         raw_validation = self._validator(request)
@@ -224,7 +425,8 @@ class DeterministicOrchestrator:
             else ValidateConfigResponse.model_validate(raw_validation)
         )
         if validation.status == "error":
-            emit(
+            self._emit(
+                events,
                 "validation_failed",
                 f"Validation returned {len(validation.errors)} error(s).",
             )
@@ -235,7 +437,11 @@ class DeterministicOrchestrator:
                 events=tuple(events),
             )
 
-        emit("validated", "The compiled configuration passed validation.")
+        self._emit(
+            events,
+            "validated",
+            "The compiled configuration passed validation.",
+        )
         return ValidatedWorkflow(
             conversation=conversation,
             compilation=compilation,

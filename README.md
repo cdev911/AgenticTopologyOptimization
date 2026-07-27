@@ -248,9 +248,27 @@ model memory.
 For a ready intent, the orchestrator emits the defaults notice before invoking the
 validator, then passes a `ValidateConfigRequest` containing the exact compiled
 Pydantic config. Its callback and persisted event trace expose stage facts without
-chain-of-thought. The current slice deliberately stops at `validated`: worker
-launch, idempotent job resume, manifest handoff, and analysis are the next
-orchestration slice.
+chain-of-thought.
+
+Execution continues from a `validated` state using two idempotency layers. An
+in-memory cache prevents a repeated transition in one application process from
+calling the runner again. A stable application-owned key derived from conversation,
+compiled config, and defaults profile lets the run tool replay the same durable
+result after a UI/process restart. A successful typed `RunManifest` is passed
+directly into `AnalyzeResultsRequest`; no model or application code copies its
+paths or metrics. Run and analysis failures are separate typed states, and an
+analysis retry reuses the stored manifest without revisiting the solver.
+
+Run the small no-API Stage 1 harness:
+
+```bash
+docker compose run --rm -T fenitop python scripts/stage1_workflow_harness.py
+```
+
+It uses a canned schema-validated `8×4`, five-iteration intent, then performs real
+validation, contained execution, and deterministic analysis. The first invocation
+reports `idempotent_replay=false`; repeating it returns the same run ID with
+`idempotent_replay=true`.
 
 ## Agent-tool layer
 
@@ -390,8 +408,8 @@ cancellation/signal recovery, generated malformed inputs, corrupt artifacts,
 calibrated heuristics, CLI purity, and real MCP composition. Focused development
 commands are listed in the [tool reference](docs/tool-reference.md); the full
 command above remains the checkpoint gate. All 107 tests pass in the pinned image.
-The Stage 1 interpretation-through-validation additions bring the current
-checkpoint to 134 passing tests plus 103 passing subtests.
+The Stage 1 deterministic workflow additions bring the current checkpoint to 139
+passing tests plus 103 passing subtests.
 
 ## Repository layout
 
