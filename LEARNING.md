@@ -343,17 +343,135 @@ them. Once complete, the draft converts into the existing strict
 `ProblemIntent`; the compiler, tool validation, and approval gate remain
 unchanged.
 
-The new turn schema is 2,315 characters rather than 235,234—about a 99% reduction.
-Six multi-turn evaluation seeds cover disordered descriptions, corrections, load
-negotiation, unsupported reformulation, conflicts, and casually stated numerical
-preferences.
+The strict live transport is 2,729 characters rather than 235,234—about a 99%
+reduction. Six multi-turn evaluation seeds cover disordered descriptions,
+corrections, load negotiation, unsupported reformulation, conflicts, and casually
+stated numerical preferences.
 
-This foundation is tested but is not yet the live Streamlit entry path. The next
-engineering work is to connect it to a capable conversation adapter, add
-error-specific repair, compare model/reasoning settings on the same evaluations,
-and migrate the UI only after the conversations pass.
+The provider-independent foundation and live Responses adapter are now tested.
+The released Streamlit entry path has not yet migrated from the v1 interpreter.
 
-## 14. How we will continue learning
+## 14. What the live formulation implementation taught us
+
+### 14.1 A small Pydantic schema can still be an invalid provider schema
+
+The first live Responses call failed with HTTP 400 before the model ran.
+`DraftUpdate.value` used Pydantic's unconstrained `JsonValue`, which generated an
+empty `{}` definition. That was convenient for deterministic per-path validation,
+but OpenAI strict structured output requires a real type at every schema node.
+
+Expanding every possible support, traction, spring, and recursive region value
+back into the transport would have recreated the original huge schema. We instead
+added a separate strict transport: `value_json` is a string containing one JSON
+value. Application code decodes it immediately and sends the result through the
+existing path-specific Pydantic validator. This kept the API schema small without
+weakening the domain boundary.
+
+The general lesson is that domain models and provider transport models need not
+be identical. Their conversion must be explicit and tested.
+
+### 14.2 Conversation state needs a canonical truth anchor
+
+The live adapter uses the [OpenAI Responses API conversation-state
+mechanism](https://developers.openai.com/api/docs/guides/conversation-state) with
+`previous_response_id` and all-turn reasoning context. That lets later turns
+benefit from earlier model work. It does not make provider memory authoritative.
+
+Every request also contains the application-owned canonical draft. The response
+ID is stored as opaque adapter state. If it expires or is unavailable, the adapter
+makes exactly one recovery call with full application history. Generic SDK retries
+remain disabled.
+
+Responses are stored to support continuation under the provider's documented
+retention behavior. This is a conscious data-lifecycle tradeoff for the local
+learning tool; the typed local draft remains the durable project state.
+
+### 14.3 A conversational draft must be more granular than final solver input
+
+The first live disordered conversation exposed a design flaw. The user supplied
+“ten long and half as tall” on one turn and the lower-left origin on the next.
+Because the draft had only `domain.bounds`, the model had to either lose the
+dimensions or invent an origin. It invented an origin as an assumption and then
+asked the user to reconfirm dimensions and a clamp already supplied.
+
+The fix was to add formulation-only facts:
+
+- `domain.origin`, `domain.width`, and `domain.height`;
+- `support_edges` for relative full-vector clamps; and
+- `mesh.long_short_divisions` for orientation-independent mesh preferences.
+
+Deterministic finalization resolves these into the unchanged strict
+`ProblemIntent` only when enough geometry exists. It also detects conflicts
+between complete bounds and component geometry and detects ambiguous long/short
+counts for a square.
+
+The lesson is that the conversation's intermediate representation must match the
+order in which people naturally provide information. A strict final schema is not
+automatically a good partial-draft schema.
+
+### 14.4 Unsupported features are not always a terminal conversation
+
+For a requested point load, the model correctly explained that point and
+total-force semantics are unsupported, offered a finite distributed traction
+segment, and asked for width and traction magnitude. Our initial turn invariant
+rejected that response because it allowed `unsupported_features` only when
+`declared_state="unsupported"`.
+
+That confused “this feature is unsupported” with “this conversation must stop.”
+The draft now allows capability limits to remain visible while status stays
+`gathering`. A truly incompatible request can still use the terminal unsupported
+state, and a later user turn can reformulate it.
+
+### 14.5 Repair must receive new information
+
+When deterministic merge rejects a value, provenance, or confirmation, the model
+now receives:
+
+- the rejected complete turn;
+- stable issue codes and field paths;
+- deterministic error messages;
+- the same current user message; and
+- the unchanged canonical draft.
+
+It gets one bounded attempt to return a complete replacement patch for that user
+turn. This differs from the v1 retry, which repeated the identical request and
+therefore gave the model no reason to produce a better result.
+
+### 14.6 Evaluations must grade meaning, not internal storage
+
+After semantic `support_edges` were added, both models produced a valid left-edge
+clamp and passed real mesh validation. The first evaluator still reported failure
+because it looked only for the old absolute `supports` draft path. The grader was
+testing an implementation detail rather than the finalized strict intent.
+
+We corrected the grader to inspect semantic outcomes after deterministic
+resolution. Evaluation code can become stale just like application code; a
+failed check must be diagnosed before it is treated as a model failure.
+
+### 14.7 Model selection needs measured conversations
+
+The versioned v2 gate makes ten turns across six scenarios and never calls the
+solver. Ready drafts must compile and pass mesh-backed validation.
+
+Both GPT-5.6 Sol at medium reasoning and GPT-5.6 Terra at medium reasoning passed
+all six. The full comparison measured:
+
+| Setting | Input tokens | Output tokens | Reasoning tokens | Total latency |
+| --- | ---: | ---: | ---: | ---: |
+| Sol / medium | 30,938 | 4,576 | 1,613 | 75.347 s |
+| Terra / medium | 30,306 | 2,784 | 236 | 34.688 s |
+
+Terra is the measured lower-latency option on this suite. Sol remains the default
+because six scenarios establish a capability floor, not broad equivalence on
+unseen engineering conversations. This decision can change when a larger
+evaluation provides stronger evidence.
+
+This implementation follows the official guidance to use
+[Responses for multi-turn reasoning](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.6#migrate-to-gpt-56),
+[structured Pydantic output](https://developers.openai.com/api/docs/guides/structured-outputs),
+lean prompts, and explicit approval boundaries.
+
+## 15. How we will continue learning
 
 We will use these rules for the remaining work:
 
@@ -372,7 +490,7 @@ We will use these rules for the remaining work:
 The next lesson should come from making the live formulation conversation work
 well—not from keeping the design artificially simple.
 
-## 15. Milestone trail
+## 16. Milestone trail
 
 This condensed trail connects the lessons above to the implementation order:
 
@@ -392,6 +510,8 @@ This condensed trail connects the lessons above to the implementation order:
 - **2026-07-27** — diagnosed the limitations of the one-shot conversational
   phase and added the provider-independent multi-turn draft, provenance, revision,
   readiness, finalization, and evaluation foundation.
-- **Next** — implement and measure the live conversation/repair adapter, then
-  migrate the UI while retaining all existing solver and approval boundaries.
-
+- **2026-07-27** — implemented the live Responses adapter, persisted continuation,
+  bounded structured repair, strict transport conversion, semantic partial facts,
+  v2 live graders, and the measured Sol/Terra comparison.
+- **Next** — migrate the UI while retaining the existing compiler, validator,
+  contained solver, evidence, and explicit approval boundaries.

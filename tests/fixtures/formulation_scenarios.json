@@ -1,5 +1,5 @@
 {
-  "version": "formulation-evals-v1",
+  "version": "formulation-evals-v2",
   "scenarios": [
     {
       "id": "disordered_cantilever_over_two_turns",
@@ -13,6 +13,7 @@
         "retain facts from turn one",
         "ask for missing material and precise load",
         "interpret half as tall as height five",
+        "retain dimensions without inventing an origin",
         "do not start a solver"
       ]
     },
@@ -54,6 +55,7 @@
       "expected_final_status": "gathering",
       "required_behaviors": [
         "identify 3D as unsupported on turn one",
+        "offer a supported 2D reformulation without silently changing physics",
         "accept the supported reformulation on turn two",
         "ask for the remaining 2D problem facts"
       ]
@@ -69,6 +71,7 @@
       "required_behaviors": [
         "identify the conflicting width",
         "ask whether width 10 or right coordinate 12 is authoritative",
+        "do not overwrite width 10 before the conflict is resolved",
         "keep nonconflicting facts"
       ]
     },
@@ -80,8 +83,9 @@
       ],
       "expected_final_status": "gathering",
       "required_behaviors": [
-        "record mesh divisions as an explicit preference",
+        "record mesh.long_short_divisions as an explicit preference",
         "cite the current user turn as provenance",
+        "defer x/y mapping until the domain orientation is known",
         "do not invent missing physics"
       ]
     }

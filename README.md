@@ -6,8 +6,9 @@ an LLM to invent numerical facts.
 
 The project combines:
 
-- **CrewAI + an OpenAI model** for the two places where language judgment helps:
-  interpreting a request and organizing result evidence.
+- **CrewAI plus the OpenAI Responses API** for the places where language judgment
+  helps: conversational formulation, current v1 interpretation, and organizing
+  result evidence.
 - **Typed deterministic Python** for defaults, workflow transitions, validation,
   execution authority, and factual rendering.
 - **FEniTop/FEniCSx** for finite-element analysis and topology optimization.
@@ -121,30 +122,44 @@ creates immutable fact IDs; the LLM may only organize allowed IDs under allowed
 headings. Code then checks completeness and renders the original fact text. An
 unknown, duplicated, or omitted required fact makes the explanation fail closed.
 
-### Conversational formulation redesign in progress
+### Conversational formulation adapter ready; UI migration pending
 
 The released UI still uses the v1 one-shot interpreter. A post-v1 redesign is
 being built test-first so ordinary problem descriptions can be developed over
 several turns without weakening the solver boundary.
 
-The first completed slice is provider-independent:
+The provider-independent core and live model adapter are now complete:
 
 - `ProblemDraft` retains partial facts, their source turn, a short modeling
   rationale, and whether each fact was explicit, derived, assumed, or confirmed.
+- Formulation-only facts retain width, height, origin, relative support edges, and
+  long/short-side mesh preferences before enough geometry exists to map them into
+  solver coordinates.
 - A small `FormulationTurn` contains a natural assistant message, changed fields,
   up to three questions, and a conversation-state hint.
 - Deterministic code validates each changed field, rejects unsupported provenance,
-  records corrections, identifies missing or unconfirmed facts, and alone decides
+  records corrections, gives rejected patches back to the model for one bounded
+  repair attempt, identifies missing or unconfirmed facts, and alone decides
   whether the draft is ready.
 - Assumptions remain visible and cannot cross into strict `ProblemIntent` until the
   user confirms them.
 - The final draft conversion reuses the existing strict intent, compiler,
   validation, and approval path.
+- `OpenAIResponsesFormulationAgent` uses strict Pydantic output, medium reasoning,
+  `previous_response_id`, and persisted all-turn reasoning. The canonical draft
+  is included on every call, and an expired continuation triggers exactly one
+  full-history recovery; generic provider retries remain disabled.
+- The strict API transport is 2,729 characters versus 235,234 for the v1 one-shot
+  schema. Arbitrary field values travel as compact JSON strings and are decoded
+  immediately through the existing deterministic field validators.
 
-This reduces the model-facing turn schema from 235,234 characters in the v1
-one-shot path to 2,315 characters. The next slice will connect a live
-conversation-state adapter and repair loop; the current solver UI is unchanged
-until that integration passes multi-turn evaluations.
+The versioned six-scenario billed evaluation covers disordered input, correction,
+unsupported-load negotiation, 3D reformulation, conflicting geometry, and casual
+mesh preferences. Sol/medium and Terra/medium both pass all six; Sol/medium is the
+quality-first default while Terra/medium is a measured lower-latency option.
+Responses are stored to support continuation under OpenAI's default response
+retention; the application draft remains the durable source of truth. The next
+slice is the Streamlit/orchestrator migration.
 
 ### Execution boundary
 
@@ -181,6 +196,8 @@ Set your key in the untracked file:
 ```dotenv
 OPENAI_API_KEY=your-real-api-key
 OPENAI_MODEL=gpt-5.6-terra
+OPENAI_FORMULATION_MODEL=gpt-5.6-sol
+OPENAI_FORMULATION_REASONING_EFFORT=medium
 ```
 
 `.gitignore` excludes `.env` and `.env.*` while allowing `.env.example`.
@@ -311,6 +328,21 @@ docker compose run --rm -T fenitop \
 It calls real models and incurs API cost, so it is deliberately excluded from the
 default test suite.
 
+The post-v1 live formulation evaluation makes multiple billed Responses API calls,
+never starts a solver, and compile/mesh-validates every scenario that reaches
+review:
+
+```bash
+docker compose run --rm -T fenitop \
+  python scripts/formulation_live_eval.py \
+  --models gpt-5.6-sol gpt-5.6-terra \
+  --reasoning-effort medium \
+  --summary-only
+```
+
+Use `--scenarios <id> ...` to run a focused subset. The fixture and deterministic
+graders live under `tests/fixtures` and `scripts/formulation_live_eval.py`.
+
 ## Supported v1 scope
 
 The natural-language workflow supports:
@@ -387,12 +419,13 @@ docker compose run --rm -T fenitop python -m pip check
 docker compose run --rm -T fenitop pytest -q
 ```
 
-Current checkpoint: **177 tests plus 109 numerical subtests pass**. The suite
+Current checkpoint: **192 tests plus 109 numerical subtests pass**. The suite
 includes schema and adversarial-input tests, real compliance/mechanism baselines,
 finite-difference sensitivities, geometry validation, resource calibration,
 process timeout/cancellation/crash behavior, secret scrubbing, path and
 idempotency cases, manifest integrity, CLI/MCP composition, mocked LLM workflow
-branches, fact-preserving explanation checks, and Streamlit application tests.
+branches, conversational repair/continuation behavior, semantic partial-draft
+resolution, fact-preserving explanation checks, and Streamlit application tests.
 
 The focused test tiers and exact tool contracts are documented in
 [`docs/tool-reference.md`](docs/tool-reference.md).

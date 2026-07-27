@@ -9,22 +9,25 @@ Last updated: 2026-07-27
 
 - **Release**: v1 remains complete, but the Phase 1 interaction is now scheduled
   for a post-v1 redesign before further feature work.
-- **Verification**: 177 tests plus 109 numerical subtests pass in the pinned Docker
+- **Verification**: 192 tests plus 109 numerical subtests pass in the pinned Docker
   image. Compose config, dependency checks, Streamlit health, the no-credit
   idempotent harness, and documentation links have also passed.
 - **Scope**: personal learning/demo workflow, not engineering design software or a
   hosted multi-user service. This scope does not authorize intentionally weak or
   toy implementations: functional quality and measured reliability are the
   learning objective.
-- **Just implemented**: a durable `LEARNING.md` that reconstructs the project from
-  tool preparation through orchestration and the conversational redesign,
-  including failed approaches and real regression examples. The immediately
-  preceding code slice is the model-independent conversational-formulation
-  foundation: typed partial drafts, revision provenance, compact turn patches,
-  deterministic readiness/finalization, and six multi-turn evaluation seeds. Its
-  turn schema is 2,315 characters versus 235,234 for the current one-shot schema.
-- **Next action**: select and implement the live conversation adapter plus repair
-  loop, then migrate the Streamlit entry path only after the multi-turn evals pass.
+- **Just implemented**: the live OpenAI Responses formulation adapter and bounded
+  deterministic repair loop. Persisted continuation state is subordinate to the
+  canonical `ProblemDraft`; an unavailable continuation gets one full-history
+  recovery, while generic SDK retries remain disabled. Formulation-only facts now
+  retain partial geometry, relative support edges, and long/short mesh counts
+  without inventing coordinates. A 2,729-character strict transport replaces the
+  invalid open-JSON value node and immediately decodes values into deterministic
+  validators. The v2 six-scenario live gate passes on both Sol/medium and
+  Terra/medium, including real compilation and mesh validation for ready drafts.
+- **Next action**: migrate the Streamlit/orchestration entry path to
+  `ConversationFormulator`, display the evolving draft, assumptions, capability
+  limits, and repair-specific failures, then reverify the explicit approval gate.
   The released UI still uses the v1 interpreter.
 
 ## 1. Product
@@ -70,8 +73,8 @@ contract. They do not expand the agent-safe surface.
 
 ## 3. Architecture
 
-- **LLM roles**: typed intent interpretation and constrained evidence
-  organization only.
+- **LLM roles**: post-v1 conversational formulation, current v1 typed intent
+  interpretation, and constrained evidence organization only.
 - **Deterministic authority**: compilation, defaults, validation, state
   transitions, side effects, retry bounds, and factual rendering.
 - **Hands**: `fenitop.tools` exposes `validate_config`, `run_topopt`, and
@@ -82,10 +85,12 @@ contract. They do not expand the agent-safe surface.
   credential-free child process.
 - **Handoffs**: exact Pydantic objects and a checksum-verified `RunManifest`; no
   prose or LLM copying between stages.
-- **Post-v1 formulation foundation**: model turn patches merge into an
-  application-owned partial draft with source-turn provenance. Model-declared
-  readiness is advisory; deterministic readiness and final strict intent
-  validation remain authoritative. This foundation is not yet the live UI path.
+- **Post-v1 live formulation**: Responses API turn patches merge into an
+  application-owned partial draft with source-turn provenance. Provider
+  continuation improves multi-turn reasoning but never replaces canonical draft
+  state. Model-declared readiness is advisory; deterministic repair, readiness,
+  semantic resolution, and final strict intent validation remain authoritative.
+  This adapter is not yet the live UI path.
 
 ## 4. Deterministic Defaults
 
@@ -119,6 +124,12 @@ element edge. Resource validation remains authoritative.
 - Optional model-produced mesh/filter/iteration values are reset unless a
   deterministic text check finds that the user explicitly requested that class of
   preference.
+- Formulation-only width/height/origin, relative support edges, and long/short
+  mesh counts become solver intent only through deterministic resolution.
+- Responses continuation IDs are application state, not execution authority.
+  Stored provider state may recover conversation reasoning, but every call
+  receives the canonical draft and an expired ID gets only one full-context
+  fallback.
 - Successful solver evidence is immutable; deterministic derived plots are not
   added to the original manifest.
 - SHA-256 protects local evidence consistency, not authenticity against an actor
@@ -126,7 +137,7 @@ element edge. Resource validation remains authoritative.
 
 ## 6. LLM Configuration
 
-The recorded v1 configuration is:
+The released v1 configuration remains:
 
 - CrewAI `1.15.6`
 - OpenAI `gpt-5.6-terra`
@@ -138,6 +149,26 @@ The recorded v1 configuration is:
 
 The model is environment-configurable through `OPENAI_MODEL`. Model smoke/golden
 checks are manual and billed; the deterministic test suite uses canned results.
+
+The post-v1 formulation configuration is:
+
+- direct OpenAI Responses API through `openai==2.48.0`;
+- `gpt-5.6-sol` through `OPENAI_FORMULATION_MODEL`;
+- medium reasoning through `OPENAI_FORMULATION_REASONING_EFFORT`;
+- `reasoning.context=all_turns` and `previous_response_id`;
+- prompt `formulation-system-v1`;
+- strict `OpenAIFormulationTurn` output with a 2,729-character schema;
+- SDK retries disabled, one application-owned deterministic patch repair, and one
+  continuation-expiry full-history recovery; and
+- `store=true` for response continuation under provider retention, while the local
+  typed draft remains authoritative.
+
+On the v2 six-scenario gate, both Sol/medium and Terra/medium passed. Across ten
+turns, Sol recorded 30,938 input, 4,576 output, and 1,613 reasoning tokens in
+75.347 seconds; Terra recorded 30,306 input, 2,784 output, and 236 reasoning tokens
+in 34.688 seconds. Sol remains the default because the current suite establishes
+a minimum capability bar rather than broad out-of-distribution equivalence;
+Terra/medium is a measured lower-latency option.
 
 ## 7. Testing
 
@@ -151,7 +182,10 @@ docker compose run --rm -T fenitop pytest -q
 Coverage includes schemas, adversarial requests, physics and mesh validation,
 resource calibration, numerical baselines and sensitivities, contained process
 lifecycle, secret scrubbing, idempotency, manifest/artifact integrity, CLI/MCP
-transports, workflow branches, fact preservation, and Streamlit behavior.
+transports, workflow branches, Responses continuation/recovery, deterministic
+patch repair, partial semantic draft resolution, fact preservation, and Streamlit
+behavior. `scripts/formulation_live_eval.py` is a separate billed gate and never
+starts the solver.
 
 ## 8. Post-v1 Backlog
 
@@ -170,6 +204,27 @@ tests, and explicit user decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — Responses API with a quality-first model default**: use the
+  Responses API, `previous_response_id`, persisted all-turn reasoning, strict
+  output, and the application-owned canonical draft for post-v1 formulation.
+  Default to Sol/medium; expose Terra/medium as a measured faster option. Both
+  passed all six v2 conversations. The full comparison measured Sol at 75.347
+  seconds and Terra at 34.688 seconds over ten turns, with similar input but fewer
+  Terra output/reasoning tokens. Reason: Responses directly supports the
+  multi-turn reasoning behavior this role needs; the small suite proves a floor
+  but is not broad enough to trade away the flagship model's capability by
+  default.
+- **2026-07-27 — Formulation facts must preserve unresolved semantics**: retain
+  domain origin/width/height, relative support edges, and long/short mesh counts
+  before mapping them into strict solver coordinates. Allow unsupported features
+  to be named while a supported reformulation remains in `gathering`. Use a
+  strict `value_json` transport because Pydantic's unconstrained `JsonValue`
+  produced an OpenAI-invalid empty schema; decode immediately through the existing
+  field validators. Reason: live evaluations showed that monolithic bounds forced
+  invented origins and repeated questions, x/y mesh fields could not honestly
+  retain relative preferences, negotiable point loads did not fit a terminal
+  unsupported state, and the initial live call failed before inference with
+  `invalid_json_schema`.
 - **2026-07-27 — Solve the real problem and preserve the learning**: “learning
   project” describes the purpose and deployment scope, not a reason to keep the
   implementation artificially simple. Choose frameworks, APIs, models, and
@@ -249,13 +304,11 @@ Reverse chronological; final decisions only.
 
 ## 10. Open Questions
 
-- Should conversational formulation continue through CrewAI's current
-  Chat-Completions adapter with application-owned history, or use the OpenAI
-  Responses API for native conversation state and persisted reasoning while
-  retaining CrewAI elsewhere? Select by the shared conversation evaluations, not
-  by a requirement to keep the architecture simple or framework-pure.
-- Which measured quality/cost point should be selected after representative
-  conversation evals: Terra at medium/high reasoning, or Sol at medium reasoning?
+- No architecture question blocks the next slice.
+- During UI migration, decide how much revision/provenance detail is shown by
+  default versus placed in an inspectable expander. Assumptions, unresolved
+  conflicts, selected defaults, and the final approval question must always remain
+  visible.
 
 ## 11. Implementation Checklist
 
@@ -275,7 +328,7 @@ Reverse chronological; final decisions only.
       merge, revision history, readiness, strict final conversion, and eval seeds.
 - [x] Learning record — tool preparation, numerical containment, orchestration,
       real regression lessons, and quality-first development principle.
-- [ ] Post-v1 live formulation — conversation-state adapter, structured repair
+- [x] Post-v1 live formulation — conversation-state adapter, structured repair
       feedback, and measured Terra/Sol comparison.
 - [ ] Post-v1 UI migration — conversational draft display, error-specific UX,
       final compile/validate handoff, and approval regression verification.

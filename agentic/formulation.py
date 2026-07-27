@@ -1,8 +1,8 @@
-"""Typed, model-independent foundation for conversational problem formulation.
+"""Typed, model-independent core for conversational problem formulation.
 
-The language model will eventually propose a small patch on each turn.  This
-module keeps the durable draft, provenance, merge rules, readiness decision, and
-strict final conversion in deterministic application code.
+The language model proposes a small patch on each turn. This module keeps the
+durable draft, provenance, merge rules, readiness decision, and strict final
+conversion in deterministic application code.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from agentic.intent import (
     MeshPreferences,
     OpenFraction,
     OptimizationPreferences,
+    Point2D,
     PositiveFiniteNumber,
     PositiveInt,
     ProblemIntent,
@@ -40,9 +41,13 @@ from agentic.intent import (
 DraftPath = Literal[
     "problem_type",
     "domain.bounds",
+    "domain.origin",
+    "domain.width",
+    "domain.height",
     "material.young_modulus",
     "material.poisson_ratio",
     "supports",
+    "support_edges",
     "tractions",
     "body_force",
     "volume_fraction",
@@ -50,6 +55,7 @@ DraftPath = Literal[
     "input_spring",
     "output_spring",
     "mesh.divisions",
+    "mesh.long_short_divisions",
     "mesh.cell_type",
     "optimization.filter_radius",
     "optimization.max_iter",
@@ -66,9 +72,13 @@ SessionStatus = Literal[
 DRAFT_PATHS: tuple[DraftPath, ...] = (
     "problem_type",
     "domain.bounds",
+    "domain.origin",
+    "domain.width",
+    "domain.height",
     "material.young_modulus",
     "material.poisson_ratio",
     "supports",
+    "support_edges",
     "tractions",
     "body_force",
     "volume_fraction",
@@ -76,16 +86,15 @@ DRAFT_PATHS: tuple[DraftPath, ...] = (
     "input_spring",
     "output_spring",
     "mesh.divisions",
+    "mesh.long_short_divisions",
     "mesh.cell_type",
     "optimization.filter_radius",
     "optimization.max_iter",
 )
 COMMON_REQUIRED_PATHS: tuple[DraftPath, ...] = (
     "problem_type",
-    "domain.bounds",
     "material.young_modulus",
     "material.poisson_ratio",
-    "supports",
     "volume_fraction",
 )
 MECHANISM_REQUIRED_PATHS: tuple[DraftPath, ...] = (
@@ -181,10 +190,6 @@ class FormulationTurn(StrictFormulationModel):
             raise ValueError(
                 "unsupported turns must identify at least one unsupported feature."
             )
-        if self.declared_state != "unsupported" and self.unsupported_features:
-            raise ValueError(
-                "unsupported_features are allowed only for an unsupported turn."
-            )
         return self
 
 
@@ -268,16 +273,46 @@ class ConversationMessage(StrictFormulationModel):
         return value.strip()
 
 
+class FormulationRepair(StrictFormulationModel):
+    """Deterministic feedback for a corrected attempt on the same user turn."""
+
+    attempt: int = Field(ge=2, le=3)
+    rejected_turn: FormulationTurn
+    issues: Annotated[tuple[PatchIssue, ...], Field(min_length=1)]
+
+
+class FormulationModelState(StrictFormulationModel):
+    """Opaque continuation owned by a model adapter, never by solver logic."""
+
+    adapter: str
+    continuation_id: str
+
+    @field_validator("adapter", "continuation_id")
+    @classmethod
+    def _nonblank_state(cls, value):
+        if not value.strip():
+            raise ValueError("model-state values must not be blank.")
+        return value.strip()
+
+
 class FormulationRequest(StrictFormulationModel):
     turn_number: int = Field(ge=1)
     user_message: str
     draft: ProblemDraft
     history: tuple[ConversationMessage, ...]
+    model_state: FormulationModelState | None = None
+    repair: FormulationRepair | None = None
+
+
+class FormulationAgentResponse(StrictFormulationModel):
+    turn: FormulationTurn
+    model_state: FormulationModelState | None = None
 
 
 class FormulationSession(StrictFormulationModel):
     draft: ProblemDraft = Field(default_factory=ProblemDraft)
     messages: tuple[ConversationMessage, ...] = ()
+    model_state: FormulationModelState | None = None
     status: SessionStatus = "gathering"
     questions: tuple[str, ...] = ()
     unsupported_features: tuple[str, ...] = ()
@@ -292,7 +327,10 @@ class FormulationStep(StrictFormulationModel):
 
 
 class FormulationAgent(Protocol):
-    def formulate(self, request: FormulationRequest) -> FormulationTurn: ...
+    def formulate(
+        self,
+        request: FormulationRequest,
+    ) -> FormulationAgentResponse | FormulationTurn: ...
 
 
 class DraftNotReadyError(ValueError):
@@ -316,15 +354,21 @@ SupportList = Annotated[list[FixedSupportIntent], Field(min_length=1)]
 TractionList = list[TractionIntent]
 MeshDivisions = tuple[PositiveInt, PositiveInt]
 CellType = Literal["quadrilateral", "triangle"]
+RectangleEdge = Literal["left", "right", "bottom", "top"]
+SupportEdges = Annotated[list[RectangleEdge], Field(min_length=1)]
 ProblemType = Literal["minimize_compliance", "compliant_mechanism"]
 PoissonRatio = Annotated[FiniteNumber, Field(gt=-1.0, lt=0.5)]
 
 _FIELD_ADAPTERS: dict[DraftPath, TypeAdapter] = {
     "problem_type": TypeAdapter(ProblemType),
     "domain.bounds": TypeAdapter(Bounds2D),
+    "domain.origin": TypeAdapter(Point2D),
+    "domain.width": TypeAdapter(PositiveFiniteNumber),
+    "domain.height": TypeAdapter(PositiveFiniteNumber),
     "material.young_modulus": TypeAdapter(PositiveFiniteNumber),
     "material.poisson_ratio": TypeAdapter(PoissonRatio),
     "supports": TypeAdapter(SupportList),
+    "support_edges": TypeAdapter(SupportEdges),
     "tractions": TypeAdapter(TractionList),
     "body_force": TypeAdapter(Vector2D),
     "volume_fraction": TypeAdapter(OpenFraction),
@@ -332,6 +376,7 @@ _FIELD_ADAPTERS: dict[DraftPath, TypeAdapter] = {
     "input_spring": TypeAdapter(MechanismSpringIntent),
     "output_spring": TypeAdapter(MechanismSpringIntent),
     "mesh.divisions": TypeAdapter(MeshDivisions),
+    "mesh.long_short_divisions": TypeAdapter(MeshDivisions),
     "mesh.cell_type": TypeAdapter(CellType),
     "optimization.filter_radius": TypeAdapter(PositiveFiniteNumber),
     "optimization.max_iter": TypeAdapter(PositiveInt),
@@ -513,13 +558,101 @@ def merge_formulation_turn(
     )
 
 
-def _intent_payload(draft: ProblemDraft) -> dict:
+def _resolved_bounds(
+    values: dict[DraftPath, JsonValue],
+) -> tuple[list[list[int | float]] | None, list[str]]:
+    stored = values.get("domain.bounds")
+    component_paths = (
+        "domain.origin",
+        "domain.width",
+        "domain.height",
+    )
+    has_all_components = all(path in values for path in component_paths)
+    derived = None
+    if has_all_components:
+        origin = values["domain.origin"]
+        width = values["domain.width"]
+        height = values["domain.height"]
+        derived = [
+            [origin[0], origin[1]],
+            [origin[0] + width, origin[1] + height],
+        ]
+
+    errors = []
+    if stored is not None and derived is not None and stored != derived:
+        errors.append(
+            "domain.bounds conflicts with domain.origin/width/height."
+        )
+    return stored or derived, errors
+
+
+def _support_for_edge(
+    edge: str,
+    bounds: list[list[int | float]],
+) -> dict:
+    (x0, y0), (x1, y1) = bounds
+    axis, value = {
+        "left": ("x", x0),
+        "right": ("x", x1),
+        "bottom": ("y", y0),
+        "top": ("y", y1),
+    }[edge]
+    return {
+        "region": {
+            "op": "plane",
+            "axis": axis,
+            "value": value,
+        }
+    }
+
+
+def _resolved_mesh_divisions(
+    values: dict[DraftPath, JsonValue],
+    bounds: list[list[int | float]] | None,
+) -> tuple[JsonValue | None, list[str]]:
+    direct = values.get("mesh.divisions")
+    relative = values.get("mesh.long_short_divisions")
+    if relative is None:
+        return direct, []
+    if bounds is None:
+        return direct, []
+
+    (x0, y0), (x1, y1) = bounds
+    width = float(x1) - float(x0)
+    height = float(y1) - float(y0)
+    long_count, short_count = relative
+    if width > height:
+        mapped = [long_count, short_count]
+    elif height > width:
+        mapped = [short_count, long_count]
+    elif long_count == short_count:
+        mapped = [long_count, short_count]
+    else:
+        return direct, [
+            "mesh.long_short_divisions is ambiguous for a square domain; "
+            "specify x/y divisions."
+        ]
+
+    if direct is not None and direct != mapped:
+        return direct, [
+            "mesh.divisions conflicts with mesh.long_short_divisions."
+        ]
+    return direct or mapped, []
+
+
+def _intent_payload(
+    draft: ProblemDraft,
+    *,
+    bounds: list[list[int | float]] | None = None,
+) -> dict:
     values = draft.values()
+    if bounds is None:
+        bounds, _ = _resolved_bounds(values)
     payload: dict = {}
     if "problem_type" in values:
         payload["problem_type"] = values["problem_type"]
-    if "domain.bounds" in values:
-        payload["domain"] = {"bounds": values["domain.bounds"]}
+    if bounds is not None:
+        payload["domain"] = {"bounds": bounds}
     material = {}
     if "material.young_modulus" in values:
         material["young_modulus"] = values["material.young_modulus"]
@@ -527,8 +660,16 @@ def _intent_payload(draft: ProblemDraft) -> dict:
         material["poisson_ratio"] = values["material.poisson_ratio"]
     if material:
         payload["material"] = material
+    supports = list(values.get("supports", []))
+    if bounds is not None:
+        supports.extend(
+            _support_for_edge(edge, bounds)
+            for edge in values.get("support_edges", [])
+        )
+    if supports:
+        payload["supports"] = supports
+
     for path in (
-        "supports",
         "tractions",
         "body_force",
         "volume_fraction",
@@ -540,8 +681,9 @@ def _intent_payload(draft: ProblemDraft) -> dict:
             payload[path] = values[path]
 
     mesh = {}
-    if "mesh.divisions" in values:
-        mesh["divisions"] = values["mesh.divisions"]
+    divisions, _ = _resolved_mesh_divisions(values, bounds)
+    if divisions is not None:
+        mesh["divisions"] = divisions
     if "mesh.cell_type" in values:
         mesh["cell_type"] = values["mesh.cell_type"]
     if mesh:
@@ -565,6 +707,12 @@ def assess_draft(draft: ProblemDraft) -> DraftReadiness:
     """Determine readiness independently of the model's declared turn state."""
     values = draft.values()
     missing = [path for path in COMMON_REQUIRED_PATHS if path not in values]
+    bounds, semantic_errors = _resolved_bounds(values)
+    if bounds is None:
+        missing.append("domain.bounds")
+    if "supports" not in values and "support_edges" not in values:
+        missing.append("supports")
+
     problem_type = values.get("problem_type")
     if problem_type == "compliant_mechanism":
         missing.extend(
@@ -584,10 +732,13 @@ def assess_draft(draft: ProblemDraft) -> DraftReadiness:
     unconfirmed = tuple(
         fact.path for fact in draft.facts if fact.basis == "assumption"
     )
-    semantic_errors: list[str] = []
+    _, mesh_errors = _resolved_mesh_divisions(values, bounds)
+    semantic_errors.extend(mesh_errors)
     if not missing and not unconfirmed:
         try:
-            _PROBLEM_ADAPTER.validate_python(_intent_payload(draft))
+            _PROBLEM_ADAPTER.validate_python(
+                _intent_payload(draft, bounds=bounds)
+            )
         except ValidationError as exc:
             semantic_errors.append(_validation_message(exc))
 
@@ -610,8 +761,16 @@ def finalize_draft(draft: ProblemDraft) -> ProblemIntent:
 class ConversationFormulator:
     """Advance real user/assistant turns while deterministic state remains canonical."""
 
-    def __init__(self, agent: FormulationAgent):
+    def __init__(
+        self,
+        agent: FormulationAgent,
+        *,
+        max_repair_attempts: int = 1,
+    ):
+        if not 0 <= max_repair_attempts <= 2:
+            raise ValueError("max_repair_attempts must be between 0 and 2.")
         self._agent = agent
+        self._max_repair_attempts = max_repair_attempts
 
     def start(self, user_message: str) -> FormulationStep:
         return self.advance(FormulationSession(), user_message)
@@ -625,19 +784,42 @@ class ConversationFormulator:
         if not message:
             raise ValueError("user_message must not be blank.")
         turn_number = session.draft.turn_count + 1
-        request = FormulationRequest(
-            turn_number=turn_number,
-            user_message=message,
-            draft=session.draft,
-            history=session.messages,
-        )
-        turn = self._agent.formulate(request)
-        merge = merge_formulation_turn(
-            session.draft,
-            turn,
-            user_message=message,
-            turn_number=turn_number,
-        )
+        model_state = session.model_state
+        repair = None
+        for attempt in range(1, self._max_repair_attempts + 2):
+            request = FormulationRequest(
+                turn_number=turn_number,
+                user_message=message,
+                draft=session.draft,
+                history=session.messages,
+                model_state=model_state,
+                repair=repair,
+            )
+            raw_response = self._agent.formulate(request)
+            response = (
+                raw_response
+                if isinstance(raw_response, FormulationAgentResponse)
+                else FormulationAgentResponse(
+                    turn=raw_response,
+                    model_state=model_state,
+                )
+            )
+            turn = response.turn
+            model_state = response.model_state
+            merge = merge_formulation_turn(
+                session.draft,
+                turn,
+                user_message=message,
+                turn_number=turn_number,
+            )
+            if not merge.issues or attempt > self._max_repair_attempts:
+                break
+            repair = FormulationRepair(
+                attempt=attempt + 1,
+                rejected_turn=turn,
+                issues=merge.issues,
+            )
+
         readiness = assess_draft(merge.draft)
 
         intent = None
@@ -667,6 +849,7 @@ class ConversationFormulator:
         next_session = FormulationSession(
             draft=merge.draft,
             messages=messages,
+            model_state=model_state,
             status=status,
             questions=turn.questions,
             unsupported_features=turn.unsupported_features,
