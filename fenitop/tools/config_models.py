@@ -16,9 +16,16 @@ from pydantic import (
 )
 
 from fenitop.regions import NoneRegion, RegionSpec, parse_region
+from fenitop.tools.mechanical_units import (
+    ForceUnitName,
+    LengthUnitName,
+    MechanicalUnitContext,
+    StressUnitName,
+)
 from fenitop.tools.schema import FieldError
 
-CONFIG_SCHEMA_VERSION = "1.1"
+CONFIG_SCHEMA_VERSION = "2.0"
+LEGACY_CONFIG_SCHEMA_VERSION = "1.1"
 
 
 def _finite(value):
@@ -64,7 +71,7 @@ class MeshModel(StrictModel):
         return self
 
 
-class DirichletBC(StrictModel):
+class LegacyDirichletBC(StrictModel):
     marker: RegionSpec = Field(
         description="DSL region for a full-vector fixed support."
     )
@@ -89,7 +96,7 @@ class DirichletBC(StrictModel):
         return value
 
 
-class TractionBC(StrictModel):
+class LegacyTractionBC(StrictModel):
     value: Vector2D = Field(
         description="Distributed boundary traction [tx,ty] per unit out-of-plane thickness."
     )
@@ -100,7 +107,7 @@ class TractionBC(StrictModel):
     def _bounded_region(cls, value):
         return parse_region(value)
 
-class FemModel(StrictModel):
+class LegacyFemModel(StrictModel):
     analysis_type: Literal["plane_strain"] = Field(
         default="plane_strain",
         description="The v1 constitutive assumption is 2D plane strain.",
@@ -115,8 +122,8 @@ class FemModel(StrictModel):
     )
     young_modulus: PositiveFiniteNumber = 100.0
     poisson_ratio: FiniteNumber
-    dirichlet_bcs: Annotated[list[DirichletBC], Field(min_length=1)]
-    traction_bcs: list[TractionBC] = Field(default_factory=list)
+    dirichlet_bcs: Annotated[list[LegacyDirichletBC], Field(min_length=1)]
+    traction_bcs: list[LegacyTractionBC] = Field(default_factory=list)
     body_force: Vector2D = (0.0, 0.0)
 
     @field_validator("poisson_ratio")
@@ -185,8 +192,161 @@ OptimizationModel = Annotated[
 ]
 
 
+class LegacyAgentSafeConfig(StrictModel):
+    """Read-only parser used solely by the deterministic 1.1 migration."""
+
+    schema_version: Literal[LEGACY_CONFIG_SCHEMA_VERSION]
+    mesh: MeshModel
+    fem: LegacyFemModel
+    opt: OptimizationModel
+
+
+class LegacyConsistentUnits(StrictModel):
+    kind: Literal["legacy_consistent"] = "legacy_consistent"
+    thickness_value: Literal[1.0] = 1.0
+
+
+class ExplicitMechanicalUnits(StrictModel):
+    kind: Literal["explicit"] = "explicit"
+    length_unit: LengthUnitName
+    force_unit: ForceUnitName
+    stress_unit: StressUnitName
+    thickness_value: Literal[1.0] = 1.0
+
+    def context(self) -> MechanicalUnitContext:
+        return MechanicalUnitContext(
+            length_unit=self.length_unit,
+            force_unit=self.force_unit,
+            stress_unit=self.stress_unit,
+            thickness_value=self.thickness_value,
+        )
+
+
+MechanicalUnits = Annotated[
+    Union[LegacyConsistentUnits, ExplicitMechanicalUnits],
+    Field(discriminator="kind"),
+]
+
+
+class FractionEdgeInterval(StrictModel):
+    kind: Literal["fraction"] = "fraction"
+    start: Annotated[FiniteNumber, Field(ge=0, le=1)]
+    end: Annotated[FiniteNumber, Field(ge=0, le=1)]
+
+    @model_validator(mode="after")
+    def _positive_ordered_interval(self):
+        if self.end <= self.start:
+            raise ValueError("end must be greater than start.")
+        return self
+
+
+class CoordinateEdgeInterval(StrictModel):
+    kind: Literal["coordinate"] = "coordinate"
+    start: FiniteNumber
+    end: FiniteNumber
+
+    @model_validator(mode="after")
+    def _positive_ordered_interval(self):
+        if self.end <= self.start:
+            raise ValueError("end must be greater than start.")
+        return self
+
+
+EdgeInterval = Annotated[
+    Union[FractionEdgeInterval, CoordinateEdgeInterval],
+    Field(discriminator="kind"),
+]
+
+
+class RectangleEdgeSelector(StrictModel):
+    kind: Literal["rectangle_edge"] = "rectangle_edge"
+    edge: Literal["left", "right", "bottom", "top"]
+    interval: EdgeInterval
+
+
+class ExpertRegionSelector(StrictModel):
+    kind: Literal["expert_region"] = "expert_region"
+    region: RegionSpec
+
+    @field_validator("region")
+    @classmethod
+    def _bounded_region(cls, value):
+        return parse_region(value)
+
+
+BoundarySelector = Annotated[
+    Union[RectangleEdgeSelector, ExpertRegionSelector],
+    Field(discriminator="kind"),
+]
+
+
+class FixedBoundaryCondition(StrictModel):
+    bc_id: str = Field(pattern=r"^S[1-9][0-9]*$")
+    kind: Literal["fixed"] = "fixed"
+    selector: BoundarySelector
+    value: Vector2D = (0.0, 0.0)
+
+    @field_validator("value")
+    @classmethod
+    def _zero_only(cls, value):
+        if any(float(component) != 0.0 for component in value):
+            raise ValueError(
+                "agent-safe 2.0 supports only full-vector zero clamps [0,0]."
+            )
+        return value
+
+
+class UniformTractionBoundaryCondition(StrictModel):
+    bc_id: str = Field(pattern=r"^L[1-9][0-9]*$")
+    kind: Literal["uniform_traction"]
+    selector: BoundarySelector
+    traction: Vector2D
+
+
+class UniformResultantBoundaryCondition(StrictModel):
+    bc_id: str = Field(pattern=r"^L[1-9][0-9]*$")
+    kind: Literal["uniform_resultant"]
+    selector: BoundarySelector
+    resultant: Vector2D
+
+
+BoundaryCondition = Annotated[
+    Union[
+        FixedBoundaryCondition,
+        UniformTractionBoundaryCondition,
+        UniformResultantBoundaryCondition,
+    ],
+    Field(discriminator="kind"),
+]
+
+
+class FemModel(StrictModel):
+    analysis_type: Literal["plane_strain"] = "plane_strain"
+    young_modulus: PositiveFiniteNumber = 100.0
+    poisson_ratio: FiniteNumber
+    boundary_conditions: Annotated[list[BoundaryCondition], Field(min_length=1)]
+    body_force: Vector2D = (0.0, 0.0)
+
+    @field_validator("poisson_ratio")
+    @classmethod
+    def _poisson_range(cls, value):
+        if not -1.0 < value < 0.5:
+            raise ValueError(f"must satisfy -1 < nu < 0.5; got {value}.")
+        return value
+
+    @model_validator(mode="after")
+    def _boundary_identity_and_support(self):
+        ids = [bc.bc_id for bc in self.boundary_conditions]
+        if len(ids) != len(set(ids)):
+            raise ValueError("boundary-condition IDs must be unique.")
+        if not any(bc.kind == "fixed" for bc in self.boundary_conditions):
+            raise ValueError("at least one fixed boundary condition is required.")
+        return self
+
+
 class AgentSafeConfig(StrictModel):
     schema_version: Literal[CONFIG_SCHEMA_VERSION] = CONFIG_SCHEMA_VERSION
+    units: MechanicalUnits
     mesh: MeshModel
     fem: FemModel
     opt: OptimizationModel
@@ -200,11 +360,94 @@ class AgentSafeConfig(StrictModel):
                 f"opt.filter_radius={self.opt.filter_radius:g} must be smaller "
                 f"than the domain's minimum extent ({extent:g})."
             )
+        if (
+            isinstance(self.units, LegacyConsistentUnits)
+            and any(
+                bc.kind == "uniform_resultant"
+                for bc in self.fem.boundary_conditions
+            )
+        ):
+            raise ValueError(
+                "uniform_resultant requires explicit length, force, and stress "
+                "units; legacy_consistent units cannot verify the conversion."
+            )
         return self
+
+
+AgentSafeConfigInput = Annotated[
+    Union[AgentSafeConfig, LegacyAgentSafeConfig],
+    Field(discriminator="schema_version"),
+]
 
 # Transitional import name used by existing internal callers. It now denotes the
 # strict agent-safe schema; it is not the former lambda/path-capable model.
 ConfigModel = AgentSafeConfig
+
+
+def migrate_legacy_config(config: dict) -> dict:
+    """Convert a validated 1.1 config to canonical 2.0 without model help."""
+    legacy = LegacyAgentSafeConfig.model_validate({
+        **config,
+        "schema_version": config.get(
+            "schema_version", LEGACY_CONFIG_SCHEMA_VERSION
+        ),
+    })
+    conditions: list[dict] = []
+    for index, bc in enumerate(legacy.fem.dirichlet_bcs, start=1):
+        conditions.append({
+            "bc_id": f"S{index}",
+            "kind": "fixed",
+            "selector": {
+                "kind": "expert_region",
+                "region": bc.marker.model_dump(mode="json"),
+            },
+            "value": list(bc.value),
+        })
+    for index, bc in enumerate(legacy.fem.traction_bcs, start=1):
+        conditions.append({
+            "bc_id": f"L{index}",
+            "kind": "uniform_traction",
+            "selector": {
+                "kind": "expert_region",
+                "region": bc.locator.model_dump(mode="json"),
+            },
+            "traction": list(bc.value),
+        })
+    return {
+        "schema_version": CONFIG_SCHEMA_VERSION,
+        "units": {"kind": "legacy_consistent"},
+        "mesh": legacy.mesh.model_dump(mode="json"),
+        "fem": {
+            "analysis_type": legacy.fem.analysis_type,
+            "young_modulus": legacy.fem.young_modulus,
+            "poisson_ratio": legacy.fem.poisson_ratio,
+            "boundary_conditions": conditions,
+            "body_force": list(legacy.fem.body_force),
+        },
+        "opt": legacy.opt.model_dump(mode="json"),
+    }
+
+
+def parse_agent_safe_config(
+    config: AgentSafeConfig | LegacyAgentSafeConfig | dict,
+) -> tuple[AgentSafeConfig, bool]:
+    """Parse canonical 2.0 or deterministically migrate legacy 1.1."""
+    if isinstance(config, AgentSafeConfig):
+        return config, False
+    if isinstance(config, LegacyAgentSafeConfig):
+        config = config.model_dump(mode="json")
+    version = config.get("schema_version")
+    looks_legacy = (
+        version == LEGACY_CONFIG_SCHEMA_VERSION
+        or (
+            version is None
+            and isinstance(config.get("fem"), dict)
+            and "dirichlet_bcs" in config["fem"]
+        )
+    )
+    if looks_legacy:
+        return AgentSafeConfig.model_validate(migrate_legacy_config(config)), True
+    return AgentSafeConfig.model_validate(config), False
 
 
 def compile_solver_config(
@@ -216,11 +459,7 @@ def compile_solver_config(
     output_interval: int = 20,
 ) -> dict:
     """Deterministically compile safe physics into the legacy solver dictionary."""
-    model = (
-        config
-        if isinstance(config, AgentSafeConfig)
-        else AgentSafeConfig.model_validate(config)
-    )
+    model, _ = parse_agent_safe_config(config)
     problem_type = model.opt.problem_type
     if solver_profile == "auto":
         solver_profile = (
@@ -270,19 +509,33 @@ def compile_solver_config(
         "fem": {
             "young's modulus": model.fem.young_modulus,
             "poisson's ratio": model.fem.poisson_ratio,
+            "unit_context": model.units.model_dump(mode="json"),
             "dirichlet_bcs": [
                 {
-                    "marker": bc.marker.model_dump(mode="json"),
+                    "bc_id": bc.bc_id,
+                    "selector": bc.selector.model_dump(mode="json"),
                     "value": list(bc.value),
                 }
-                for bc in model.fem.dirichlet_bcs
+                for bc in model.fem.boundary_conditions
+                if bc.kind == "fixed"
             ],
             "traction_bcs": [
                 {
-                    "value": list(bc.value),
-                    "locator": bc.locator.model_dump(mode="json"),
+                    "bc_id": bc.bc_id,
+                    "quantity_kind": (
+                        "traction"
+                        if bc.kind == "uniform_traction"
+                        else "resultant"
+                    ),
+                    "value": list(
+                        bc.traction
+                        if bc.kind == "uniform_traction"
+                        else bc.resultant
+                    ),
+                    "selector": bc.selector.model_dump(mode="json"),
                 }
-                for bc in model.fem.traction_bcs
+                for bc in model.fem.boundary_conditions
+                if bc.kind in {"uniform_traction", "uniform_resultant"}
             ],
             "body_force": list(model.fem.body_force),
             "quadrature_degree": 2,
@@ -334,6 +587,17 @@ def compute_warnings(model: AgentSafeConfig) -> list[str]:
     if model.fem.poisson_ratio < 0:
         warnings.append(
             f"fem.poisson_ratio={model.fem.poisson_ratio} is auxetic; confirm this is intentional."
+        )
+    if model.fem.poisson_ratio >= 0.49:
+        ratio = (
+            2 * float(model.fem.poisson_ratio)
+            / (1 - 2 * float(model.fem.poisson_ratio))
+        )
+        warnings.append(
+            f"fem.poisson_ratio={model.fem.poisson_ratio} is near "
+            "incompressible in plane strain "
+            f"(lambda/mu={ratio:.3g}); low-order displacement elements may "
+            "exhibit volumetric locking, so interpret the result cautiously."
         )
     aspect_ratio = max(hx / hy, hy / hx)
     if aspect_ratio > 5:

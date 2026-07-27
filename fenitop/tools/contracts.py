@@ -6,7 +6,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from fenitop.tools.config_models import AgentSafeConfig, CONFIG_SCHEMA_VERSION
+from fenitop.tools.config_models import (
+    AgentSafeConfig,
+    AgentSafeConfigInput,
+    CONFIG_SCHEMA_VERSION,
+)
 from fenitop.tools.schema import TOOL_CONTRACT_VERSION
 
 
@@ -52,6 +56,24 @@ class EntityMatchRecord(ContractModel):
     entity_kind: Literal["facet", "node", "cell"]
     count: int
     bounds: tuple[tuple[float, float], tuple[float, float]]
+    bc_id: str | None = None
+    selector_kind: Literal["rectangle_edge", "expert_region"] | None = None
+    requested_extent: tuple[float, float] | None = None
+    resolved_extent: tuple[float, float] | None = None
+    measure: float | None = None
+    centroid: tuple[float, float] | None = None
+    outward_normal: tuple[float, float] | None = None
+    resolution_error: float | None = None
+    resolution_warning: str | None = None
+    quantity_kind: Literal["traction", "resultant"] | None = None
+    input_vector: tuple[float, float] | None = None
+    effective_traction: tuple[float, float] | None = None
+    integrated_resultant: tuple[float, float] | None = None
+    length_unit: str | None = None
+    force_unit: str | None = None
+    stress_unit: str | None = None
+    thickness_value: float | None = None
+    thickness_unit: str | None = None
 
 
 class GeometryReport(ContractModel):
@@ -93,11 +115,11 @@ class ManifestArtifactRecord(ContractModel):
 
 
 class ValidateConfigRequest(ContractModel):
-    config: AgentSafeConfig
+    config: AgentSafeConfigInput
 
 
 class RunTopoptRequest(ContractModel):
-    config: AgentSafeConfig
+    config: AgentSafeConfigInput
 
 
 class ResourceLimits(ContractModel):

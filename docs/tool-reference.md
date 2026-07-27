@@ -7,8 +7,9 @@ machine sources of truth are `fenitop/tools/contracts.py`,
 
 Current versions:
 
-- tool contract: `4.0.0`
-- agent-safe config schema: `1.1`
+- tool contract: `5.0.0`
+- canonical agent-safe config schema: `2.0`
+- accepted legacy input schema: `1.1` through deterministic migration
 - successful-run manifest: `1.0`
 
 ## 1. Scope and trust boundary
@@ -38,10 +39,10 @@ hardcoded Python regions, but those are not agent-tool capabilities.
 |---|---|---|
 | Domain | One axis-aligned 2D rectangle, quadrilateral or triangular cells | No arbitrary CAD, holes in the mesh, 3D, shells, or remeshing |
 | Constitutive model | Isotropic linear elasticity under plane strain | Unit out-of-plane thickness is fixed |
-| Units | Any one self-consistent user unit system | The tool does not convert or infer units |
+| Units | Explicit length, force, and stress units with fixed one-length-unit thickness; migrated 1.1 inputs retain an unlabeled consistent-unit sentinel | Pint validates and converts dimensions; missing unit labels are never invented |
 | Material | SIMP interpolation using `young_modulus`, `poisson_ratio`, `penalty`, and positive ersatz `epsilon` | Single isotropic material plus void approximation |
-| Support | Full-vector zero displacement on matched boundary facets | No roller/component-only support and no nonzero prescribed displacement |
-| Traction | Constant distributed boundary traction vector integrated over every matched boundary facet, per unit out-of-plane thickness | It is not a total force; overlapping traction regions are rejected rather than summed |
+| Support | Stable `S…` full-vector zero clamp on an expert region or rectangle-edge interval | No roller/component-only support and no nonzero prescribed displacement |
+| Boundary load | Stable `L…` constant effective traction or uniform total resultant on an expert region or rectangle-edge interval | Overlapping load facets are rejected rather than summed; exact point loads remain unsupported |
 | Body force | Constant force-per-volume vector integrated over the domain, with unit thickness | It is not a total force |
 | Passive zones | Cell-center regions forced near solid (`0.99`) or void (`0.01`) | Regions must match cells, remain disjoint, and preserve required neighborhoods |
 | Density filter | Helmholtz length-scale filter; `filter_radius` uses the same length unit as mesh coordinates | It must be smaller than the smallest domain extent; sub-element radii warn |
@@ -69,6 +70,57 @@ mesh-independent total spring constant.
 The region DSL supports `plane`, `range`, `circle`, `all`, `none`, `and`, `or`,
 and `not`. It is strictly 2D, finite, bounded in depth and node count, and rejects
 unknown fields. Regions describe geometric selection; they do not execute code.
+
+### 2.1 Canonical boundary representation
+
+Schema 2.0 stores all supports and loads in `fem.boundary_conditions`. Every
+condition has a strict stable ID and discriminated `kind`:
+
+- `S…` + `fixed` + zero `value`;
+- `L…` + `uniform_traction` + `traction=[tx,ty]`; or
+- `L…` + `uniform_resultant` + `resultant=[Fx,Fy]`.
+
+A selector is either:
+
+- `expert_region`, containing the bounded region DSL; or
+- `rectangle_edge`, containing `edge` and a positive interval. A `fraction`
+  interval uses `[0,1]` along the edge; a `coordinate` interval uses the
+  configured length unit.
+
+Schema 1.1 remains accepted by direct, CLI, and MCP inputs. Deterministic code
+validates it, allocates `S1…`/`L1…` in list order, wraps its regions as
+`expert_region`, and returns only canonical 2.0 as `normalized_config`. Its unit
+labels remain intentionally unspecified, so migration preserves existing
+traction behavior but cannot represent a total resultant.
+
+### 2.2 Shared facet resolution and total-force formula
+
+Validation and FEM execution call the same mesh resolver. For a rectangle-edge
+selector it orders actual edge facets, selects the contiguous facets whose
+midpoints lie in the requested interval, and uses one closest facet with a
+warning when a positive sub-facet interval contains no midpoint. It reports:
+
+- requested and resolved physical extents;
+- facet count and bounds;
+- summed boundary measure;
+- length-weighted centroid;
+- outward normal;
+- maximum endpoint resolution error; and
+- any closest-facet warning.
+
+For an explicit unit context, traction values use the configured stress unit and
+resultant values use the configured force unit. With fixed thickness equal to one
+configured length unit:
+
+```text
+effective traction = resultant / (resolved boundary measure × thickness)
+```
+
+Pint converts `force / length²` into the configured stress unit. Validation then
+integrates the effective traction over the same resolved measure and thickness
+and reports the reconstructed resultant. Execution repeats the same conversion
+through the shared resolver and fails if that round trip is not numerically
+consistent.
 
 ## 3. Tool sequence and result envelopes
 
@@ -101,10 +153,16 @@ Key success fields:
 - `estimated_cost`: element/node/DOF/design counts, evaluated states, linear solves,
   work, memory, output, wall estimate, solver profile, and risk band.
 - `geometry_report`: total mesh entities, rigid-body rank, and a record for every
-  support/load/spring/passive region with entity kind, count, and physical bounds.
+  support/load/spring/passive region. Boundary records also include stable BC ID,
+  selector kind, requested/resolved extent, count, measure, centroid, normal,
+  resolution error/warning, effective traction, integrated resultant, thickness,
+  and unit labels where available.
 
 An `ok` result means the config is valid under the current trusted policy. It is
 not a guarantee that iterative optimization will converge to a good topology.
+For plane strain, `poisson_ratio >= 0.49` produces a visible
+near-incompressibility/volumetric-locking warning based on the Lamé ratio; values
+strictly below the mathematical limit `0.5` are not silently rejected.
 
 ### `run_topopt`
 

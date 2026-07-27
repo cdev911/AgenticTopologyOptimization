@@ -386,6 +386,16 @@ it cannot become a traction until the Package 3 mesh resolver supplies the actua
 loaded-boundary measure. This core is deterministic and tested, but is not yet
 the live OpenAI/finalization path.
 
+Package 3 upgrades the prepared tool boundary to canonical
+`AgentSafeConfig 2.0` and tool contract `5.0.0`. Stable `S…`/`L…` boundary
+conditions now carry expert-region or rectangle-edge selectors and distinguish
+uniform effective traction from uniform total resultant. One shared mesh resolver
+is used by both validation and FEM execution; its evidence includes requested and
+resolved extents, facet count, measure, centroid, normal, resolution error, and
+load conversion. Legacy 1.1 inputs are still accepted through deterministic
+migration, while successful validation returns canonical 2.0. This tool behavior
+is ready, but first-class conversational finalization remains Package 4.
+
 ## Supported natural-language scope
 
 The natural-language workflow supports:
@@ -410,7 +420,8 @@ This demo intentionally does not support:
 - 3D or non-rectangular geometry in the agent-safe workflow;
 - plane stress, nonlinear, dynamic, thermal, or multi-material physics;
 - roller/component-wise supports or nonzero prescribed displacement;
-- point loads or total-force semantics;
+- point loads, or total-force semantics through the current live conversational
+  finalizer (the lower-level 2.0 tool contract now supports a uniform resultant);
 - user-provided code/lambdas in serialized regions;
 - parallel/MPI execution through `run_topopt`;
 - multiple simultaneous solves; or
@@ -462,7 +473,7 @@ docker compose run --rm -T fenitop python -m pip check
 docker compose run --rm -T fenitop pytest -q
 ```
 
-Current checkpoint: **254 tests plus 181 subtests pass**. The suite
+Current checkpoint: **266 tests plus 194 subtests pass**. The suite
 includes schema and adversarial-input tests, real compliance/mechanism baselines,
 finite-difference sensitivities, geometry validation, resource calibration,
 process timeout/cancellation/crash behavior, secret scrubbing, path and

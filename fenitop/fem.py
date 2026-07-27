@@ -27,6 +27,11 @@ from dolfinx.fem import (functionspace, Function, Constant,
 
 from fenitop.utility import create_mechanism_vectors
 from fenitop.utility import LinearProblem
+from fenitop.boundary_resolver import resolve_boundary
+from fenitop.tools.mechanical_units import (
+    MechanicalUnitContext,
+    resultant_to_traction,
+)
 
 
 def _as_bc_value(value, dim):
@@ -75,7 +80,11 @@ def form_fem(fem, opt):
     for bc_spec in fem.get("dirichlet_bcs", []):
         marker = bc_spec.get("marker", fem.get("disp_bc"))
         value = bc_spec.get("value", [0.0] * dim)
-        facets = locate_entities_boundary(mesh, fdim, marker)
+        facets = (
+            resolve_boundary(mesh, bc_spec["selector"]).facets
+            if "selector" in bc_spec
+            else locate_entities_boundary(mesh, fdim, marker)
+        )
         if len(facets) == 0:
             continue
         bc_value = _as_bc_value(value, dim)
@@ -90,9 +99,44 @@ def form_fem(fem, opt):
         )
 
     tractions, facets, markers = [], [], []
-    for marker, (traction, traction_bc) in enumerate(fem.get("traction_bcs", [])):
+    unit_spec = fem.get("unit_context", {"kind": "legacy_consistent"})
+    unit_context = (
+        MechanicalUnitContext(
+            length_unit=unit_spec["length_unit"],
+            force_unit=unit_spec["force_unit"],
+            stress_unit=unit_spec["stress_unit"],
+            thickness_value=unit_spec.get("thickness_value", 1.0),
+        )
+        if unit_spec.get("kind") == "explicit"
+        else None
+    )
+    for marker, load_spec in enumerate(fem.get("traction_bcs", [])):
+        if isinstance(load_spec, dict):
+            resolved = resolve_boundary(mesh, load_spec["selector"])
+            traction = tuple(load_spec["value"])
+            if load_spec.get("quantity_kind") == "resultant":
+                traction, integrated = resultant_to_traction(
+                    traction,
+                    boundary_measure=resolved.measure,
+                    context=unit_context,
+                )
+                if not np.allclose(
+                    integrated,
+                    load_spec["value"],
+                    rtol=1e-12,
+                    atol=1e-12,
+                ):
+                    raise ValueError(
+                        f"Integrated resultant verification failed for "
+                        f"{load_spec.get('bc_id', 'boundary load')}."
+                    )
+            current_facets = resolved.facets
+        else:
+            traction, traction_bc = load_spec
+            current_facets = locate_entities_boundary(
+                mesh, fdim, traction_bc
+            )
         tractions.append(Constant(mesh, np.asarray(traction, dtype=float)))
-        current_facets = locate_entities_boundary(mesh, fdim, traction_bc)
         facets.extend(current_facets)
         markers.extend([marker,] * len(current_facets))
     facets = np.array(facets, dtype=np.int32)

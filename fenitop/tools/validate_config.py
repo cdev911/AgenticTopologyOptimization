@@ -8,6 +8,7 @@ from pydantic import BaseModel, ValidationError
 from fenitop.tools.config_models import (
     AgentSafeConfig,
     compute_warnings,
+    parse_agent_safe_config,
     translate_validation_error,
 )
 from fenitop.tools.contracts import (
@@ -56,13 +57,25 @@ def _rigid_body_rank(constrained_rows: list[tuple[float, float, int]]) -> int:
 def _semantic_errors(model: AgentSafeConfig) -> list[FieldError]:
     """Cross-field rules that need more than one independently valid field."""
     errors: list[FieldError] = []
-    nonzero_tractions = [
-        index
-        for index, bc in enumerate(model.fem.traction_bcs)
-        if any(float(component) != 0.0 for component in bc.value)
+    loads = [
+        bc
+        for bc in model.fem.boundary_conditions
+        if bc.kind in {"uniform_traction", "uniform_resultant"}
+    ]
+    nonzero_loads = [
+        bc
+        for bc in loads
+        if any(
+            float(component) != 0.0
+            for component in (
+                bc.traction
+                if bc.kind == "uniform_traction"
+                else bc.resultant
+            )
+        )
     ]
     if (
-        not nonzero_tractions
+        not nonzero_loads
         and all(float(component) == 0.0 for component in model.fem.body_force)
     ):
         errors.append(
@@ -72,13 +85,20 @@ def _semantic_errors(model: AgentSafeConfig) -> list[FieldError]:
                 "At least one nonzero distributed traction or body force is required.",
             )
         )
-    for index, bc in enumerate(model.fem.traction_bcs):
-        if all(float(component) == 0.0 for component in bc.value):
+    for bc in loads:
+        value = (
+            bc.traction if bc.kind == "uniform_traction" else bc.resultant
+        )
+        if all(float(component) == 0.0 for component in value):
             errors.append(
                 FieldError(
-                    f"config.fem.traction_bcs[{index}].value",
-                    "zero_traction",
-                    "A distributed traction entry must have a nonzero vector.",
+                    f"config.fem.boundary_conditions.{bc.bc_id}",
+                    (
+                        "zero_traction"
+                        if bc.kind == "uniform_traction"
+                        else "zero_resultant"
+                    ),
+                    "A distributed boundary load must have a nonzero vector.",
                 )
             )
     if model.opt.problem_type == "compliant_mechanism":
@@ -103,12 +123,20 @@ def _check_geometry(
     """Validate every solver-relevant region against the exact mesh entities."""
     import numpy as np
     from dolfinx.fem import functionspace
-    from dolfinx.mesh import locate_entities_boundary
     from mpi4py import MPI
     from scipy.spatial import cKDTree
 
+    from fenitop.boundary_resolver import (
+        BoundaryResolutionError,
+        resolve_boundary,
+    )
     from fenitop.config import build_mesh
     from fenitop.regions import compile_region
+    from fenitop.tools.mechanical_units import (
+        MechanicalUnitContext,
+        resultant_to_traction,
+        traction_to_resultant,
+    )
 
     errors: list[FieldError] = []
     warnings: list[str] = []
@@ -116,12 +144,10 @@ def _check_geometry(
     mesh = build_mesh(config["mesh"], comm=MPI.COMM_SELF)
     cell_dimension = mesh.topology.dim
     facet_dimension = cell_dimension - 1
-    mesh.topology.create_connectivity(facet_dimension, 0)
-    facet_to_vertex = mesh.topology.connectivity(facet_dimension, 0)
+    from dolfinx.mesh import locate_entities_boundary
+
     boundary_facets = locate_entities_boundary(
-        mesh,
-        facet_dimension,
-        lambda x: np.full(x.shape[1], True, dtype=bool),
+        mesh, facet_dimension, lambda x: np.full(x.shape[1], True, dtype=bool)
     )
     total_facets = len(boundary_facets)
     total_cells = mesh.topology.index_map(cell_dimension).size_local
@@ -149,62 +175,152 @@ def _check_geometry(
             }
         )
 
-    def facet_vertex_indices(facets) -> np.ndarray:
-        indices: set[int] = set()
-        for facet in facets:
-            indices.update(int(v) for v in facet_to_vertex.links(int(facet)))
-        return np.asarray(sorted(indices), dtype=np.int32)
-
-    def check_facets(path: str, spec):
+    def check_facets(path: str, selector, *, bc=None):
         try:
-            facets = locate_entities_boundary(
-                mesh, facet_dimension, compile_region(spec)
-            )
-        except Exception as exc:
+            resolved = resolve_boundary(mesh, selector)
+        except BoundaryResolutionError as exc:
             errors.append(
                 FieldError(
                     path,
-                    "geometry_marker_error",
-                    f"Region failed while matching boundary facets: {exc}",
+                    exc.code,
+                    str(exc),
                 )
             )
             return None
-        vertices = facet_vertex_indices(facets)
-        coords = mesh.geometry.x[vertices] if vertices.size else np.empty((0, 3))
-        add_record(path, "facet", coords, count=len(facets))
-        if len(facets) == 0:
-            errors.append(
-                FieldError(
-                    path,
-                    "region_matches_no_facets",
-                    f"Region matched 0 of {total_facets} boundary facets.",
-                )
-            )
-            return None
-        return np.asarray(facets, dtype=np.int32)
+        record = {
+            "path": path,
+            "entity_kind": "facet",
+            "count": int(len(resolved.facets)),
+            "bounds": resolved.bounds,
+            "bc_id": bc["bc_id"] if bc else None,
+            "selector_kind": selector["kind"],
+            "requested_extent": resolved.requested_extent,
+            "resolved_extent": resolved.resolved_extent,
+            "measure": resolved.measure,
+            "centroid": resolved.centroid,
+            "outward_normal": resolved.outward_normal,
+            "resolution_error": resolved.resolution_error,
+            "resolution_warning": resolved.warning,
+            "quantity_kind": None,
+            "input_vector": None,
+            "effective_traction": None,
+            "integrated_resultant": None,
+            "length_unit": None,
+            "force_unit": None,
+            "stress_unit": None,
+            "thickness_value": None,
+            "thickness_unit": None,
+        }
+        if resolved.warning:
+            warnings.append(f"{bc['bc_id']}: {resolved.warning}")
+        entities.append(record)
+        return resolved, record
+
+    def resolved_node_mask(resolved) -> np.ndarray:
+        selected_coords = np.asarray(
+            mesh.geometry.x[resolved.node_indices, :2], dtype=float
+        )
+        if not len(selected_coords):
+            return np.zeros(total_nodes, dtype=bool)
+        (x0, y0), (x1, y1) = config["mesh"]["bounds"]
+        tolerance = 1e-9 * max(1.0, x1 - x0, y1 - y0)
+        distances, _ = cKDTree(selected_coords).query(node_coords[:, :2])
+        return distances <= tolerance
 
     support_facets: list[np.ndarray] = []
     support_node_masks: list[np.ndarray] = []
     constrained_rows: list[tuple[float, float, int]] = []
-    for index, bc in enumerate(config["fem"]["dirichlet_bcs"]):
-        path = f"config.fem.dirichlet_bcs[{index}].marker"
-        facets = check_facets(path, bc["marker"])
-        mask = compile_region(bc["marker"])(node_coords.T)
+    conditions = config["fem"]["boundary_conditions"]
+    supports = [bc for bc in conditions if bc["kind"] == "fixed"]
+    loads = [bc for bc in conditions if bc["kind"] != "fixed"]
+    for index, bc in enumerate(supports):
+        path = f"config.fem.boundary_conditions.{bc['bc_id']}.selector"
+        checked = check_facets(path, bc["selector"], bc=bc)
+        mask = np.zeros(total_nodes, dtype=bool)
+        if checked is not None:
+            resolved, _ = checked
+            mask = resolved_node_mask(resolved)
         support_node_masks.append(mask)
-        if facets is not None:
-            support_facets.append(facets)
-            vertices = facet_vertex_indices(facets)
-            for x, y, *_ in mesh.geometry.x[vertices]:
+        if checked is not None:
+            resolved, _ = checked
+            support_facets.append(resolved.facets)
+            for x, y, *_ in mesh.geometry.x[resolved.node_indices]:
                 constrained_rows.extend([(x, y, 0), (x, y, 1)])
 
     traction_facets: list[tuple[int, np.ndarray]] = []
     traction_node_masks: list[np.ndarray] = []
-    for index, bc in enumerate(config["fem"].get("traction_bcs", [])):
-        path = f"config.fem.traction_bcs[{index}].locator"
-        facets = check_facets(path, bc["locator"])
-        traction_node_masks.append(compile_region(bc["locator"])(node_coords.T))
-        if facets is not None:
-            traction_facets.append((index, facets))
+    unit_spec = config["units"]
+    unit_context = (
+        MechanicalUnitContext(
+            length_unit=unit_spec["length_unit"],
+            force_unit=unit_spec["force_unit"],
+            stress_unit=unit_spec["stress_unit"],
+            thickness_value=unit_spec["thickness_value"],
+        )
+        if unit_spec["kind"] == "explicit"
+        else None
+    )
+    for index, bc in enumerate(loads):
+        path = f"config.fem.boundary_conditions.{bc['bc_id']}.selector"
+        checked = check_facets(path, bc["selector"], bc=bc)
+        mask = np.zeros(total_nodes, dtype=bool)
+        if checked is not None:
+            resolved, record = checked
+            mask = resolved_node_mask(resolved)
+            traction_facets.append((index, resolved.facets))
+            if bc["kind"] == "uniform_resultant":
+                effective, integrated = resultant_to_traction(
+                    tuple(bc["resultant"]),
+                    boundary_measure=resolved.measure,
+                    context=unit_context,
+                )
+                record.update({
+                    "quantity_kind": "resultant",
+                    "input_vector": bc["resultant"],
+                    "effective_traction": effective,
+                    "integrated_resultant": integrated,
+                    "length_unit": unit_context.length_unit,
+                    "force_unit": unit_context.force_unit,
+                    "stress_unit": unit_context.stress_unit,
+                    "thickness_value": unit_context.thickness_value,
+                    "thickness_unit": unit_context.thickness_unit,
+                })
+            else:
+                traction = tuple(float(v) for v in bc["traction"])
+                integrated = (
+                    traction_to_resultant(
+                        traction,
+                        boundary_measure=resolved.measure,
+                        context=unit_context,
+                    )
+                    if unit_context is not None
+                    else tuple(
+                        component * resolved.measure
+                        for component in traction
+                    )
+                )
+                record.update({
+                    "quantity_kind": "traction",
+                    "input_vector": traction,
+                    "effective_traction": traction,
+                    "integrated_resultant": integrated,
+                    "length_unit": (
+                        unit_context.length_unit if unit_context else None
+                    ),
+                    "force_unit": (
+                        unit_context.force_unit if unit_context else None
+                    ),
+                    "stress_unit": (
+                        unit_context.stress_unit if unit_context else None
+                    ),
+                    "thickness_value": (
+                        unit_context.thickness_value if unit_context else 1.0
+                    ),
+                    "thickness_unit": (
+                        unit_context.thickness_unit if unit_context else None
+                    ),
+                })
+        traction_node_masks.append(mask)
 
     for right in range(len(traction_facets)):
         for left in range(right):
@@ -216,9 +332,13 @@ def _check_geometry(
             if overlap.size:
                 errors.append(
                     FieldError(
-                        f"config.fem.traction_bcs[{right_index}].locator",
+                        (
+                            "config.fem.boundary_conditions."
+                            f"{loads[right_index]['bc_id']}.selector"
+                        ),
                         "traction_regions_overlap",
-                        f"Overlaps traction_bcs[{left_index}] on {overlap.size} facets; "
+                        f"Overlaps {loads[left_index]['bc_id']} on "
+                        f"{overlap.size} facets; "
                         "overlapping distributed tractions are rejected.",
                     )
                 )
@@ -231,7 +351,10 @@ def _check_geometry(
         if overlap.size:
             errors.append(
                 FieldError(
-                    f"config.fem.traction_bcs[{index}].locator",
+                    (
+                        "config.fem.boundary_conditions."
+                        f"{loads[index]['bc_id']}.selector"
+                    ),
                     "traction_on_fixed_support",
                     f"Traction overlaps fully fixed support on {overlap.size} facets.",
                 )
@@ -241,7 +364,7 @@ def _check_geometry(
     if constrained_rows and rank < 3:
         errors.append(
             FieldError(
-                "config.fem.dirichlet_bcs",
+                "config.fem.boundary_conditions",
                 "rigid_body_modes_unconstrained",
                 f"Fixed supports resist only rank {rank}/3 planar rigid-body modes.",
             )
@@ -249,7 +372,7 @@ def _check_geometry(
     elif not constrained_rows and not errors:
         errors.append(
             FieldError(
-                "config.fem.dirichlet_bcs",
+                "config.fem.boundary_conditions",
                 "no_support_facets",
                 "No fixed support matched a boundary facet.",
             )
@@ -384,12 +507,23 @@ def _validate_config_impl(
         "validate_config: starting (check_geometry=%s)",
         validation_policy.check_geometry,
     )
+    migrated_legacy = False
     try:
-        parsed_request = (
-            request
-            if isinstance(request, ValidateConfigRequest)
-            else ValidateConfigRequest.model_validate(request)
-        )
+        if isinstance(request, ValidateConfigRequest):
+            parsed_config, migrated_legacy = parse_agent_safe_config(
+                request.config
+            )
+            parsed_request = ValidateConfigRequest(config=parsed_config)
+        elif isinstance(request, dict) and isinstance(request.get("config"), dict):
+            parsed_config, migrated_legacy = parse_agent_safe_config(
+                request["config"]
+            )
+            parsed_request = ValidateConfigRequest.model_validate({
+                **request,
+                "config": parsed_config,
+            })
+        else:
+            parsed_request = ValidateConfigRequest.model_validate(request)
     except ValidationError as exc:
         return _response(
             error_envelope(
@@ -414,6 +548,12 @@ def _validate_config_impl(
     model = parsed_request.config
     normalized = model.model_dump(mode="json")
     warnings = compute_warnings(model)
+    if migrated_legacy:
+        warnings.append(
+            "AgentSafeConfig 1.1 was deterministically migrated to canonical "
+            "2.0; legacy consistent units remain unspecified and resultants "
+            "are therefore unavailable."
+        )
     semantic_errors = _semantic_errors(model)
     cost = estimate_cost(
         normalized["mesh"],

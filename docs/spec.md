@@ -9,7 +9,7 @@ Last updated: 2026-07-27
 
 - **Release**: v1 numerical/execution behavior remains complete, and the post-v1
   conversational Phase 1 is now the released Streamlit entry path.
-- **Verification**: 254 tests plus 181 subtests pass in the pinned Docker
+- **Verification**: 266 tests plus 194 subtests pass in the pinned Docker
   image. Compose config, dependency checks, Streamlit health, the no-credit
   idempotent harness, and documentation links have also passed.
 - **Scope**: personal learning/demo workflow, not engineering design software or a
@@ -49,9 +49,17 @@ Last updated: 2026-07-27
   state. Resultants normalize as force but remain execution-deferred until a
   mesh-resolved boundary measure is available. Legacy live finalization and the
   solver contract remain unchanged at this checkpoint.
-- **Next action**: implement BC Work Package 3: shared mesh boundary resolver,
-  versioned tool schema/evidence, resultant-to-traction conversion, and numerical
-  warnings.
+- **Just implemented**: BC Work Package 3 versions canonical `AgentSafeConfig`
+  as 2.0 and the three-tool contract as 5.0.0. It adds stable-ID fixed,
+  uniform-traction, and uniform-resultant variants; expert and rectangle-edge
+  selectors; deterministic 1.1 migration; one validation/FEM facet resolver;
+  requested/resolved extent, measure, centroid, normal, error, unit, and
+  conversion evidence; resultant round-trip verification; a traction/resultant
+  numerical-equivalence solve; and a visible plane-strain warning for
+  `poisson_ratio >= 0.49`. Live first-class BC finalization remains unchanged.
+- **Next action**: implement BC Work Package 4: compile only complete, confirmed
+  first-class BC entities into schema 2.0 and include authoritative selector/load
+  evidence in the existing approval gate.
 
 ## 1. Product
 
@@ -395,6 +403,21 @@ contract, prompt update, numerical tests, and an explicit decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — Validation and FEM share one facet-resolution policy**: version
+  canonical `AgentSafeConfig` as 2.0 and the complete tool boundary as 5.0.0.
+  Represent stable-ID fixed, uniform-traction, and uniform-resultant BCs with
+  expert-region or rectangle-edge selectors. Select rectangle-edge facets by
+  ordered midpoint inclusion; if a positive interval contains no midpoint, use
+  the single closest facet and report a warning and resolution error. Both
+  validation and FEM call the same resolver. Convert a resultant using resolved
+  measure times one-length-unit thickness, reintegrate it as a pre-run check, and
+  require explicit mechanical units. Accept schema 1.1 through deterministic
+  migration with an honest unlabeled consistent-unit sentinel, but return only
+  canonical 2.0 and disallow resultants for that sentinel. Warn at plane-strain
+  Poisson ratio 0.49 or above rather than rejecting values below 0.5. Reason:
+  duplicated selectors can drift, valid sub-facet intent should not become a
+  zero-load failure, invented migration units would be false provenance, and
+  mathematical material validity does not prevent volumetric locking.
 - **2026-07-27 — Unit normalization stops before mesh-dependent physics**: pin
   Pint 0.25.3 in the Docker runtime and represent length, force, and stress as
   provenance-bearing draft facts. Retain original display values/units beside
@@ -592,7 +615,7 @@ Reverse chronological; final decisions only.
       readiness, pending confirmations, and explicit legacy migration.
 - [x] BC Work Package 2 — typed unit context and semantic traction/resultant
       resolution.
-- [ ] BC Work Package 3 — shared mesh boundary resolver, versioned tool contract,
+- [x] BC Work Package 3 — shared mesh boundary resolver, versioned tool contract,
       enriched evidence, and numerical warnings.
 - [ ] BC Work Packages 4–6 — finalization/approval evidence, prompt adapter, and
       human BC cards/preview.

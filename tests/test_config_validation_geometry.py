@@ -49,7 +49,7 @@ class GeometryValidationTests(unittest.TestCase):
         self.assertGreater(report["total_boundary_facets"], 0)
         self.assertTrue(
             any(
-                entity["path"] == "config.fem.traction_bcs[0].locator"
+                entity.get("bc_id") == "L1"
                 and entity["count"] > 0
                 for entity in report["entities"]
             )
@@ -80,7 +80,8 @@ class GeometryValidationTests(unittest.TestCase):
         result = validate_config_tool({"config": raw}, policy=self.policy)
         self.assertEqual(result["status"], "error")
         self.assertTrue(any(
-            e["path"] == "config.fem.dirichlet_bcs[0].marker" and "matched 0 of" in e["message"]
+            e["path"] == "config.fem.boundary_conditions.S1.selector"
+            and "matched 0 of" in e["message"]
             for e in result["errors"]))
 
     def test_traction_locator_matching_zero_facets_is_rejected(self):
@@ -89,7 +90,8 @@ class GeometryValidationTests(unittest.TestCase):
         result = validate_config_tool({"config": raw}, policy=self.policy)
         self.assertEqual(result["status"], "error")
         self.assertTrue(any(
-            e["path"] == "config.fem.traction_bcs[0].locator" and "matched 0 of" in e["message"]
+            e["path"] == "config.fem.boundary_conditions.L1.selector"
+            and "matched 0 of" in e["message"]
             for e in result["errors"]))
 
     def test_zero_facet_error_takes_priority_over_estimated_cost(self):

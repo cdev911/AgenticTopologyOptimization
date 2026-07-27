@@ -21,7 +21,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import ValidationError
 
-from fenitop.tools.config_models import compile_solver_config, translate_validation_error
+from fenitop.tools.config_models import (
+    compile_solver_config,
+    parse_agent_safe_config,
+    translate_validation_error,
+)
 from fenitop.tools.contracts import (
     RunTopoptRequest,
     RunTopoptResponse,
@@ -36,6 +40,16 @@ from fenitop.tools.validate_config import validate_config_tool
 
 _MMA_WARNING_MARKER = "mma_inner_iteration_cap_reached"
 logger = get_logger(__name__)
+
+
+def _parse_run_request(request) -> RunTopoptRequest:
+    if isinstance(request, RunTopoptRequest):
+        config, _ = parse_agent_safe_config(request.config)
+        return RunTopoptRequest(config=config)
+    if isinstance(request, dict) and isinstance(request.get("config"), dict):
+        config, _ = parse_agent_safe_config(request["config"])
+        return RunTopoptRequest.model_validate({**request, "config": config})
+    return RunTopoptRequest.model_validate(request)
 
 
 def _make_run_id(output_prefix: str) -> str:
@@ -194,11 +208,7 @@ def _run_topopt_in_process(
     """
     run_policy = policy or TrustedRunPolicy()
     try:
-        parsed_request = (
-            request
-            if isinstance(request, RunTopoptRequest)
-            else RunTopoptRequest.model_validate(request)
-        )
+        parsed_request = _parse_run_request(request)
     except ValidationError as exc:
         return _response(error_envelope(
             "run_topopt",
@@ -585,11 +595,7 @@ def _run_topopt_impl(
 
     run_policy = policy or TrustedRunPolicy()
     try:
-        parsed_request = (
-            request
-            if isinstance(request, RunTopoptRequest)
-            else RunTopoptRequest.model_validate(request)
-        )
+        parsed_request = _parse_run_request(request)
     except ValidationError as exc:
         return _response(error_envelope(
             "run_topopt",

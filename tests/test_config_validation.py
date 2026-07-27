@@ -149,19 +149,19 @@ class RegionDSLTests(unittest.TestCase):
 
 class AgentSafeConfigTests(unittest.TestCase):
     def test_reference_configs_validate(self):
-        from fenitop.tools.config_models import AgentSafeConfig
+        from fenitop.tools.config_models import parse_agent_safe_config
 
         self.assertEqual(
-            AgentSafeConfig.model_validate(_load()).opt.problem_type,
+            parse_agent_safe_config(_load())[0].opt.problem_type,
             "minimize_compliance",
         )
         self.assertEqual(
-            AgentSafeConfig.model_validate(_load("mechanism_2d")).opt.problem_type,
+            parse_agent_safe_config(_load("mechanism_2d"))[0].opt.problem_type,
             "compliant_mechanism",
         )
 
     def test_rejects_lambda_markers_and_execution_capabilities(self):
-        from fenitop.tools.config_models import AgentSafeConfig
+        from fenitop.tools.config_models import parse_agent_safe_config
 
         for path, value in [
             (("fem", "dirichlet_bcs", 0, "marker"), "lambda x: True"),
@@ -176,10 +176,10 @@ class AgentSafeConfigTests(unittest.TestCase):
                 target = target[key]
             target[path[-1]] = value
             with self.subTest(path=path), self.assertRaises(ValidationError):
-                AgentSafeConfig.model_validate(config)
+                parse_agent_safe_config(config)
 
     def test_rejects_nonzero_supports_bad_vectors_and_nonfinite_values(self):
-        from fenitop.tools.config_models import AgentSafeConfig
+        from fenitop.tools.config_models import parse_agent_safe_config
 
         mutations = [
             ("support", lambda c: c["fem"]["dirichlet_bcs"][0].update(value=[0, 1])),
@@ -191,10 +191,10 @@ class AgentSafeConfigTests(unittest.TestCase):
             config = _load()
             mutate(config)
             with self.subTest(name=name), self.assertRaises(ValidationError):
-                AgentSafeConfig.model_validate(config)
+                parse_agent_safe_config(config)
 
     def test_mechanism_springs_are_named_positive_and_conditional(self):
-        from fenitop.tools.config_models import AgentSafeConfig
+        from fenitop.tools.config_models import parse_agent_safe_config
 
         positional = _load("mechanism_2d")
         positional["opt"]["in_spring"] = [
@@ -203,20 +203,20 @@ class AgentSafeConfigTests(unittest.TestCase):
             0.2,
         ]
         with self.assertRaises(ValidationError):
-            AgentSafeConfig.model_validate(positional)
+            parse_agent_safe_config(positional)
 
         nonpositive = _load("mechanism_2d")
         nonpositive["opt"]["out_spring"]["stiffness"] = 0
         with self.assertRaises(ValidationError):
-            AgentSafeConfig.model_validate(nonpositive)
+            parse_agent_safe_config(nonpositive)
 
         missing = _load("mechanism_2d")
         del missing["opt"]["in_spring"]
         with self.assertRaises(ValidationError):
-            AgentSafeConfig.model_validate(missing)
+            parse_agent_safe_config(missing)
 
     def test_rejects_open_fraction_endpoints_and_invalid_beta_schedule(self):
-        from fenitop.tools.config_models import AgentSafeConfig
+        from fenitop.tools.config_models import parse_agent_safe_config
 
         mutations = [
             ("vol_frac_zero", lambda c: c["opt"].update(vol_frac=0)),
@@ -230,7 +230,7 @@ class AgentSafeConfigTests(unittest.TestCase):
             config = _load()
             mutate(config)
             with self.subTest(name=name), self.assertRaises(ValidationError):
-                AgentSafeConfig.model_validate(config)
+                parse_agent_safe_config(config)
 
     def test_compiler_adds_only_trusted_solver_settings(self):
         from fenitop.tools.config_models import compile_solver_config

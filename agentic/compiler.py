@@ -80,43 +80,6 @@ def _record(
     return value
 
 
-def _compile_traction_region(traction, bounds) -> dict:
-    """Convert semantic relative edge segments into absolute region geometry."""
-    if traction.region is not None:
-        return traction.region
-
-    segment = traction.edge_segment
-    if segment is None:
-        raise AssertionError("traction location was validated by the intent model")
-    (x0, y0), (x1, y1) = bounds
-    if segment.edge in ("left", "right"):
-        plane_axis = "x"
-        plane_value = x0 if segment.edge == "left" else x1
-        range_axis = "y"
-        edge_min, edge_max = y0, y1
-    else:
-        plane_axis = "y"
-        plane_value = y0 if segment.edge == "bottom" else y1
-        range_axis = "x"
-        edge_min, edge_max = x0, x1
-
-    edge_length = float(edge_max - edge_min)
-    center = float(edge_min) + float(segment.center_fraction) * edge_length
-    half_span = float(segment.span_fraction) * edge_length / 2.0
-    return {
-        "op": "and",
-        "regions": [
-            {"op": "plane", "axis": plane_axis, "value": plane_value},
-            {
-                "op": "range",
-                "axis": range_axis,
-                "min": float(f"{center - half_span:.12g}"),
-                "max": float(f"{center + half_span:.12g}"),
-            },
-        ],
-    }
-
-
 def format_defaults_notice(
     profile: str,
     defaults: list[AppliedDefault] | tuple[AppliedDefault, ...],
@@ -225,15 +188,15 @@ def compile_intent(intent: ProblemIntent) -> CompilationResult:
     )
     thickness = _record(
         defaults,
-        "fem.thickness",
+        "units.thickness_value",
         1.0,
-        "the supported v1 implicit out-of-plane thickness",
+        "the supported implicit out-of-plane thickness",
     )
     units = _record(
         defaults,
-        "fem.units",
-        "consistent_user_units",
-        "preserves the user's one consistent unit system",
+        "units.kind",
+        "legacy_consistent",
+        "preserves legacy values without inventing physical unit labels",
     )
     solid_zone = _record(
         defaults,
@@ -253,23 +216,49 @@ def compile_intent(intent: ProblemIntent) -> CompilationResult:
         "divisions": divisions,
         "cell_type": cell_type,
     }
+    boundary_conditions = [
+        {
+            "bc_id": f"S{index}",
+            "kind": "fixed",
+            "selector": {
+                "kind": "expert_region",
+                "region": support.region,
+            },
+            "value": (0.0, 0.0),
+        }
+        for index, support in enumerate(intent.supports, start=1)
+    ]
+    for index, traction in enumerate(intent.tractions, start=1):
+        if traction.edge_segment is not None:
+            segment = traction.edge_segment
+            start = segment.center_fraction - segment.span_fraction / 2
+            end = segment.center_fraction + segment.span_fraction / 2
+            selector = {
+                "kind": "rectangle_edge",
+                "edge": segment.edge,
+                "interval": {
+                    "kind": "fraction",
+                    "start": start,
+                    "end": end,
+                },
+            }
+        else:
+            selector = {
+                "kind": "expert_region",
+                "region": traction.region,
+            }
+        boundary_conditions.append({
+            "bc_id": f"L{index}",
+            "kind": "uniform_traction",
+            "selector": selector,
+            "traction": traction.vector,
+        })
+
     fem = {
         "analysis_type": analysis_type,
-        "thickness": thickness,
-        "units": units,
         "young_modulus": intent.material.young_modulus,
         "poisson_ratio": intent.material.poisson_ratio,
-        "dirichlet_bcs": [
-            {"marker": support.region, "value": (0.0, 0.0)}
-            for support in intent.supports
-        ],
-        "traction_bcs": [
-            {
-                "locator": _compile_traction_region(traction, bounds),
-                "value": traction.vector,
-            }
-            for traction in intent.tractions
-        ],
+        "boundary_conditions": boundary_conditions,
         "body_force": intent.body_force,
     }
     opt: dict[str, Any] = {
@@ -305,7 +294,15 @@ def compile_intent(intent: ProblemIntent) -> CompilationResult:
             }
         )
 
-    config = AgentSafeConfig.model_validate({"mesh": mesh, "fem": fem, "opt": opt})
+    config = AgentSafeConfig.model_validate({
+        "units": {
+            "kind": units,
+            "thickness_value": thickness,
+        },
+        "mesh": mesh,
+        "fem": fem,
+        "opt": opt,
+    })
     applied = tuple(defaults)
     return CompilationResult(
         config=config,
