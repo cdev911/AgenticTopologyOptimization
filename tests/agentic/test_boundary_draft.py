@@ -554,8 +554,10 @@ class BoundaryDraftIntegrationTests(unittest.TestCase):
             result.boundary_merge.accepted[0].local_ref,
             "new_support",
         )
-        # Package 1 does not silently switch legacy finalization/readiness.
-        self.assertIn("supports", assess_draft(result.draft).missing_fields)
+        # Package 4 makes complete first-class BC entities authoritative.
+        readiness = assess_draft(result.draft)
+        self.assertNotIn("supports", readiness.missing_fields)
+        self.assertIn("external_load", readiness.missing_fields)
 
     def test_empty_boundary_patch_preserves_existing_live_behavior(self):
         result = merge_formulation_turn(

@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 import unittest
 
-from agentic.compiler import compile_intent
+from agentic.boundary_draft import (
+    BoundaryCreate,
+    BoundaryFieldInput,
+    BoundaryPatch,
+)
+from agentic.compiler import compile_formulation_draft, compile_intent
 from agentic.formulation import (
     ConversationFormulator,
     DraftNotReadyError,
@@ -79,6 +84,74 @@ class CannedFormulationAgent:
 
 
 class FormulationTests(unittest.TestCase):
+    def test_ready_first_class_bc_step_uses_finalized_draft_not_legacy_intent(self):
+        user = (
+            "Use a 10 by 4 compliance domain, E 100 Pa, nu 0.3, units m N Pa, "
+            "clamp the left edge, apply total force [0,-20] N uniformly on the "
+            "right edge, and use 40 percent material."
+        )
+
+        def boundary_field(name, value):
+            return BoundaryFieldInput(
+                field=name,
+                value=value,
+                basis="explicit",
+                source_quote=user,
+                rationale="Captured from the complete request.",
+            )
+
+        turn = FormulationTurn(
+            assistant_message="The first-class boundary problem is ready.",
+            updates=(
+                update("problem_type", "minimize_compliance", user),
+                update("domain.bounds", [[0, 0], [10, 4]], user),
+                update("material.young_modulus", 100, user),
+                update("material.poisson_ratio", 0.3, user),
+                update("units.length", "m", user),
+                update("units.force", "N", user),
+                update("units.stress", "Pa", user),
+                update("volume_fraction", 0.4, user),
+            ),
+            boundary_patch=BoundaryPatch(
+                creates=(
+                    BoundaryCreate(
+                        local_ref="new_support",
+                        kind="support",
+                        fields=(
+                            boundary_field("support.kind", "fixed_all"),
+                            boundary_field("selector.kind", "whole_edge"),
+                            boundary_field("selector.edge", "left"),
+                        ),
+                    ),
+                    BoundaryCreate(
+                        local_ref="new_load",
+                        kind="load",
+                        fields=(
+                            boundary_field("load.kind", "resultant_vector"),
+                            boundary_field("load.vector", [0, -20]),
+                            boundary_field("load.distribution", "uniform"),
+                            boundary_field("selector.kind", "whole_edge"),
+                            boundary_field("selector.edge", "right"),
+                        ),
+                    ),
+                )
+            ),
+            declared_state="ready",
+        )
+
+        step = ConversationFormulator(
+            CannedFormulationAgent([turn])
+        ).start(user)
+
+        self.assertEqual(step.session.status, "ready_for_review")
+        self.assertIsNone(step.intent)
+        self.assertIs(step.finalized_draft, step.session.draft)
+        compilation = compile_formulation_draft(step.finalized_draft)
+        self.assertEqual(
+            compilation.config.fem.boundary_conditions[1].kind,
+            "uniform_resultant",
+        )
+
     def test_turn_schema_is_small_and_supports_conversation_plus_patch(self):
         schema = json.dumps(FormulationTurn.model_json_schema())
 

@@ -54,31 +54,58 @@ def format_run_approval_request(
     validation: ValidateConfigResponse,
 ) -> str:
     """Render the exact validated proposal before any solver side effect."""
+    if validation.status != "ok" or validation.geometry_report is None:
+        raise ValueError(
+            "Run approval can only be rendered from successful mesh validation."
+        )
     config = compilation.config
     bounds = config.mesh.bounds
     divisions = config.mesh.divisions
-    supports = [
-        {
-            "bc_id": item.bc_id,
-            "selector": item.selector.model_dump(mode="json"),
-        }
-        for item in config.fem.boundary_conditions
-        if item.kind == "fixed"
-    ]
-    tractions = [
-        {
-            "bc_id": item.bc_id,
-            "kind": item.kind,
-            "selector": item.selector.model_dump(mode="json"),
-            "vector": list(
-                item.traction
-                if item.kind == "uniform_traction"
-                else item.resultant
-            ),
-        }
-        for item in config.fem.boundary_conditions
-        if item.kind != "fixed"
-    ]
+    evidence_by_id = {
+        item.bc_id: item
+        for item in validation.geometry_report.entities
+        if item.bc_id is not None
+    }
+    boundary_lines = []
+    for item in config.fem.boundary_conditions:
+        evidence = evidence_by_id.get(item.bc_id)
+        if evidence is None:
+            raise ValueError(
+                f"Validated geometry evidence is missing for {item.bc_id}."
+            )
+        requested = json.dumps(
+            item.selector.model_dump(mode="json"),
+            separators=(",", ":"),
+        )
+        resolved = (
+            f"facets={evidence.count}, extent={evidence.resolved_extent}, "
+            f"measure={evidence.measure}, centroid={evidence.centroid}, "
+            f"normal={evidence.outward_normal}"
+        )
+        if item.kind == "fixed":
+            meaning = "full-vector zero clamp"
+        else:
+            meaning = (
+                f"{evidence.quantity_kind} input={evidence.input_vector}; "
+                f"effective traction={evidence.effective_traction}; "
+                f"integrated resultant={evidence.integrated_resultant}"
+            )
+            if evidence.stress_unit is not None:
+                meaning += (
+                    f"; units length={evidence.length_unit}, "
+                    f"force={evidence.force_unit}, stress={evidence.stress_unit}, "
+                    f"thickness={evidence.thickness_value} "
+                    f"{evidence.thickness_unit}"
+                )
+        warning = (
+            f"; warning={evidence.resolution_warning}"
+            if evidence.resolution_warning
+            else ""
+        )
+        boundary_lines.append(
+            f"- {item.bc_id} `{item.kind}`: {meaning}; "
+            f"requested selector=`{requested}`; resolved {resolved}{warning}"
+        )
     estimated = validation.estimated_cost
     cost_line = (
         f"- Estimated run: {estimated.num_elements} elements, "
@@ -102,8 +129,19 @@ def format_run_approval_request(
             f"ν={config.fem.poisson_ratio}",
             f"- Material fraction: {config.opt.vol_frac}",
             f"- Filter radius: {config.opt.filter_radius}",
-            f"- Supports: `{json.dumps(supports, separators=(',', ':'))}`",
-            f"- Tractions: `{json.dumps(tractions, separators=(',', ':'))}`",
+            (
+                "- Mechanical units: unlabeled legacy-consistent values; "
+                "implicit thickness=1"
+                if config.units.kind == "legacy_consistent"
+                else (
+                    f"- Mechanical units: length={config.units.length_unit}, "
+                    f"force={config.units.force_unit}, "
+                    f"stress={config.units.stress_unit}; implicit thickness=1 "
+                    f"{config.units.length_unit}"
+                )
+            ),
+            "- Boundary conditions (requested → mesh-resolved):",
+            *boundary_lines,
             cost_line,
             "",
             "Do you approve these parameters and want me to start the run? "

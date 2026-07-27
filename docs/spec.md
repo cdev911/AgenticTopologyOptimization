@@ -9,7 +9,7 @@ Last updated: 2026-07-27
 
 - **Release**: v1 numerical/execution behavior remains complete, and the post-v1
   conversational Phase 1 is now the released Streamlit entry path.
-- **Verification**: 266 tests plus 194 subtests pass in the pinned Docker
+- **Verification**: 271 tests plus 194 subtests pass in the pinned Docker
   image. Compose config, dependency checks, Streamlit health, the no-credit
   idempotent harness, and documentation links have also passed.
 - **Scope**: personal learning/demo workflow, not engineering design software or a
@@ -40,15 +40,14 @@ Last updated: 2026-07-27
   revision history, atomic create plus targeted update/delete/confirm operations,
   typed pending confirmations, basic BC readiness, and explicit migration from
   legacy list facts. `ProblemDraft` and `FormulationTurn` carry the new optional
-  state/patch, but the current OpenAI transport and finalization path deliberately
-  remain on legacy facts until later packages.
+  state/patch; Package 4 now owns finalization, while the current OpenAI transport
+  continues to emit legacy BC facts until Package 5.
 - **Just implemented**: BC Work Package 2 pins Pint 0.25.3 in Docker and adds
   provenance-bearing length/force/stress unit facts, typed dimensional
   normalization with retained display values, deterministic global/edge-local
   direction and pressure resolution, and explicit traction versus total-resultant
-  state. Resultants normalize as force but remain execution-deferred until a
-  mesh-resolved boundary measure is available. Legacy live finalization and the
-  solver contract remain unchanged at this checkpoint.
+  state. Resultants normalize as force and remain conversion-deferred until the
+  mesh resolver supplies an authoritative boundary measure.
 - **Just implemented**: BC Work Package 3 versions canonical `AgentSafeConfig`
   as 2.0 and the three-tool contract as 5.0.0. It adds stable-ID fixed,
   uniform-traction, and uniform-resultant variants; expert and rectangle-edge
@@ -56,17 +55,25 @@ Last updated: 2026-07-27
   requested/resolved extent, measure, centroid, normal, error, unit, and
   conversion evidence; resultant round-trip verification; a traction/resultant
   numerical-equivalence solve; and a visible plane-strain warning for
-  `poisson_ratio >= 0.49`. Live first-class BC finalization remains unchanged.
-- **Next action**: implement BC Work Package 4: compile only complete, confirmed
-  first-class BC entities into schema 2.0 and include authoritative selector/load
-  evidence in the existing approval gate.
+  `poisson_ratio >= 0.49`.
+- **Just implemented**: BC Work Package 4 makes complete, confirmed first-class
+  BC state authoritative at the conversational compiler boundary. Fraction,
+  coordinate, physical-width, and corner-offset selectors compile
+  deterministically; explicit-unit tractions normalize and resultants remain
+  forces for mesh conversion; stable IDs survive into schema 2.0. Legacy live
+  facts migrate once at this boundary. Approval fails closed without successful
+  geometry evidence and shows requested versus resolved selectors, measures,
+  normals, conversions, integrated resultants, units, thickness, and warnings.
+  The separate explicit run-approval transition is unchanged.
+- **Next action**: implement BC Work Package 5: teach the live Responses prompt
+  and compact adapter to create and refine first-class BC patches directly.
 
 ## 1. Product
 
 The product is the full plain-language workflow:
 
 ```text
-formulate ↔ gather/repair/reformulate → finalize strict intent
+formulate ↔ gather/repair/reformulate → finalize typed problem and BC state
           → compile → validate → await approval → run → analyze → explain
 ```
 
@@ -122,7 +129,7 @@ contract. They do not expand the agent-safe surface.
   application-owned partial draft with source-turn provenance. Provider
   continuation improves multi-turn reasoning but never replaces canonical draft
   state. Model-declared readiness is advisory; deterministic repair, readiness,
-  semantic resolution, and final strict intent validation remain authoritative.
+  semantic resolution, and typed finalization remain authoritative.
   This is now the live UI path.
 
 ## 4. Deterministic Defaults
@@ -403,6 +410,22 @@ contract, prompt update, numerical tests, and an explicit decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — Finalization consumes first-class BC state, approval consumes
+  mesh evidence**: make a ready `ProblemDraft`, not the legacy `ProblemIntent`,
+  the conversational orchestrator handoff. Compile ordinary problem facts and
+  complete, confirmed BC entities through separate typed paths into canonical
+  schema 2.0. If no first-class state exists, migrate legacy BC facts exactly
+  once; otherwise first-class state is authoritative. Require explicit mechanical
+  units for native boundary loads, preserve traction/resultant quantity kind and
+  stable IDs, and deterministically resolve fraction, coordinate, physical-width,
+  and corner-offset selectors. Render approval only from successful validation
+  and pair every requested selector with its authoritative mesh-resolved facets,
+  extent, measure, normal, conversion, integrated resultant, units, thickness,
+  and warning. Do not alter the separate explicit run green-light transition.
+  Reason: finite clamps and resultants cannot be represented honestly by the
+  legacy intent, a temporary fake intent would corrupt the audit trail, and
+  approval should show what the solver will apply rather than only what was
+  requested.
 - **2026-07-27 — Validation and FEM share one facet-resolution policy**: version
   canonical `AgentSafeConfig` as 2.0 and the complete tool boundary as 5.0.0.
   Represent stable-ID fixed, uniform-traction, and uniform-resultant BCs with
@@ -617,8 +640,9 @@ Reverse chronological; final decisions only.
       resolution.
 - [x] BC Work Package 3 — shared mesh boundary resolver, versioned tool contract,
       enriched evidence, and numerical warnings.
-- [ ] BC Work Packages 4–6 — finalization/approval evidence, prompt adapter, and
-      human BC cards/preview.
+- [x] BC Work Package 4 — first-class finalization, deterministic BC compilation,
+      authoritative approval evidence, and unchanged explicit run gate.
+- [ ] BC Work Packages 5–6 — prompt adapter and human BC cards/preview.
 - [ ] BC Work Package 7 — complete deterministic, numerical, UI, and billed live
       first-increment gate.
 - [ ] BC Work Package 8 — explicit component-support checkpoint and optional
