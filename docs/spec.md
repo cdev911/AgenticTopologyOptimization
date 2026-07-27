@@ -9,7 +9,7 @@ Last updated: 2026-07-27
 
 - **Release**: v1 numerical/execution behavior remains complete, and the post-v1
   conversational Phase 1 is now the released Streamlit entry path.
-- **Verification**: 292 tests plus 194 subtests pass in the pinned Docker image,
+- **Verification**: 293 tests plus 194 subtests pass in the pinned Docker image,
   and `pip check` reports no broken requirements. This includes historical
   numerical baselines, exact resultant integration, deterministic selector/error
   behavior, UI approval behavior, and solver lifecycle tests.
@@ -86,10 +86,13 @@ Last updated: 2026-07-27
   53-case billed evaluator for `boundary-condition-evals-v6`, semantic
   normalization and forbidden-behavior grading, bounded retries for connection
   and timeout errors only, and deterministic application normalization of
-  constant traction uniformity. The clean Sol/medium run reached 51/53 with zero
-  solver starts; both remaining constant-traction cases passed a focused 2/2 live
-  rerun after the deterministic fix. The deterministic/numerical gate passes,
-  but a fresh clean 53/53 billed invocation has not been run after that fix.
+  constant traction uniformity. A post-fix clean Sol/medium run reached 52/53
+  with zero solver starts; the only difference was a redundant direction label
+  consistent with the retained vector, now covered by a strict equivalence
+  regression that still rejects contradictions. The following full attempt was
+  interrupted after 29 cases by persistent provider `RateLimitError` responses,
+  including a one-case recovery probe. The deterministic/numerical gate passes,
+  but a fresh clean 53/53 billed invocation remains required.
 - **Next action**: rerun the clean 53-case billed gate once to close Work Package
   7. Only after a 53/53 result should the explicit Work Package 8
   component-support checkpoint begin.
@@ -248,12 +251,14 @@ The Package 7 evaluator uses `boundary-condition-evals-v6` and the
 `formulation-system-v3` / `openai-responses-v3` live contract. It imports no
 orchestrator or solver entry point and reports `solver_executed=false`. Transport
 timeouts and connection failures receive up to three attempts; semantic failures
-receive exactly one. The latest clean run before the final deterministic
-constant-traction fix passed 51/53 over 64 API calls with 385,496 input, 46,355
-output, 18,613 reasoning, and 350,573 cached tokens in 835.464 seconds, with no
-context recoveries and zero solver starts. The two remaining cases then passed a
-focused 2/2 live rerun after the fix. This is strong implementation evidence but
-is not recorded as a 53/53 release pass.
+receive exactly one. The latest complete semantic run passed 52/53 over 64 API
+calls with 388,483 input, 46,908 output, 18,924 reasoning, and 360,244 cached
+tokens in 768.307 seconds, with no context recoveries and zero solver starts. Its
+sole difference was a redundant direction label consistent with an axis-aligned
+vector; the grader now ignores only an exact match and explicitly rejects a
+contradiction. The next full attempt reached 29 passing cases before 24 persistent
+`RateLimitError` responses, and a one-case probe failed immediately with the same
+provider error. This is not recorded as a 53/53 release pass.
 
 ## 7. Testing
 
@@ -455,6 +460,14 @@ contract, prompt update, numerical tests, and an explicit decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — Redundant vector direction is equivalent only when provably
+  consistent**: when an axis-aligned load vector exactly implies the separately
+  retained direction label, ignore that duplicate label during live grading;
+  retain and fail any contradictory label. Reason: `[0,-1]` already carries
+  complete direction semantics, while accepting arbitrary vector-plus-direction
+  pairs would hide real conflicts. The post-fix clean gate reached 52/53 before
+  this regression; the next full attempt was invalidated by a persistent provider
+  rate limit rather than semantic behavior.
 - **2026-07-27 — The BC release gate grades engineering meaning and separates
   provider health**: execute the fixed 53-case corpus through a dedicated
   formulation-only live evaluator. Canonicalize only proven-equivalent selector
