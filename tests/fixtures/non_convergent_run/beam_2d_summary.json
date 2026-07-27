@@ -1,0 +1,10 @@
+{
+  "iterations": 400,
+  "final_compliance": 0.715146720663673,
+  "final_volume": 0.4989469582528533,
+  "final_objective": 0.0,
+  "grayness": 0.4775083541631264,
+  "output_folder": "/workspace/results",
+  "output_prefix": "beam_2d",
+  "initial_density": 0.5
+}

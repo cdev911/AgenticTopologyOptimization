@@ -18,22 +18,11 @@ Reference:
   https://doi.org/10.1007/s00158-024-03818-7
 """
 
-import sys
-
-## Parallel programming imports
-import ipyparallel as ipp
-from mpi4py import MPI
-
-comm = MPI.COMM_WORLD # MPI communicator
-
-def mpi_print(s):
-    print(f"Rank {comm.rank}: {s}")
-
 import numpy as np
 import ufl
 import basix
 from dolfinx.mesh import locate_entities_boundary, meshtags
-from dolfinx.fem import (functionspace, FunctionSpace, Function, Constant,
+from dolfinx.fem import (functionspace, Function, Constant,
                          dirichletbc, locate_dofs_topological)
 
 from fenitop.utility import create_mechanism_vectors

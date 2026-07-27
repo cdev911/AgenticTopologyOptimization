@@ -30,7 +30,7 @@ from fenitop.fem import form_fem
 from fenitop.parameterize import DensityFilter, Heaviside
 from fenitop.sensitivity import Sensitivity
 from fenitop.optimize import optimality_criteria, mma_optimizer
-from fenitop.utility import Communicator, XDMFTimeSeries  # Plotter, save_xdmf
+from fenitop.utility import Communicator, XDMFTimeSeries
 
 
 class FlushFileHandler(logging.FileHandler):
@@ -102,8 +102,6 @@ def topopt(fem, opt):
     displacement_saver = XDMFTimeSeries(
         fem["mesh"], f"{path}/{file_prefix}_displacement_history.xdmf", "displacement")
 
-    # if comm.rank == 0:
-    #     plotter = Plotter(fem["mesh_serial"])
     num_consts = 1 if opt["opt_compliance"] else 2
     num_elems = rho_field.x.petsc_vec.array.size
     if not opt["use_oc"]:
@@ -177,7 +175,8 @@ def topopt(fem, opt):
         else:
             rho_new, change, low, upp = mma_optimizer(
                 num_consts, num_elems, opt_iter, rho_values, rho_min, rho_max,
-                rho_old1, rho_old2, dJdrho, g_vec, dgdrho, low, upp, opt["move"])
+                rho_old1, rho_old2, dJdrho, g_vec, dgdrho, low, upp, opt["move"],
+                logger=logger)
             rho_old2 = rho_old1.copy()
             rho_old1 = rho_values.copy()
         rho_field.x.petsc_vec.array[:] = rho_new.copy()
@@ -233,6 +232,7 @@ def topopt(fem, opt):
             logger.info("Final design already saved at iteration %d.", opt_iter)
 
     values = S_comm.gather(rho_phys_field.x.petsc_vec)
+    summary = None
     if comm.rank == 0 and values is not None:
         summary = {
             "iterations": int(opt_iter),
@@ -248,6 +248,10 @@ def topopt(fem, opt):
         with open(summary_path, "w", encoding="utf-8") as handle:
             json.dump(summary, handle, indent=2)
         logger.info("Wrote summary to %s", summary_path)
-    # if comm.rank == 0:
-    #     plotter.plot(values)
-    # save_xdmf(fem["mesh"], rho_phys_field)
+
+    return {
+        "density_values_serial": values,
+        "mesh_serial": fem.get("mesh_serial"),
+        "summary": summary,
+        "converged_raw": {"opt_iter": int(opt_iter), "change": float(change)},
+    }

@@ -22,6 +22,10 @@ results/
 *.xdmf.h5
 *.npy
 
+# Committed test fixtures (real run.log artifacts used by Tool 3's tests) are
+# not generated output -- un-ignore them despite the broad pattern above.
+!tests/fixtures/**/*.log
+
 .DS_Store
 
 # Local comparison snapshot, not part of the runnable package.
