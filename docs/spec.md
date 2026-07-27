@@ -9,24 +9,25 @@ Last updated: 2026-07-26
 
 ## 0. Current Status (read this first; update it last, every session)
 
-- **Stage**: Stage 2 Streamlit UI complete; Stage 3 documentation/showcase next.
+- **Stage**: v1 complete; Stages 0–3 are finished.
 - **As of**: 2026-07-26.
-- **Just finished**: thin Streamlit chat UI over the typed orchestrator. It keeps
-  clarification and job state in the session, displays the defaults notice before
-  automatic execution, runs the solver workflow in a background future, polls
-  lifecycle progress, supports cancellation through a trusted derived run ID, and
-  exposes structured events/evidence without hidden reasoning or browser-provided
-  paths/policies. The real container health check, dependency check, all 151 tests,
-  and 103 numerical subtests pass.
+- **Just finished**: visitor-facing README rewrite. It now leads with the complete
+  agentic product, illustrates the deterministic/LLM trust boundary, provides a
+  Docker quick start, three reproducible interpretation scenarios, a no-credit
+  harness, supported scope and honest limitations, output/test guidance, and the
+  main learning conclusions. Local links and Compose config pass, the documented
+  no-credit harness completes as an idempotent replay, and both Streamlit UI tests
+  pass. The executable checkpoint remains all 151 tests plus 103 numerical
+  subtests.
 - **Architecture decisions updated** (§3, §6, §6a): deterministic orchestration
   replaces the three-agent tool-calling pipeline; solver execution stays in the
   same image/container but moves to a child process without the API key;
   clarification is allowed for incomplete/ambiguous requests without adding a
   pre-run confirmation gate; and `gpt-5.6-terra` replaces the old
   `gpt-4.1-mini` default.
-- **Next action**: Stage 3 documentation/showcase: rewrite the README narrative,
-  add reproducible demo scenarios and capability limits, and illustrate the final
-  architecture.
+- **Next action**: choose a post-v1 backlog item only after a user decision. The
+  two explicit showcase follow-ups are license/origin attribution and an optional
+  prerecorded UI fallback for demo-day API/network failure.
 - **If you're an AI assistant picking this up cold**: read this whole file before
   doing anything, then summarize your understanding of current state + proposed
   next step back to the user before acting. See `CLAUDE.md`/`AGENTS.md` at the
@@ -74,10 +75,9 @@ Two documents, two audiences, deliberately not merged:
   architecture, key design decisions and their reasoning, how to run the demo. It
   should demonstrate understanding, not just list setup commands.
 
-As stages complete in this spec, the corresponding understanding should get
-distilled into README.md in narrative form. README.md is not rewritten yet — it
-predates the `agentic/` layer and should be revisited once that layer exists, so it
-describes the whole picture rather than being edited twice.
+The completed Stage 3 README distills the final workflow, architecture, operating
+recipe, demo scenarios, scope, limitations, and learning conclusions for outside
+readers. This spec remains the historical and forward-looking working record.
 
 ## 3. Architecture Overview: Brain vs Hands
 
@@ -339,10 +339,12 @@ Existing (unittest-based, already in place):
   composition, CLI JSON purity, and actual stdio MCP composition.
 - Test entry point: `docker compose run --rm -T fenitop python -m unittest discover -v`.
   `tests/__init__.py` makes nested discovery reliable; zero collection exits 5.
-  Current result: all 148 tests plus 103 subtests pass with no expected failures:
+  Current result: all 151 tests plus 103 subtests pass with no expected failures:
   107 hardened-tool tests plus 7 strict-intent, 9 interpreter, 6 compiler, 12
-  full deterministic-orchestrator, and 7 fact-preserving explainer tests
-  (`docker compose run --rm -T fenitop pytest -q`, 33.41 seconds).
+  core deterministic-orchestrator, 7 fact-preserving explainer tests, and the
+  Stage 2 orchestration/UI additions
+  (`docker compose run --rm -T fenitop pytest -q`, 34.58 seconds at the Stage 2
+  checkpoint).
 
 Remaining additions for agent-workflow compatibility:
 - **Hardened-tool suite (passed)**: contract/schema, generated
@@ -362,15 +364,15 @@ Remaining additions for agent-workflow compatibility:
 ## 8. Reviewer Notes / Backlog (things to come back to)
 
 Flagged during initial planning (2026-07-25), not yet actioned:
-- Observability: show a structured event/evidence trace for demo storytelling
-  (intent, clarification, validation, resource estimate, progress, analysis), not
-  private chain-of-thought or raw verbose reasoning.
-- Confirm `docker-compose.yml` allows outbound internet access from the container
-  for the LLM API call.
 - Demo-day reliability: consider caching/recording a known-good run so a live
   presentation doesn't depend on a live LLM call working under pressure.
 - License/attribution check: confirm the origin/license of the `fenitop` codebase
   before presenting this publicly as a demo.
+
+Completed since the initial review:
+- The Streamlit UI exposes a structured event/config/validation/analysis trace and
+  lifecycle progress without private chain-of-thought.
+- Stage 0 smoke and golden checks confirmed outbound API access from Compose.
 
 Final tool review findings (2026-07-26):
 
@@ -398,6 +400,19 @@ Final tool review findings (2026-07-26):
 
 Reverse-chronological. Each entry: date, decision, why, status.
 
+- **2026-07-26** — Finish Stage 3 by replacing the accumulated implementation-style
+  README with a visitor-first showcase narrative. Lead with the complete
+  plain-language-to-evidence outcome, make the LLM/deterministic trust split the
+  central architecture story, put the Docker chat demo before lower-level tools,
+  and include reproducible ready/clarification/unsupported prompts, a no-credit
+  harness, supported scope, limitations, verification, and learning conclusions.
+  Explicitly disclose the missing license/origin attribution and live API/network
+  dependency rather than implying public-release or offline-demo readiness.
+  Reason: this learning project should demonstrate architectural understanding and
+  honest boundaries, not merely preserve setup commands and implementation
+  chronology. Status: implemented; local links and Compose config pass, the
+  no-credit harness completes as an idempotent replay, and both Streamlit UI tests
+  pass. Stage 3 complete.
 - **2026-07-26** — Implement Stage 2 as a thin Streamlit `1.60.0` chat layer over
   the existing typed orchestrator. Keep the orchestrator, current outcome,
   conversation messages, validated job state, and background `Future` in
@@ -567,12 +582,21 @@ Reverse-chronological. Each entry: date, decision, why, status.
 
 ## 10. Open Questions / Next Checkpoint
 
-The next checkpoint is deterministic agentic Stage 1. Items intentionally resolved
-by measurement/implementation rather than guessed now:
+The planned v1 stages are complete. Further work should begin only after selecting
+a post-v1 objective. Current candidates:
+
+- Confirm the original FEniTop source license and attribution before public
+  distribution or presentation.
+- Add an optional recorded/cached UI scenario if a live demo must survive API or
+  network failure. The deterministic harness is the current offline fallback.
+- Consider future physics only as explicit contract/version changes: for example
+  roller supports, nonzero prescribed displacement, or agent-safe 3D.
+
+Retained technical boundaries:
 
 - The trusted iterative compliance and direct mechanism PETSc profiles pass
   convergence/residual checks, finite differences, and isolated-worker
-  calibration; retain them unless later testing finds a profile-specific issue.
+  calibration; retain them unless testing finds a profile-specific issue.
 - Component-wise/roller supports and nonzero prescribed displacement are explicitly
   rejected in agent-safe v1. A future implementation must add correct
   lifting/subspace behavior and tests before changing that capability.
@@ -630,6 +654,6 @@ Completed tool capabilities and their verification commands are maintained in
 
 **Stage 3 — documentation/showcase**:
 
-- [ ] Rewrite README narrative once the hardened tools and `agentic/` flow exist.
-- [ ] Add demo scenarios, known capability limits, architecture rationale, and
+- [x] Rewrite README narrative once the hardened tools and `agentic/` flow exist.
+- [x] Add demo scenarios, known capability limits, architecture rationale, and
       reproducible run/test instructions.

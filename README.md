@@ -1,468 +1,413 @@
-# FEniTop
+# Agentic Topology Optimization
 
-FEniTop is a FEniCSx-based topology optimization package for 2D and 3D problems. It combines a finite-element formulation with density filtering, Heaviside projection, and optimization routines such as OC and MMA.
+A learning project that turns a plain-English structural design request into a
+validated topology-optimization run—and then explains the result without allowing
+an LLM to invent numerical facts.
 
-## Docker-based setup
+The project combines:
 
-The recommended way to run this project is in the pinned Docker image. The
-`Dockerfile` uses an immutable Dolfinx image digest and exact Python dependency
-versions so numerical baselines do not drift when an upstream `stable` tag moves.
+- **CrewAI + an OpenAI model** for the two places where language judgment helps:
+  interpreting a request and organizing result evidence.
+- **Typed deterministic Python** for defaults, workflow transitions, validation,
+  execution authority, and factual rendering.
+- **FEniTop/FEniCSx** for finite-element analysis and topology optimization.
+- **Streamlit** for a small chat interface and inspectable workflow trace.
+
+This is a personal demonstration and learning repository, not a production or
+multi-user engineering service.
+
+## What the demo does
+
+In the web UI, a user describes a supported 2D structural problem in ordinary
+language. The workflow then:
+
+1. interprets the structural intent into a strict schema;
+2. asks focused questions if required physics is missing;
+3. applies and discloses deterministic numerical defaults;
+4. validates physics, geometry, mesh entities, and estimated resource use;
+5. runs the FEniCSx solver in an isolated child process;
+6. verifies and analyzes the resulting manifest and artifacts; and
+7. presents a fact-preserving explanation with inspectable evidence.
+
+Unsupported requests stop before compilation or execution. A valid request does
+not require a confirmation click: the selected defaults are shown, the user is
+invited to request changes, and the workflow proceeds automatically.
+
+## Architecture: judgment at the edges, authority in the middle
+
+```mermaid
+flowchart LR
+    U[User chat] --> I[LLM intent interpreter]
+    I -->|missing physics| C[Clarification in chat]
+    C --> I
+    I -->|unsupported| X[Capability explanation]
+    I -->|typed ready intent| D[Deterministic compiler]
+    D --> V[Validate config]
+    V --> R[Credential-free solver worker]
+    R --> M[Checksum-verified run manifest]
+    M --> A[Deterministic analysis]
+    A --> E[LLM evidence organizer]
+    E --> P[Deterministic factual renderer]
+    P --> U
+```
+
+The key design decision is that this is not a chain of autonomous agents calling
+expensive tools. The LLM never chooses output paths, PETSc settings, resource
+ceilings, run IDs, timeouts, or retry policy. It also never copies the normalized
+configuration or run manifest between stages.
+
+The workflow passes exact Pydantic objects through a deterministic state machine:
+
+```text
+interpret → clarify | unsupported | compile
+          → validate → run → analyze → explain
+```
+
+This split makes the useful flexibility of language models visible while keeping
+numerical and side-effect authority testable.
+
+### Brain, hands, and interface
+
+- `agentic/` is the **brain boundary**. It contains typed intent models, the
+  CrewAI-backed interpreter, deterministic compiler/orchestrator, and constrained
+  evidence explainer.
+- `fenitop/` is the **hands**. It knows nothing about CrewAI and exposes three
+  framework-independent operations: `validate_config`, `run_topopt`, and
+  `analyze_results`.
+- `streamlit_app.py` is a **thin interface**. It retains typed workflow/job state,
+  renders public events and evidence, and does not become workflow authority.
+
+### Two LLM roles, both constrained
+
+The intent interpreter returns exactly one schema-validated outcome:
+
+- `ready`
+- `needs_clarification`
+- `unsupported`
+
+It cannot call tools or invent missing problem-defining physics. Optional numerical
+preferences may be omitted because the deterministic compiler supplies versioned
+defaults. For mesh resolution, it targets an element size of
+`sqrt(domain area) / 50`: a square becomes approximately `50 × 50`, while a
+rectangle remains near 2,500 cells with nearly square elements. The default filter
+radius is 1.5 times the larger element edge.
+
+The result explainer is not a free-form report writer. Deterministic analysis
+creates immutable fact IDs; the LLM may only organize allowed IDs under allowed
+headings. Code then checks completeness and renders the original fact text. An
+unknown, duplicated, or omitted required fact makes the explanation fail closed.
+
+### Execution and secret boundary
+
+Streamlit, CrewAI, Dolfinx, and the solver share one pinned Docker image for a
+simple demo setup. Each native solve still runs in a separate child process:
+
+- the parent owns run paths, limits, idempotency, timeout, and cancellation;
+- all `OPENAI_*` variables are removed from the worker environment;
+- lifecycle state is written atomically;
+- timeout, cancellation, native crash, and orphan states are translated into
+  typed outcomes; and
+- successful artifacts are described by a checksum-verified `RunManifest`.
+
+There are two duplicate-solve defenses: an in-process orchestrator cache and a
+stable durable idempotency key derived from the conversation, compiled config, and
+defaults profile. Streamlit reruns therefore do not own or repeat solver work.
+
+## Quick start: run the chat demo
 
 ### Prerequisites
 
-- Docker Engine
-- Docker Compose
-- An OpenAI Platform API key with API billing/credit enabled for the agentic
-  workflow checks. A ChatGPT subscription does not include API credit.
+- Docker Engine with Docker Compose
+- an OpenAI Platform API key with API billing or prepaid credit enabled
 
-CrewAI is installed inside the project image at its pinned version. No global
-CrewAI or Python package installation is needed on the host Mac. Keeping the
-framework in Docker prevents one project's CrewAI/Pydantic versions from changing
-another project's environment.
+A ChatGPT subscription does not include OpenAI API credit. CrewAI is installed
+inside the project image; nothing is installed globally on the Mac.
 
-### Configure the local API environment
-
-Create the local environment file from the safe committed template:
+### 1. Configure the local environment
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and set the key:
+Set your key in the untracked file:
 
 ```dotenv
 OPENAI_API_KEY=your-real-api-key
 OPENAI_MODEL=gpt-5.6-terra
 ```
 
-Do not commit `.env` or paste its key into issues, logs, or chat. The secret has
-two separate protections:
+`.gitignore` excludes `.env` and `.env.*` while allowing `.env.example`.
+`.dockerignore` also excludes local environment files, preventing the key from
+being copied into an image layer. Compose injects the key only into the parent
+application container.
 
-1. `.gitignore` prevents `.env` and `.env.*` files from entering Git, while
-   explicitly allowing the blank `.env.example` template.
-2. `.dockerignore` prevents those files from entering the Docker build context,
-   so `COPY . /workspace` cannot bake the key into an image layer.
-
-At runtime, Compose's `env_file:` injects the values into the parent application
-container. Solver jobs run as child processes with all `OPENAI_*` variables
-removed, because numerical code does not need model credentials.
-
-### Pull the base image (optional)
-
-```bash
-docker pull dolfinx/dolfinx@sha256:2ae4bfbc0d9077268880faf04c72750528bee986c94ab223a2c159969bd56fa8
-```
-
-`docker compose build` pulls this digest automatically if it is not already
-available, so the explicit pull is normally unnecessary.
-
-### Build the project image
+### 2. Build the pinned image
 
 ```bash
 docker compose build
 ```
 
-This installs the complete pinned dependency closure from
-`requirements/runtime.lock`, including CrewAI and Streamlit, inside
-`fenitop:local`. Rebuild
-after changing `pyproject.toml`, the lock file, Dockerfile, or base-image digest.
-Ordinary source changes are visible immediately through the repository bind mount.
+The image installs the exact closure in `requirements/runtime.lock`, including
+CrewAI `1.15.6`, Pydantic `2.12.5`, and Streamlit `1.60.0`.
 
-Check the installed environment without exposing the API key:
-
-```bash
-docker compose run --rm -T fenitop python -m pip check
-docker compose run --rm -T fenitop python -c \
-  'from importlib.metadata import version; print("crewai", version("crewai")); print("pydantic", version("pydantic"))'
-```
-
-Expected Stage 0 pins are CrewAI `1.15.6` and Pydantic `2.12.5`.
-
-### Run the chat UI
-
-Start the Streamlit service in the same pinned Docker environment:
+### 3. Start the UI
 
 ```bash
 docker compose up ui
 ```
 
-Then open <http://localhost:8501>. Stop it with `Ctrl-C`, or use
-`docker compose stop ui` if it was started in the background.
-
-The only problem-definition input is chat. The UI preserves clarification context,
-shows every compiler-selected default before automatically continuing, and exposes
-an inspectable deterministic event/evidence trace. Solver work runs in a background
-thread that launches the existing credential-scrubbed child process, so Streamlit
-can poll lifecycle progress and offer cancellation without blocking the page.
-
-Streamlit reruns keep the typed workflow and job future in session state. The
-orchestrator also derives a stable application-owned idempotency key, so rerunning
-the page cannot turn the same validated request into a second solve. Cancellation
-uses the same derived run identity under the fixed `results/` root; neither paths
-nor execution-policy values are accepted from the browser.
-
-Streamlit is pinned at `1.60.0`. Adding it caused the compatible dependency solver
-to select PyArrow `24.0.0` instead of `25.0.0`; the image was rebuilt and the full
-test suite was rerun after regenerating the lock file. This is why dependency
-changes should be treated as runtime changes, even when application code does not
-import the transitive package directly.
-
-### Verify the model environment
-
-Run the small structured-output smoke test:
+Open <http://localhost:8501>. Stop the foreground service with `Ctrl-C`; if it was
+started with `-d`, use:
 
 ```bash
-docker compose run --rm -T fenitop python scripts/stage0_model_smoke.py
+docker compose stop ui
 ```
 
-Expected output:
+## Reproducible demo conversations
+
+These prompts exercise the three interpretation branches. Model wording may vary,
+but the typed status and side-effect behavior are the important result.
+
+### 1. Ready request with visible defaults
+
+```text
+Minimize compliance of a rectangular 10 by 4 plane-strain domain starting at
+[0, 0]. Use Young's modulus 100 and Poisson ratio 0.3. Fully clamp the entire
+left edge and apply a distributed traction [0, -1] on the entire right edge.
+Use 40 percent material.
+```
+
+Expected behavior:
+
+- status becomes `ready`;
+- no clarification is required;
+- the UI explicitly says mesh, filter, iteration, and other numerical settings
+  were not provided and were selected by the compiler;
+- the derived mesh is approximately `79 × 32`, giving near-square cells and about
+  2,500 elements;
+- validation and solver execution continue automatically; and
+- the final response cites deterministic convergence, metric, constraint, and
+  quality evidence.
+
+The traction vector is distributed force per boundary length per unit thickness,
+not a total force.
+
+### 2. Missing physics requires clarification
+
+```text
+Optimize a 10 by 4 beam. Fix the left side, put a load on the right, and use
+40 percent material.
+```
+
+Expected behavior:
+
+- status becomes `needs_clarification`;
+- no config is compiled and no solver starts;
+- the assistant asks for details such as material properties, precise load
+  magnitude/direction, and any ambiguous problem definition; and
+- the next chat answer resumes the stored clarification context rather than
+  relying on hidden model memory.
+
+### 3. Unsupported request stops safely
+
+```text
+Optimize a three-dimensional cantilever with a roller support and a prescribed
+nonzero displacement.
+```
+
+Expected behavior:
+
+- status becomes `unsupported`;
+- the UI identifies the capability mismatch; and
+- validation and solver execution are never called.
+
+## No-credit deterministic harness
+
+To exercise compile → validate → contained solve → manifest handoff → analysis
+without making an API call:
+
+```bash
+docker compose run --rm -T fenitop \
+  python scripts/stage1_workflow_harness.py
+```
+
+The canned request uses an `8 × 4` mesh and five iterations. Run it twice: the
+second invocation should report the same run ID and
+`idempotent_replay=true`.
+
+## Model checks
+
+The basic structured-output smoke test makes one real billed API call:
+
+```bash
+docker compose run --rm -T fenitop \
+  python scripts/stage0_model_smoke.py
+```
+
+Expected shape:
 
 ```text
 crewai_structured_output=ok model=gpt-5.6-terra status=ok answer=4
 ```
 
-Run the occasional golden intent comparison:
+The occasional golden classification check compares supported, ambiguous, and
+unsupported scenarios:
 
 ```bash
-docker compose run --rm -T fenitop python scripts/stage0_golden_intents.py
+docker compose run --rm -T fenitop \
+  python scripts/stage0_golden_intents.py
 ```
 
-The golden check exercises `ready`, `needs_clarification`, and `unsupported`
-classification against Terra and the cheaper Luna comparison. Both commands make
-real, billed API calls; they are manual checkpoints, not part of the default test
-suite or CI.
+It calls real models and incurs API cost, so it is deliberately excluded from the
+default test suite.
 
-If OpenAI reports `insufficient_quota`, the key can still be valid—the API account
-needs billing or prepaid credit. If the model rejects `temperature=0`, leave
-temperature unset; the pinned Terra integration uses low reasoning effort and
-strict Pydantic output instead.
+## Supported v1 scope
 
-### CrewAI compatibility and rollback
+The natural-language workflow supports:
 
-CrewAI `1.15.6` currently requires Pydantic below 2.13 and its structured-output
-stack requires Rich below 15. The verified image therefore pins Pydantic `2.12.5`,
-`pydantic-core 2.41.5`, and Rich `14.2.0`. All 107 hardened solver/tool tests pass
-with this combination.
+- rectangular 2D domains;
+- isotropic linear elasticity in plane strain with unit thickness;
+- compliance minimization and compliant-mechanism optimization;
+- one consistent user unit system;
+- full-vector zero clamps;
+- constant distributed boundary tractions and constant body force;
+- a volume-fraction constraint;
+- quadrilateral or triangular meshes;
+- declarative `plane`, `range`, `circle`, `all`, `none`, `and`, `or`, and `not`
+  regions; and
+- compliant-mechanism input/output springs with explicit direction, region, and
+  positive per-matched-directional-DOF stiffness.
 
-If a future CrewAI change breaks the hardened layer, roll back by removing CrewAI
-from `pyproject.toml`, restoring Pydantic `2.13.4`, `pydantic-core 2.46.4`, and
-Rich `15.0.0`, regenerating `requirements/runtime.lock`, rebuilding the image, and
-rerunning the full test suite. Never bypass dependency checks or accept changed
-contract/schema snapshots just to force an installation.
+## Known limitations
 
-### Run the examples
+This demo intentionally does not support:
 
-Run the 2D beam example:
+- 3D or non-rectangular geometry in the agent-safe workflow;
+- plane stress, nonlinear, dynamic, thermal, or multi-material physics;
+- roller/component-wise supports or nonzero prescribed displacement;
+- point loads or total-force semantics;
+- user-provided code/lambdas in serialized regions;
+- parallel/MPI execution through `run_topopt`;
+- multiple simultaneous solves; or
+- browser-provided paths, solver profiles, rendering controls, limits, or safety
+  overrides.
 
-```bash
-docker compose run --rm fenitop python scripts/beam_2d.py --config config/beam_2d.json
-```
+The repository still includes legacy 2D/3D example scripts, but those are not part
+of the hardened natural-language contract. Mechanism spring stiffness is
+mesh/region dependent because it is applied per matched directional nodal degree
+of freedom. Artifact SHA-256 checks provide local integrity, not authenticity
+against someone able to rewrite the trusted results root. The child process
+contains native crashes but shares the container's memory boundary.
 
-Run the compliant mechanism example:
+There is currently no repository license file. Confirm the original FEniTop code's
+license and attribution before redistributing or presenting the project publicly.
+For a live presentation, the workflow still depends on API/network availability;
+the deterministic harness is the current offline fallback, not a prerecorded UI
+demo.
 
-```bash
-docker compose run --rm fenitop python scripts/mechanism_2d.py --config config/mechanism_2d.json
-```
+## Outputs and evidence
 
-Run with MPI:
+Each run is placed under an application-owned directory in `results/` and includes:
 
-```bash
-docker compose run --rm fenitop mpirun -n 2 python scripts/beam_2d.py --config config/beam_2d.json
-```
+- density and displacement XDMF histories with HDF5 sidecars;
+- a flushed iteration log;
+- a final JSON summary;
+- atomic lifecycle state;
+- a canonical run manifest with relative artifact paths, sizes, and SHA-256; and
+- deterministic analysis plots/evidence when generated.
 
-## Configuration-driven runs
+Open XDMF files in ParaView. Density and displacement use separate time series so
+each file exposes a clean field while retaining all recorded iterations.
 
-The example entry points now read a JSON configuration file. The repository includes example configs in the config directory:
+The Streamlit “Inspectable workflow trace” shows public stage events, the compiled
+agent-safe configuration, validation/resource evidence, and deterministic analysis
+evidence. It deliberately does not expose private chain-of-thought.
 
-- config/beam_2d.json
-- config/mechanism_2d.json
+## Run the tests
 
-The config file controls:
-
-- mesh generation and boundary conditions
-- material properties and the supported plane-strain physics
-- objective and constraint settings
-- filter parameters and optimizer settings
-
-The versioned agent-safe schema deliberately does not include output paths, PETSc
-options, mesh ghost modes, rendering switches, or safety overrides. Application
-code owns those execution capabilities. The loader validates the config before a
-run begins, so invalid settings such as negative iteration counts, malformed
-vectors, non-finite values, or volume fractions outside the supported range fail
-fast with field-level errors.
-
-For a much more thorough check — a strict schema, physical sanity checks, and a real mesh build confirming boundary conditions actually apply — use the `validate_config` agent tool described below.
-
-## Outputs
-
-Each run writes FEniCSx-native XDMF time series output with HDF5 sidecar data:
-
-- `<prefix>_density_history.xdmf` and `<prefix>_density_history.h5` contain the scalar physical density history.
-- `<prefix>_displacement_history.xdmf` and `<prefix>_displacement_history.h5` contain the vector displacement history.
-- `<prefix>_run.log` contains flushed per-iteration logging and structured `history` JSON records.
-- `<prefix>_summary.json` contains final evaluated compliance, volume, objective,
-  conventional grayness, binarization, design change, beta/continuation state,
-  optimizer status, and iteration count.
-
-The XDMF files are intended to be opened in ParaView. Density and displacement are written as separate time series so each file has a clean, selectable field while keeping all time steps for that field in one place.
-
-Example scripts write these files under `results/` beneath the repository root.
-The tool layer assigns a fresh per-run directory through trusted application
-policy. Generated output files are ignored by Git.
-
-## Agentic workflow (Stage 1 complete)
-
-The first agentic boundary is implemented in `agentic/intent.py`. It converts the
-idea of a free-text request into one of three strict, mutually exclusive outcomes:
-
-- `ready`: all problem-defining physics is present in a typed `ProblemIntent`.
-- `needs_clarification`: required physics is missing or ambiguous, so the workflow
-  returns focused questions and does not solve.
-- `unsupported`: the request needs physics outside the v1 tool contract, so the
-  workflow explains the mismatch and does not solve.
-
-`ProblemIntent` separates structural meaning from numerical tuning. Geometry,
-material, supports, loads, volume fraction, and mechanism-specific fields are
-physics and must be present for `ready`. Mesh divisions/cell type, filter radius,
-and iteration limit are optional preferences. When they are omitted, deterministic
-application code—not the LLM—will apply versioned defaults and show each selected
-value and reason to the user before proceeding. This is a transparency notice, not
-a confirmation gate: the user can request changes, while an unchanged supported
-request continues automatically.
-
-This separation makes an important agent-design rule concrete: use the LLM where
-language judgment is needed, and use typed deterministic code for defaults,
-validation, execution authority, and side effects.
-
-`agentic/interpreter.py` now provides the LLM boundary. It loads the versioned
-capability prompt from `agentic/prompts/intent_system_v1.txt`, sends the free-text
-request as JSON-escaped untrusted data, and accepts only the strict outcome schema.
-CrewAI is configured with low reasoning effort and hidden SDK retries disabled;
-the application owns a bounded two-attempt retry policy and reports only sanitized
-failure metadata. The interpreter cannot compile configs, choose defaults, call
-solver tools, or launch work.
-
-The OpenAI structured-output API accepts a stricter JSON Schema subset than
-Pydantic normally emits for fixed tuples and recursive region expressions. A
-transport-only schema adapter therefore converts tuple `prefixItems` to compatible
-`items` schemas and ensures every object rejects extra properties. The semantic
-Pydantic models remain unchanged, so this compatibility layer does not weaken
-runtime validation. Tests snapshot these transport invariants, and a billed smoke
-check exercises ready, clarification, and unsupported outcomes.
-
-`agentic/compiler.py` handles the next deterministic boundary. If mesh resolution
-is omitted, it derives a target element size as `sqrt(domain area) / 50`, then
-rounds each axis count from its physical length. A square becomes `50×50`; a
-rectangle remains close to 2,500 elements with nearly square cells. Extremely
-slender domains keep at least two cells across the short direction and refine the
-long direction to preserve cell shape; the existing resource validator then
-decides whether that mesh is admissible. The default filter radius is 1.5 times
-the larger derived element edge.
-
-Compilation returns both the exact `AgentSafeConfig` and a versioned ledger of
-every application-selected setting. This includes omitted mesh/filter/iteration
-preferences plus optimizer, initialization, tolerance, continuation, move-limit,
-plane-strain, thickness, units, and passive-zone settings. The ledger generates
-the explicit user notice that the values were not provided and were selected by
-the deterministic compiler; the user may request changes, otherwise execution can
-continue without a confirmation gate.
-
-The first `agentic/orchestrator.py` slice is a typed deterministic state machine
-through validation. It returns one of four explicit states:
-`awaiting_clarification`, `unsupported`, `validation_failed`, or `validated`.
-Clarification and unsupported outcomes cannot compile or validate. A clarification
-resume persists the original request, the exact missing fields/questions, and the
-user's answer before asking the interpreter again; it does not depend on hidden
-model memory.
-
-For a ready intent, the orchestrator emits the defaults notice before invoking the
-validator, then passes a `ValidateConfigRequest` containing the exact compiled
-Pydantic config. Its callback and persisted event trace expose stage facts without
-chain-of-thought.
-
-Execution continues from a `validated` state using two idempotency layers. An
-in-memory cache prevents a repeated transition in one application process from
-calling the runner again. A stable application-owned key derived from conversation,
-compiled config, and defaults profile lets the run tool replay the same durable
-result after a UI/process restart. A successful typed `RunManifest` is passed
-directly into `AnalyzeResultsRequest`; no model or application code copies its
-paths or metrics. Run and analysis failures are separate typed states, and an
-analysis retry reuses the stored manifest without revisiting the solver.
-
-Run the small no-API Stage 1 harness:
-
-```bash
-docker compose run --rm -T fenitop python scripts/stage1_workflow_harness.py
-```
-
-It uses a canned schema-validated `8×4`, five-iteration intent, then performs real
-validation, contained execution, and deterministic analysis. The first invocation
-reports `idempotent_replay=false`; repeating it returns the same run ID with
-`idempotent_replay=true`.
-
-`agentic/explainer.py` adds the optional final LLM step without giving the model
-permission to rewrite results. Deterministic code converts Tool 3 output into an
-immutable evidence ledger with stable IDs such as `F001`, marks convergence,
-metrics, constraints, and quality facts as required, and excludes the run
-directory. The model returns only a structured plan of allowed section headings
-and fact IDs. Unknown IDs, omitted required facts, duplicates, and repeated
-headings are rejected. Deterministic code then renders the original fact text and
-citations; no model-generated prose or recalculated value reaches the explanation.
-
-This is a deliberately constrained use of an LLM: it contributes presentation
-judgment—selection and organization of supporting evidence—while deterministic
-analysis retains factual authority. A live Terra check successfully organized the
-real harness evidence, including its exact non-convergence and quality findings.
-
-## Agent-tool layer
-
-Beyond the example scripts, `fenitop/tools/` exposes the config-driven workflow as three composable tools for an agent (or any script) to call, each usable as a plain Python function, a `--input`/`--output` JSON CLI, or an MCP tool — one implementation behind all three. Logs and solver progress stay on stderr or in captured run files; CLI stdout is exactly one JSON response and real stdio MCP composition is tested.
-
-> **Tool readiness (2026-07-26):** The tool layer is hardened and ready for the
-> deterministic agentic workflow. The runtime
-> and numerical baselines are pinned; the public tools now use contract `4.0.0`
-> and physics-only config schema `1.1`. Source strings and execution controls are
-> absent from the agent surface, semantic/mesh-backed validation covers every
-> current solver input, independent resource ceilings are calibrated in the
-> pinned image, and successful solves now require checked linear solves, finite
-> bounded states, explicit optimizer success, and consistent evaluated artifacts.
-> Solves now run serially in credential-scrubbed child process groups with contained
-> per-run paths, idempotent lifecycle state, one-solve admission, and tested
-> timeout/cancel/crash/orphan handling. Public boundaries are total and
-> transport-clean, and successful runs carry a durable, checksum-verified
-> `RunManifest` consumed directly by deterministic analysis. Deterministic agentic
-> development may begin after the model/secrets environment checkpoint.
-> `docs/spec.md` remains the live status source.
-
-The [hardened tool reference](docs/tool-reference.md) documents exact physics,
-every result field, lifecycle/artifact semantics, error and retry behavior, test
-tiers, and the trust limits of local integrity checks.
-
-### `validate_config`
-
-Pedantically validates a config before it reaches the solver against
-`AgentSafeConfig` in `fenitop/tools/config_models.py`. Unknown fields are rejected,
-all vectors are exactly 2D and finite, conditional compliance/mechanism fields are
-expressed as a discriminated union, and mechanism springs use named
-`region`/`direction`/`stiffness` fields. The schema explicitly supports rectangular
-2D meshes, plane strain, unit out-of-plane thickness, consistent user units,
-distributed boundary traction, and full-vector zero clamps. Nonzero prescribed
-displacements and component-wise roller supports are rejected in v1.
-
-Beyond structural checks, it runs logical/physical checks an agent is likely to get wrong — all hard errors, not warnings, since a config that fails them cannot produce a meaningful result:
-
-- `opt.filter_radius` must be smaller than the domain's smallest extent (derived from `mesh.bounds`) — a filter radius at or beyond the domain size would smooth the density field across the entire domain into a uniformly gray design. (Also warns, non-fatally, if the filter radius is smaller than one mesh element — no real smoothing effect.)
-- Volume fraction and optional initial density are strictly between zero and one;
-  move and SIMP epsilon are positive; beta continuation uses a power-of-two cap.
-  Both problem modes require a nonzero external load.
-- `fem.dirichlet_bcs` must be non-empty. Trusted validation builds the real mesh
-  and checks support/load facets, rigid-body rank, spring nodes, passive-zone
-  cells, traction/support/spring overlaps, solid/void conflicts, required material
-  neighborhoods, and forced-solid feasibility against the volume budget.
-- Mechanism spring stiffness is checked relative to Young's modulus. Entity counts
-  and physical bounds are returned in a typed geometry report.
-- Before any mesh build, pure arithmetic independently estimates elements, nodes,
-  displacement DOFs, iterations, solver-weighted work, peak memory, output, and
-  wall time. The application-owned defaults are calibrated against committed
-  medium compliance and mechanism measurements.
-
-Errors and warnings are structured records containing `code`, `path`, `message`,
-`severity`, and `retryable`. The response includes the normalized config (defaults
-filled in, still JSON-safe and re-runnable), resource estimate, and geometry
-entity report.
-
-### `run_topopt` and `analyze_results`
-
-- **`run_topopt`** — accepts only `{"config": AgentSafeConfig}`. It always
-  re-validates, performs a cheap arithmetic safety pre-check, then applies an
-  application-owned `TrustedRunPolicy` for run IDs, paths, rendering, solver
-  profile, and safety ceilings. The MCP/LLM schema cannot override that policy.
-  The parent exclusively allocates a contained run directory, deduplicates
-  matching idempotency keys, admits only one serial solve, and launches a
-  credential-free worker process group. Its atomic lifecycle distinguishes queued,
-  running, succeeded, failed, timed-out, cancelled, and orphaned jobs; parent-side
-  crash translation records exit/signal state and marks partial artifacts
-  incomplete. On success it returns convergence state, key metrics, validation
-  evidence, lifecycle state, typed artifact records, and a self-contained
-  `RunManifest`. The manifest embeds normalized config/evidence/runtime versions
-  and uses relative artifact paths with sizes and SHA-256 checksums.
-- **`analyze_results`** — accepts only the exact successful `RunManifest`, so no
-  model copies paths or resupplies a config. Before reading results it verifies the
-  manifest hash, durable manifest file, trusted run root, and every artifact's
-  path, size, completeness, and checksum. It rejects empty/inconsistent history,
-  summary mismatches, and malformed density grids; reports convergence,
-  continuation, constraints, checkerboards, disconnected material, and per-load/
-  spring connectivity; and produces a deterministic narrative without dolfinx/MPI
-  for its core metrics.
-
-All serialized boundary/load markers, solid/void zones, and mechanism spring
-regions use the strict declarative JSON region DSL:
-
-```json
-{"op": "plane", "axis": "x", "value": 0}
-{"op": "range", "axis": "y", "min": 8, "max": 12}
-{"op": "circle", "center": [2.5, 3.0], "radius": 0.5}
-{"op": "and", "regions": [ {"op": "plane", ...}, {"op": "range", ...} ]}
-```
-
-The full op set is `plane`, `range`, `circle`, `all`, `none`, `and`, `or`, and
-`not`. Unknown fields, non-finite values, 3D axes, invalid radii/tolerances, and
-excessive recursion/node counts are rejected. JSON lambda/source strings are not
-supported and are never evaluated; trusted hardcoded Python callers may still use
-callables internally.
-
-Run a tool from the CLI (JSON request in, JSON response out):
-
-```bash
-python -c 'import json; print(json.dumps({"config": json.load(open("config/beam_2d.json"))}))' > request.json
-docker compose run --rm -T fenitop python -m fenitop.tools.validate_config --input request.json
-docker compose run --rm -T fenitop python -m fenitop.tools.run_topopt --input request.json --output run-response.json
-python -c 'import json; r=json.load(open("run-response.json")); print(json.dumps({"run_manifest": r["run_manifest"]}))' > analysis-request.json
-docker compose run --rm -T fenitop python -m fenitop.tools.analyze_results --input analysis-request.json
-```
-
-The analyzer request's `run_manifest` field contains the exact manifest returned by
-Tool 2. Direct Python, CLI, and stdio MCP surfaces all validate the same models.
-
-Or start the MCP server (the `-T` disables the pty; stdio-transport MCP needs clean, unbuffered JSON-RPC framing on stdin/stdout, which `docker-compose.yml`'s default `tty: true` would otherwise corrupt):
-
-```bash
-docker compose run --rm -T fenitop python -m fenitop.tools.mcp_server
-```
-
-Scope note: this layer currently covers the two config-driven, 2D problem types (`beam_2d` "minimize compliance" and `mechanism_2d` "compliant mechanism"). The 3D/legacy hardcoded scripts (`beam_3d.py`, `disk_2d.py`, `shell_3d.py`) are not yet part of it.
-
-## Tests
-
-Build the pinned image, then run the complete suite from the repository root:
+Build the image, check the locked dependency environment, and run the complete
+checkpoint suite:
 
 ```bash
 docker compose build
-docker compose run --rm -T fenitop python -m unittest discover -v
+docker compose run --rm -T fenitop python -m pip check
+docker compose run --rm -T fenitop pytest -q
 ```
 
-The package marker at `tests/__init__.py` is intentional: without it Python's
-default unittest discovery can silently skip nested test modules. A zero-test run
-now exits nonzero. The suite includes fast real solves for compliance and
-compliant-mechanism modes with tolerance-based references in
-`tests/fixtures/numerical_baselines.json`, directional finite-difference
-sensitivity checks, injected numerical failures, initial/final-state consistency,
-cleanup checks, path/idempotency adversarial cases, real isolated-worker timeout/
-cancellation/signal recovery, generated malformed inputs, corrupt artifacts,
-calibrated heuristics, CLI purity, and real MCP composition. Focused development
-commands are listed in the [tool reference](docs/tool-reference.md); the full
-command above remains the checkpoint gate. All 107 tests pass in the pinned image.
-The completed Stage 1 workflow brings the current checkpoint to 148 passing tests
-plus 103 passing subtests.
+Current checkpoint: **151 tests plus 103 numerical subtests pass**. The suite
+includes schema and adversarial-input tests, real compliance/mechanism baselines,
+finite-difference sensitivities, geometry validation, resource calibration,
+process timeout/cancellation/crash behavior, secret scrubbing, path and
+idempotency cases, manifest integrity, CLI/MCP composition, mocked LLM workflow
+branches, fact-preserving explanation checks, and Streamlit application tests.
 
-## Repository layout
+The focused test tiers and exact tool contracts are documented in
+[`docs/tool-reference.md`](docs/tool-reference.md).
 
-- scripts/: example entry points
-- agentic/: typed natural-language interpretation and deterministic workflow
-  modules (Stage 1 complete)
-- fenitop/: core FEM, sensitivity, optimization, and utility modules
-  - fenitop/regions.py: declarative boundary/load region DSL
-  - fenitop/tools/: the agent-tool layer (validate_config, run_topopt, analyze_results, mcp_server)
-- config/: JSON config files for the examples
-- tests/: unit tests; tests/fixtures/ holds small configs and committed run artifacts used by the tools' tests
-- docs/tool-reference.md: exact hardened tool capabilities and result interpretation
+## Direct tool and example usage
+
+The three hardened tools share the same typed implementation across direct Python,
+JSON CLI, and stdio MCP transports. Start the MCP server with a clean non-TTY stdio
+transport:
+
+```bash
+docker compose run --rm -T fenitop \
+  python -m fenitop.tools.mcp_server
+```
+
+The repository also retains config-driven solver examples:
+
+```bash
+docker compose run --rm fenitop \
+  python scripts/beam_2d.py --config config/beam_2d.json
+
+docker compose run --rm fenitop \
+  python scripts/mechanism_2d.py --config config/mechanism_2d.json
+```
+
+These example entry points are lower-level than the agentic workflow and write
+their outputs beneath `results/`.
+
+## What this project taught
+
+- **Use an LLM for ambiguity, not authority.** Natural language requires judgment;
+  solver paths, safety settings, numerical defaults, and side effects do not.
+- **Structured output is a boundary, not a guarantee by itself.** Strict Pydantic
+  models, semantic validation, bounded retries, and deterministic handoffs are
+  still necessary.
+- **Make defaults visible.** A user should know which values they supplied and
+  which values the application selected, even when execution does not pause.
+- **Idempotency belongs below the UI.** Rerun-prone interfaces should display job
+  state, while application/tool layers own durable duplicate protection.
+- **Contain native numerical work.** Python exceptions cannot reliably contain
+  PETSc/MPI aborts or process-level memory failures.
+- **Fact preservation needs structural enforcement.** Asking a model not to
+  hallucinate is weaker than allowing it to return only evidence identifiers.
+- **Pin and retest the whole environment.** Adding CrewAI required compatible
+  Pydantic/Rich versions; adding Streamlit selected PyArrow `24.0.0` instead of
+  `25.0.0`. Both changes were accepted only after rebuilding and rerunning the
+  numerical suite.
+
+## Repository map
+
+```text
+agentic/                  typed interpretation, compilation, orchestration, explanation
+  prompts/                versioned LLM capability prompts
+fenitop/                  FEM/topology-optimization domain library
+  tools/                  validate, run, analyze, lifecycle, manifest, transports
+streamlit_app.py          thin chat and workflow-trace UI
+config/                   lower-level JSON example configurations
+scripts/                  demos, smoke checks, and legacy examples
+tests/                    agentic, transport, lifecycle, and numerical verification
+  fixtures/               baselines, resource calibration, and artifact fixtures
+docs/spec.md              living status and decision log
+docs/tool-reference.md    exact tool contracts and operational reference
+results/                  generated, gitignored run artifacts
+```
+
+## Project records
+
+- [`docs/spec.md`](docs/spec.md) is the living decision log and current-status
+  handoff for future development sessions.
+- [`docs/tool-reference.md`](docs/tool-reference.md) is the detailed hardened-tool
+  contract, including fields, failure behavior, and focused verification commands.
