@@ -3,27 +3,29 @@
 This file is the compact handoff for future development. The release narrative is
 in `README.md`; exact tool behavior is in `docs/tool-reference.md`.
 
-Last updated: 2026-07-26
+Last updated: 2026-07-27
 
 ## 0. Current Status
 
-- **Release**: v1 complete and release-ready.
-- **Verification**: 168 tests plus 103 numerical subtests pass in the pinned Docker
+- **Release**: v1 remains complete, but the Phase 1 interaction is now scheduled
+  for a post-v1 redesign before further feature work.
+- **Verification**: 177 tests plus 109 numerical subtests pass in the pinned Docker
   image. Compose config, dependency checks, Streamlit health, the no-credit
   idempotent harness, and documentation links have also passed.
 - **Scope**: personal learning/demo workflow, not engineering design software or a
   hosted multi-user service.
-- **Just finished**: repaired the reported prompt/run failure and added a mandatory
-  pre-run approval gate. Optional tuning hallucinated by structured model output is
-  discarded unless explicit user text provides provenance; validation now returns
-  `awaiting_run_approval`, and only an explicit deterministic approval transition
-  can create an executable state. Small filtered-density roundoff is checked,
-  clipped to the physical interval, and distinguished from genuine bound errors.
-  The exact whole-edge prompt passes live Terra interpretation and mesh validation
-  without launching a run; the exact previously failing numerical configuration
-  now converges.
-- **Next action**: restart the UI, submit a request, review the proposal, and reply
-  `yes` only when the parameters are acceptable.
+- **Just implemented**: the model-independent conversational-formulation
+  foundation. A typed `ProblemDraft` now retains partial facts and revision
+  provenance across turns; a compact turn patch carries natural assistant text,
+  changed facts, and questions; deterministic code validates provenance and field
+  values, blocks unconfirmed assumptions, assesses readiness, and alone converts a
+  complete draft to the existing strict `ProblemIntent`. Six multi-turn evaluation
+  seeds cover disorder, correction, load negotiation, reformulation, conflict, and
+  casual numerical preferences. The new turn schema is 2,315 characters versus
+  235,234 for the current one-shot schema.
+- **Next action**: select and implement the live conversation adapter plus repair
+  loop, then migrate the Streamlit entry path only after the multi-turn evals pass.
+  The released UI still uses the v1 interpreter.
 
 ## 1. Product
 
@@ -80,6 +82,10 @@ contract. They do not expand the agent-safe surface.
   credential-free child process.
 - **Handoffs**: exact Pydantic objects and a checksum-verified `RunManifest`; no
   prose or LLM copying between stages.
+- **Post-v1 formulation foundation**: model turn patches merge into an
+  application-owned partial draft with source-turn provenance. Model-declared
+  readiness is advisory; deterministic readiness and final strict intent
+  validation remain authoritative. This foundation is not yet the live UI path.
 
 ## 4. Deterministic Defaults
 
@@ -164,6 +170,21 @@ tests, and explicit user decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — Provider-independent formulation core first**: implement the
+  partial draft, small turn-patch contract, provenance validation, revision
+  history, deterministic readiness, strict finalization, and evaluation seeds
+  before choosing CrewAI versus Responses API state. Reason: conversation behavior
+  and safety invariants should be testable without API credit, and a stable core
+  lets provider/model experiments compare the same task rather than different
+  architectures.
+- **2026-07-27 — Conversational problem formulation is required**: Phase 1 must
+  accept ordinary logical descriptions rather than requiring a near-schema-shaped
+  prompt. It must accumulate a visible problem draft over multiple turns, explain
+  its current understanding, ask useful questions, accept corrections, and recover
+  from encoding/validation failures without presenting them as user failures.
+  Creativity is allowed in interpretation and proposing explicitly labeled
+  assumptions, never in silently inventing physics or numerical facts. The exact
+  API/model/state design remains an open question.
 - **2026-07-26 — Explicit approval, optional-value provenance, and filter
   roundoff**: stop every validated request in an `awaiting_run_approval` state;
   recognize only unambiguous whole-message approval; reinterpret changes and
@@ -218,7 +239,12 @@ Reverse chronological; final decisions only.
 
 ## 10. Open Questions
 
-None for v1. Post-v1 objectives must be selected before implementation.
+- Should conversational formulation continue through CrewAI's current
+  Chat-Completions adapter with application-owned history, or use the OpenAI
+  Responses API for native conversation state and persisted reasoning while
+  retaining CrewAI elsewhere in the learning architecture?
+- Which measured quality/cost point should be selected after representative
+  conversation evals: Terra at medium/high reasoning, or Sol at medium reasoning?
 
 ## 11. Implementation Checklist
 
@@ -234,3 +260,9 @@ None for v1. Post-v1 objectives must be selected before implementation.
       100% spans.
 - [x] Post-release safety fix — explicit pre-run approval, optional-preference
       provenance, and filtered-density roundoff handling.
+- [x] Post-v1 Phase 1 foundation — conversational typed draft, provenance-aware
+      merge, revision history, readiness, strict final conversion, and eval seeds.
+- [ ] Post-v1 live formulation — conversation-state adapter, structured repair
+      feedback, and measured Terra/Sol comparison.
+- [ ] Post-v1 UI migration — conversational draft display, error-specific UX,
+      final compile/validate handoff, and approval regression verification.

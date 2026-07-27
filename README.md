@@ -118,6 +118,31 @@ creates immutable fact IDs; the LLM may only organize allowed IDs under allowed
 headings. Code then checks completeness and renders the original fact text. An
 unknown, duplicated, or omitted required fact makes the explanation fail closed.
 
+### Conversational formulation redesign in progress
+
+The released UI still uses the v1 one-shot interpreter. A post-v1 redesign is
+being built test-first so ordinary problem descriptions can be developed over
+several turns without weakening the solver boundary.
+
+The first completed slice is provider-independent:
+
+- `ProblemDraft` retains partial facts, their source turn, a short modeling
+  rationale, and whether each fact was explicit, derived, assumed, or confirmed.
+- A small `FormulationTurn` contains a natural assistant message, changed fields,
+  up to three questions, and a conversation-state hint.
+- Deterministic code validates each changed field, rejects unsupported provenance,
+  records corrections, identifies missing or unconfirmed facts, and alone decides
+  whether the draft is ready.
+- Assumptions remain visible and cannot cross into strict `ProblemIntent` until the
+  user confirms them.
+- The final draft conversion reuses the existing strict intent, compiler,
+  validation, and approval path.
+
+This reduces the model-facing turn schema from 235,234 characters in the v1
+one-shot path to 2,315 characters. The next slice will connect a live
+conversation-state adapter and repair loop; the current solver UI is unchanged
+until that integration passes multi-turn evaluations.
+
 ### Execution boundary
 
 Streamlit, CrewAI, Dolfinx, and the solver share one pinned Docker image for a
@@ -359,7 +384,7 @@ docker compose run --rm -T fenitop python -m pip check
 docker compose run --rm -T fenitop pytest -q
 ```
 
-Current checkpoint: **168 tests plus 103 numerical subtests pass**. The suite
+Current checkpoint: **177 tests plus 109 numerical subtests pass**. The suite
 includes schema and adversarial-input tests, real compliance/mechanism baselines,
 finite-difference sensitivities, geometry validation, resource calibration,
 process timeout/cancellation/crash behavior, secret scrubbing, path and
@@ -419,7 +444,7 @@ their outputs beneath `results/`.
 ## Repository map
 
 ```text
-agentic/                  typed interpretation, compilation, orchestration, explanation
+agentic/                  formulation, intent, compilation, orchestration, explanation
   prompts/                versioned LLM capability prompts
 fenitop/                  FEM/topology-optimization domain library
   tools/                  validate, run, analyze, lifecycle, manifest, transports
