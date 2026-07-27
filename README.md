@@ -180,7 +180,7 @@ Example scripts write these files under `results/` beneath the repository root.
 The tool layer assigns a fresh per-run directory through trusted application
 policy. Generated output files are ignored by Git.
 
-## Agentic workflow (Stage 1 in progress)
+## Agentic workflow (Stage 1 complete)
 
 The first agentic boundary is implemented in `agentic/intent.py`. It converts the
 idea of a free-text request into one of three strict, mutually exclusive outcomes:
@@ -269,6 +269,20 @@ It uses a canned schema-validated `8×4`, five-iteration intent, then performs r
 validation, contained execution, and deterministic analysis. The first invocation
 reports `idempotent_replay=false`; repeating it returns the same run ID with
 `idempotent_replay=true`.
+
+`agentic/explainer.py` adds the optional final LLM step without giving the model
+permission to rewrite results. Deterministic code converts Tool 3 output into an
+immutable evidence ledger with stable IDs such as `F001`, marks convergence,
+metrics, constraints, and quality facts as required, and excludes the run
+directory. The model returns only a structured plan of allowed section headings
+and fact IDs. Unknown IDs, omitted required facts, duplicates, and repeated
+headings are rejected. Deterministic code then renders the original fact text and
+citations; no model-generated prose or recalculated value reaches the explanation.
+
+This is a deliberately constrained use of an LLM: it contributes presentation
+judgment—selection and organization of supporting evidence—while deterministic
+analysis retains factual authority. A live Terra check successfully organized the
+real harness evidence, including its exact non-convergence and quality findings.
 
 ## Agent-tool layer
 
@@ -408,14 +422,14 @@ cancellation/signal recovery, generated malformed inputs, corrupt artifacts,
 calibrated heuristics, CLI purity, and real MCP composition. Focused development
 commands are listed in the [tool reference](docs/tool-reference.md); the full
 command above remains the checkpoint gate. All 107 tests pass in the pinned image.
-The Stage 1 deterministic workflow additions bring the current checkpoint to 139
-passing tests plus 103 passing subtests.
+The completed Stage 1 workflow brings the current checkpoint to 148 passing tests
+plus 103 passing subtests.
 
 ## Repository layout
 
 - scripts/: example entry points
 - agentic/: typed natural-language interpretation and deterministic workflow
-  modules (Stage 1 in progress)
+  modules (Stage 1 complete)
 - fenitop/: core FEM, sensitivity, optimization, and utility modules
   - fenitop/regions.py: declarative boundary/load region DSL
   - fenitop/tools/: the agent-tool layer (validate_config, run_topopt, analyze_results, mcp_server)

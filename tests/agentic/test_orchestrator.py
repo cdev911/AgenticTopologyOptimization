@@ -3,6 +3,11 @@ from __future__ import annotations
 import unittest
 
 from agentic.compiler import compile_intent
+from agentic.explainer import (
+    EvidenceLedger,
+    ExplanationPlan,
+    ExplanationResult,
+)
 from agentic.intent import InterpretationEnvelope
 from agentic.orchestrator import (
     AnalysisFailedWorkflow,
@@ -195,6 +200,23 @@ class RecordingAnalyzer:
         return AnalyzeResultsResponse.model_construct(
             status=status,
             message="analysis failed" if status == "error" else None,
+        )
+
+
+class RecordingExplainer:
+    def __init__(self):
+        self.analyses = []
+
+    def explain(self, analysis):
+        self.analyses.append(analysis)
+        return ExplanationResult(
+            evidence=EvidenceLedger(facts=()),
+            plan=ExplanationPlan(
+                sections=(
+                    {"heading": "Outcome", "fact_ids": ("F001",)},
+                )
+            ),
+            markdown="# Result explanation",
         )
 
 
@@ -410,6 +432,39 @@ class OrchestratorTests(unittest.TestCase):
             keys.append(runner.calls[0][1].idempotency_key)
 
         self.assertEqual(keys[0], keys[1])
+
+    def test_optional_explainer_preserves_analysis_and_is_idempotent(self):
+        explainer = RecordingExplainer()
+        orchestrator = DeterministicOrchestrator(
+            FakeInterpreter([ready_result()]),
+            validator=RecordingValidator(),
+            runner=RecordingRunner(),
+            analyzer=RecordingAnalyzer(),
+            explainer=explainer,
+        )
+        completed = orchestrator.execute(orchestrator.start("request"))
+
+        explained = orchestrator.explain(completed)
+        refreshed = orchestrator.explain(explained)
+
+        self.assertEqual(explained.status, "explained")
+        self.assertIs(explained.analysis, completed.analysis)
+        self.assertIs(explainer.analyses[0], completed.analysis)
+        self.assertEqual(len(explainer.analyses), 1)
+        self.assertIs(refreshed, explained)
+        self.assertEqual(explained.events[-1].stage, "explained")
+
+    def test_explain_requires_configured_explainer(self):
+        orchestrator = DeterministicOrchestrator(
+            FakeInterpreter([ready_result()]),
+            validator=RecordingValidator(),
+            runner=RecordingRunner(),
+            analyzer=RecordingAnalyzer(),
+        )
+        completed = orchestrator.execute(orchestrator.start("request"))
+
+        with self.assertRaises(RuntimeError):
+            orchestrator.explain(completed)
 
 
 if __name__ == "__main__":
