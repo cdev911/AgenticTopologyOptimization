@@ -20,6 +20,17 @@ from pydantic import (
     model_validator,
 )
 
+from agentic.boundary_draft import (
+    BOUNDARY_FIELDS,
+    BoundaryConditionDraft,
+    BoundaryDraftState,
+    BoundaryFieldFact,
+    BoundaryMergeResult,
+    BoundaryPatch,
+    BoundaryRevision,
+    canonical_boundary_value,
+    merge_boundary_patch,
+)
 from agentic.intent import (
     Bounds2D,
     FixedSupportIntent,
@@ -154,6 +165,7 @@ class FormulationTurn(StrictFormulationModel):
     assistant_message: str
     updates: tuple[DraftUpdate, ...] = ()
     clears: tuple[DraftClear, ...] = ()
+    boundary_patch: BoundaryPatch = Field(default_factory=BoundaryPatch)
     questions: Annotated[tuple[str, ...], Field(max_length=3)] = ()
     declared_state: DeclaredTurnState = "gathering"
     unsupported_features: tuple[str, ...] = ()
@@ -218,6 +230,9 @@ class ProblemDraft(StrictFormulationModel):
 
     facts: tuple[DraftFact, ...] = ()
     revisions: tuple[DraftRevision, ...] = ()
+    boundary_state: BoundaryDraftState = Field(
+        default_factory=BoundaryDraftState
+    )
     turn_count: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
@@ -239,17 +254,21 @@ class ProblemDraft(StrictFormulationModel):
 
 class PatchIssue(StrictFormulationModel):
     code: Literal[
+        "duplicate_target",
+        "invalid_field",
         "invalid_value",
+        "missing_target",
         "unsupported_provenance",
         "invalid_confirmation",
     ]
-    path: DraftPath
+    path: str
     message: str
 
 
 class DraftMergeResult(StrictFormulationModel):
     draft: ProblemDraft
     accepted_paths: tuple[DraftPath, ...]
+    boundary_merge: BoundaryMergeResult
     issues: tuple[PatchIssue, ...]
 
 
@@ -546,14 +565,30 @@ def merge_formulation_turn(
     ordered_facts = tuple(
         facts[path] for path in DRAFT_PATHS if path in facts
     )
+    boundary_merge = merge_boundary_patch(
+        draft.boundary_state,
+        turn.boundary_patch,
+        user_message=user_message,
+        turn_number=turn_number,
+    )
+    issues.extend(
+        PatchIssue(
+            code=issue.code,
+            path=issue.path,
+            message=issue.message,
+        )
+        for issue in boundary_merge.issues
+    )
     merged = ProblemDraft(
         facts=ordered_facts,
         revisions=tuple(revisions),
+        boundary_state=boundary_merge.state,
         turn_count=turn_number,
     )
     return DraftMergeResult(
         draft=merged,
         accepted_paths=tuple(accepted),
+        boundary_merge=boundary_merge,
         issues=tuple(issues),
     )
 
@@ -604,6 +639,139 @@ def _support_for_edge(
             "value": value,
         }
     }
+
+
+def migrate_legacy_boundary_facts(draft: ProblemDraft) -> ProblemDraft:
+    """Populate first-class BC state from current monolithic draft facts.
+
+    Migration is explicit during Work Package 1. Legacy facts remain untouched
+    and therefore remain authoritative for current finalization until a later
+    work package deliberately switches the live path.
+    """
+    if draft.boundary_state.conditions:
+        raise ValueError("boundary_state is already populated.")
+
+    conditions: list[BoundaryConditionDraft] = []
+    revisions: list[BoundaryRevision] = []
+    support_number = 1
+    load_number = 1
+
+    def make_fact(
+        source: DraftFact,
+        field,
+        value,
+        rationale: str,
+    ) -> BoundaryFieldFact:
+        return BoundaryFieldFact(
+            field=field,
+            value=canonical_boundary_value(field, value),
+            basis=source.basis,
+            source_turn=source.source_turn,
+            source_quote=source.source_quote,
+            rationale=rationale,
+        )
+
+    def add_condition(
+        *,
+        bc_id: str,
+        kind: str,
+        source: DraftFact,
+        field_values: list[tuple],
+    ) -> None:
+        facts = tuple(sorted(
+            (
+                make_fact(
+                    source,
+                    field,
+                    value,
+                    f"Migrated from legacy {source.path}: {source.rationale}",
+                )
+                for field, value in field_values
+            ),
+            key=lambda fact: BOUNDARY_FIELDS.index(fact.field),
+        ))
+        condition = BoundaryConditionDraft(
+            bc_id=bc_id,
+            kind=kind,
+            created_turn=source.source_turn,
+            facts=facts,
+        )
+        conditions.append(condition)
+        revisions.append(BoundaryRevision(
+            bc_id=bc_id,
+            turn=source.source_turn,
+            action="create",
+            new_value=condition.model_dump(mode="json"),
+            source_quote=source.source_quote or "",
+            rationale=f"Migrated legacy {source.path}.",
+        ))
+
+    supports = draft.fact("supports")
+    if supports is not None:
+        for support in supports.value:
+            add_condition(
+                bc_id=f"S{support_number}",
+                kind="support",
+                source=supports,
+                field_values=[
+                    ("support.kind", "fixed_all"),
+                    ("selector.kind", "expert_region"),
+                    ("selector.region", support["region"]),
+                ],
+            )
+            support_number += 1
+
+    support_edges = draft.fact("support_edges")
+    if support_edges is not None:
+        for edge in support_edges.value:
+            add_condition(
+                bc_id=f"S{support_number}",
+                kind="support",
+                source=support_edges,
+                field_values=[
+                    ("support.kind", "fixed_all"),
+                    ("selector.kind", "whole_edge"),
+                    ("selector.edge", edge),
+                ],
+            )
+            support_number += 1
+
+    tractions = draft.fact("tractions")
+    if tractions is not None:
+        for traction in tractions.value:
+            selector = traction.get("edge_segment")
+            if selector:
+                selector_fields = [
+                    ("selector.kind", "centered_fraction"),
+                    ("selector.edge", selector["edge"]),
+                    ("selector.center", selector["center_fraction"]),
+                    ("selector.span", selector["span_fraction"]),
+                ]
+            else:
+                selector_fields = [
+                    ("selector.kind", "expert_region"),
+                    ("selector.region", traction["region"]),
+                ]
+            add_condition(
+                bc_id=f"L{load_number}",
+                kind="load",
+                source=tractions,
+                field_values=[
+                    ("load.kind", "traction_vector"),
+                    ("load.vector", traction["vector"]),
+                    ("load.distribution", "uniform"),
+                    *selector_fields,
+                ],
+            )
+            load_number += 1
+
+    state = BoundaryDraftState(
+        conditions=tuple(conditions),
+        revisions=tuple(revisions),
+        next_support_number=support_number,
+        next_load_number=load_number,
+    )
+    return draft.model_copy(update={"boundary_state": state})
 
 
 def _resolved_mesh_divisions(

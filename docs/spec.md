@@ -9,7 +9,7 @@ Last updated: 2026-07-27
 
 - **Release**: v1 numerical/execution behavior remains complete, and the post-v1
   conversational Phase 1 is now the released Streamlit entry path.
-- **Verification**: 213 tests plus 162 subtests pass in the pinned Docker
+- **Verification**: 229 tests plus 162 subtests pass in the pinned Docker
   image. Compose config, dependency checks, Streamlit health, the no-credit
   idempotent harness, and documentation links have also passed.
 - **Scope**: personal learning/demo workflow, not engineering design software or a
@@ -35,9 +35,15 @@ Last updated: 2026-07-27
   prompts, partial/multiple/corrected BCs, units, resultants, pressure, and
   capability boundaries. This checkpoint does not change live formulation or
   solver behavior.
-- **Next action**: implement BC Work Package 1: stable partial BC entities,
-  application-owned IDs, per-field provenance, and typed create/update/delete/
-  confirm patches, driven by the new corpus.
+- **Just implemented**: BC Work Package 1 adds provider-independent partial BC
+  entities, application-owned monotonic `S…`/`L…` IDs, per-field provenance and
+  revision history, atomic create plus targeted update/delete/confirm operations,
+  typed pending confirmations, basic BC readiness, and explicit migration from
+  legacy list facts. `ProblemDraft` and `FormulationTurn` carry the new optional
+  state/patch, but the current OpenAI transport and finalization path deliberately
+  remain on legacy facts until later packages.
+- **Next action**: implement BC Work Package 2: typed mechanical unit context and
+  deterministic semantic traction/resultant/direction resolution.
 
 ## 1. Product
 
@@ -381,6 +387,19 @@ contract, prompt update, numerical tests, and an explicit decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — BC identity and confirmation are application-owned state**:
+  allocate monotonic support/load IDs in deterministic merge code from
+  turn-local create references; never accept model-selected canonical IDs and
+  never reuse an ID after deletion. Store each BC field with its own provenance
+  and revision, and express confirmation as a typed operation against an existing
+  assumption rather than restating a value. A bare generic confirmation is valid
+  only with one pending BC assumption; multiple assumptions require explicit
+  “confirm all” or targeted confirmation. Keep legacy facts and first-class BC
+  state side by side through an explicit migration function while legacy
+  finalization remains authoritative. Reason: stable references are needed for
+  corrections, field-level state prevents partial-load loss, confirmation must
+  not mutate proposed physics, and a staged migration avoids changing the live
+  or solver path accidentally.
 - **2026-07-27 — Grade BC meaning before changing the provider or solver**: add a
   provider-independent `boundary-condition-evals-v1` contract and 53-case corpus
   before integrating new live draft fields. Grade exact retained BC semantics,
@@ -546,8 +565,9 @@ Reverse chronological; final decisions only.
       expansion, and acceptance gates.
 - [x] BC Work Package 0 — 53-case versioned boundary-language corpus, strict
       semantic observation contract, and deterministic safety grader.
-- [ ] BC Work Package 1 — stable partial BC entities, patches, provenance, and
-      confirmation.
+- [x] BC Work Package 1 — stable partial BC entities, monotonic application IDs,
+      per-field provenance/revisions, typed create/update/delete/confirm patches,
+      readiness, pending confirmations, and explicit legacy migration.
 - [ ] BC Work Package 2 — typed unit context and semantic traction/resultant
       resolution.
 - [ ] BC Work Package 3 — shared mesh boundary resolver, versioned tool contract,
