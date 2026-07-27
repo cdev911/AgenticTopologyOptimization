@@ -200,6 +200,68 @@ class NumericalFailureEnvelopeTests(unittest.TestCase):
         self.assertNotIn("Traceback", serialized)
 
 
+class ComponentSupportNumericalTests(unittest.TestCase):
+    def test_roller_and_point_pin_have_stable_real_fem_baseline(self):
+        from dolfinx.fem import assemble_scalar, form
+        from mpi4py import MPI
+
+        from fenitop.config import build_fem_opt
+        from fenitop.fem import form_fem
+        from fenitop.tools.config_models import (
+            compile_solver_config,
+            migrate_legacy_config,
+        )
+
+        config = migrate_legacy_config(_load_config("smoke_beam_2d.json"))
+        config["fem"]["boundary_conditions"][0:1] = [
+            {
+                "bc_id": "S1",
+                "kind": "zero_displacement",
+                "selector": {
+                    "kind": "rectangle_edge",
+                    "edge": "bottom",
+                    "interval": {
+                        "kind": "fraction",
+                        "start": 0,
+                        "end": 1,
+                    },
+                },
+                "components": ["y"],
+            },
+            {
+                "bc_id": "S2",
+                "kind": "zero_displacement",
+                "selector": {
+                    "kind": "boundary_node",
+                    "point": [0, 2],
+                },
+                "components": ["x", "y"],
+            },
+        ]
+        solver_config = compile_solver_config(
+            config, solver_profile="direct"
+        )
+        fem, opt = build_fem_opt(solver_config, comm=MPI.COMM_SELF)
+        problem = None
+        try:
+            problem, displacement, _, _, physical_density = form_fem(fem, opt)
+            self.assertEqual(len(problem.bcs), 3)
+            physical_density.x.array[:] = 0.4
+            physical_density.x.scatter_forward()
+            problem.solve_fem(iteration=0)
+            compliance = assemble_scalar(form(opt["compliance"]))
+
+            self.assertTrue(np.isfinite(displacement.x.array).all())
+            self.assertAlmostEqual(
+                compliance,
+                0.009611586069889313,
+                places=12,
+            )
+        finally:
+            if problem is not None:
+                problem.close()
+
+
 class DirectionalSensitivityTests(unittest.TestCase):
     """Compare filtered/projected analytical gradients to central differences."""
 

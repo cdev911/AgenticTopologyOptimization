@@ -29,6 +29,8 @@ class ResolvedBoundary:
     outward_normal: tuple[float, float] | None
     resolution_error: float | None
     warning: str | None
+    requested_point: tuple[float, float] | None = None
+    resolved_point: tuple[float, float] | None = None
 
 
 _EDGE_NORMALS = {
@@ -258,6 +260,78 @@ def _infer_expert_normal(bounds, mesh_bounds, tolerance):
     return candidates[0] if len(candidates) == 1 else None
 
 
+def _resolve_boundary_node(
+    mesh,
+    selector: dict,
+    connectivity,
+    boundary_facets: np.ndarray,
+    mesh_bounds,
+) -> ResolvedBoundary:
+    requested = np.asarray(selector["point"], dtype=float)
+    (x0, y0), (x1, y1) = mesh_bounds
+    tolerance = 1e-9 * max(1.0, x1 - x0, y1 - y0)
+    on_boundary = (
+        x0 - tolerance <= requested[0] <= x1 + tolerance
+        and y0 - tolerance <= requested[1] <= y1 + tolerance
+        and (
+            abs(requested[0] - x0) <= tolerance
+            or abs(requested[0] - x1) <= tolerance
+            or abs(requested[1] - y0) <= tolerance
+            or abs(requested[1] - y1) <= tolerance
+        )
+    )
+    if not on_boundary:
+        raise BoundaryResolutionError(
+            "point_not_on_boundary",
+            f"Requested point [{requested[0]:g}, {requested[1]:g}] is not on "
+            "the rectangular domain boundary.",
+        )
+
+    facet_nodes = [
+        np.asarray(connectivity.links(int(facet)), dtype=np.int32)
+        for facet in boundary_facets
+    ]
+    nodes = np.unique(np.concatenate(facet_nodes)).astype(np.int32)
+    coordinates = np.asarray(mesh.geometry.x[nodes, :2], dtype=float)
+    distances = np.linalg.norm(coordinates - requested, axis=1)
+    closest = int(np.argmin(distances))
+    node = int(nodes[closest])
+    resolved = coordinates[closest]
+    distance = float(distances[closest])
+    incident = np.asarray(
+        [
+            int(facet)
+            for facet, current_nodes in zip(boundary_facets, facet_nodes)
+            if node in current_nodes
+        ],
+        dtype=np.int32,
+    )
+    warning = (
+        None
+        if distance <= tolerance
+        else (
+            f"Requested boundary point [{requested[0]:g}, {requested[1]:g}] "
+            f"snapped {distance:.6g} to mesh node "
+            f"[{resolved[0]:g}, {resolved[1]:g}]."
+        )
+    )
+    point = (float(resolved[0]), float(resolved[1]))
+    return ResolvedBoundary(
+        facets=incident,
+        node_indices=np.asarray([node], dtype=np.int32),
+        bounds=(point, point),
+        requested_extent=None,
+        resolved_extent=None,
+        measure=0.0,
+        centroid=point,
+        outward_normal=None,
+        resolution_error=distance,
+        warning=warning,
+        requested_point=(float(requested[0]), float(requested[1])),
+        resolved_point=point,
+    )
+
+
 def resolve_boundary(mesh, selector: Any) -> ResolvedBoundary:
     """Resolve an expert region or semantic rectangle-edge interval once."""
     from dolfinx.mesh import locate_entities_boundary
@@ -266,6 +340,14 @@ def resolve_boundary(mesh, selector: Any) -> ResolvedBoundary:
     facet_dimension, connectivity, boundary_facets = _mesh_boundary_geometry(mesh)
     mesh_coords = np.asarray(mesh.geometry.x[:, :2], dtype=float)
     mesh_bounds = _bounds(mesh_coords)
+    if spec.get("kind") == "boundary_node":
+        return _resolve_boundary_node(
+            mesh,
+            spec,
+            connectivity,
+            boundary_facets,
+            mesh_bounds,
+        )
     if spec.get("kind") == "rectangle_edge":
         return _resolve_rectangle_edge(
             mesh,

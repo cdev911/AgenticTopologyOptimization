@@ -14,7 +14,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-BC_EVALUATION_VERSION = "boundary-condition-evals-v6"
+BC_EVALUATION_VERSION = "boundary-condition-evals-v7"
 
 ScenarioFamily = Literal[
     "support_aliases",

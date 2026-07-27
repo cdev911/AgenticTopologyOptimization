@@ -89,11 +89,15 @@ def normalize_boundary_conditions(fem_config: Dict[str, Any], dim: int = 2):
             marker = entry.get("marker", entry.get("locator", legacy_disp_bc))
             value = entry.get("value", [0.0] * dim)
             if "selector" in entry:
-                dirichlet_bcs.append({
+                normalized = {
                     "bc_id": entry.get("bc_id"),
                     "selector": entry["selector"],
                     "value": value,
-                })
+                }
+                if "components" in entry:
+                    normalized["components"] = entry["components"]
+                    normalized.pop("value")
+                dirichlet_bcs.append(normalized)
                 continue
         elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
             marker = entry[0]

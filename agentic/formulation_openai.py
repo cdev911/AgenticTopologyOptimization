@@ -36,8 +36,8 @@ from agentic.formulation import (
 )
 
 
-PROMPT_VERSION = "formulation-system-v3"
-ADAPTER_ID = "openai-responses-v3"
+PROMPT_VERSION = "formulation-system-v4"
+ADAPTER_ID = "openai-responses-v4"
 DEFAULT_MODEL = "gpt-5.6-sol"
 ReasoningEffort = Literal["low", "medium", "high", "xhigh", "max"]
 ErrorKind = Literal["provider", "invalid_response", "refusal"]
@@ -319,11 +319,13 @@ def config_from_environment() -> OpenAIFormulationConfig:
 
 
 def load_system_prompt() -> str:
-    prompt = (
-        files("agentic.prompts")
-        .joinpath("formulation_system_v3.txt")
-        .read_text(encoding="utf-8")
-        .strip()
+    prompt_root = files("agentic.prompts")
+    prompt = "\n\n".join(
+        prompt_root.joinpath(name).read_text(encoding="utf-8").strip()
+        for name in (
+            "formulation_system_v3.txt",
+            "formulation_system_v4_addendum.txt",
+        )
     )
     if not prompt:
         raise RuntimeError("Formulation system prompt is empty.")

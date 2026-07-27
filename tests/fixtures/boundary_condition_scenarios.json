@@ -1,5 +1,5 @@
 {
-  "version": "boundary-condition-evals-v6",
+  "version": "boundary-condition-evals-v7",
   "description": "Provider-independent semantic targets for natural-language supports and boundary loads. These cases grade retained meaning and safety behavior; they never authorize a solver run.",
   "global_forbidden_behaviors": [
     "solver_start",
@@ -408,7 +408,7 @@
       "family": "ambiguity_and_conflicts",
       "purpose": "Do not choose between mutually different support semantics.",
       "turns": ["The left edge is fully fixed, but make that same edge a horizontal roller."],
-      "expected": {"semantic_state": "ambiguous", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "partial", "edge": "left", "selector_kind": "whole_edge"}], "clarifications": ["conflicting_support_kind"], "capability_limits": ["component_support"]},
+      "expected": {"semantic_state": "ambiguous", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "partial", "edge": "left", "selector_kind": "whole_edge"}], "clarifications": ["conflicting_support_kind"]},
       "tags": ["conflict", "roller"]
     },
     {
@@ -433,7 +433,7 @@
       "family": "capability_boundaries",
       "purpose": "Recognize roller semantics without converting them to a clamp.",
       "turns": ["Use a vertical roller support along the bottom edge."],
-      "expected": {"semantic_state": "requires_capability", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "capability_limited", "support_kind": "roller_normal", "edge": "bottom", "selector_kind": "whole_edge"}], "capability_limits": ["component_support"]},
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "complete", "support_kind": "roller_normal", "edge": "bottom", "selector_kind": "whole_edge"}]},
       "tags": ["roller", "phase-two"]
     },
     {
@@ -441,7 +441,7 @@
       "family": "capability_boundaries",
       "purpose": "Recognize a symmetry constraint as component-wise support physics.",
       "turns": ["Make the left edge a symmetry boundary."],
-      "expected": {"semantic_state": "requires_capability", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "capability_limited", "support_kind": "symmetry", "edge": "left", "selector_kind": "whole_edge"}], "capability_limits": ["component_support"]},
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "complete", "support_kind": "symmetry", "edge": "left", "selector_kind": "whole_edge"}]},
       "tags": ["symmetry", "phase-two"]
     },
     {
@@ -449,7 +449,7 @@
       "family": "capability_boundaries",
       "purpose": "Recognize a true point pin without clamping a finite facet.",
       "turns": ["Pin the lower-left corner at [0,0]."],
-      "expected": {"semantic_state": "requires_capability", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "capability_limited", "support_kind": "pin", "selector_kind": "boundary_point", "point": [0.0, 0.0]}], "capability_limits": ["point_node_pin"]},
+      "expected": {"semantic_state": "complete", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "complete", "support_kind": "pin", "selector_kind": "boundary_point", "point": [0.0, 0.0]}]},
       "tags": ["pin", "phase-two"]
     },
     {

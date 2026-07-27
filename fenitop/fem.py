@@ -80,16 +80,47 @@ def form_fem(fem, opt):
     for bc_spec in fem.get("dirichlet_bcs", []):
         marker = bc_spec.get("marker", fem.get("disp_bc"))
         value = bc_spec.get("value", [0.0] * dim)
-        facets = (
-            resolve_boundary(mesh, bc_spec["selector"]).facets
+        resolved = (
+            resolve_boundary(mesh, bc_spec["selector"])
             if "selector" in bc_spec
+            else None
+        )
+        entities = (
+            (
+                resolved.node_indices
+                if bc_spec["selector"]["kind"] == "boundary_node"
+                else resolved.facets
+            )
+            if resolved is not None
             else locate_entities_boundary(mesh, fdim, marker)
         )
-        if len(facets) == 0:
+        entity_dimension = (
+            0
+            if resolved is not None
+            and bc_spec["selector"]["kind"] == "boundary_node"
+            else fdim
+        )
+        if len(entities) == 0:
+            continue
+        components = bc_spec.get("components")
+        if components is not None:
+            for component in components:
+                component_index = 0 if component == "x" else 1
+                subspace = V.sub(component_index)
+                dofs = locate_dofs_topological(
+                    subspace, entity_dimension, entities
+                )
+                dirichlet_bcs.append(
+                    dirichletbc(0.0, dofs, subspace)
+                )
             continue
         bc_value = _as_bc_value(value, dim)
         dirichlet_bcs.append(
-            dirichletbc(Constant(mesh, bc_value), locate_dofs_topological(V, fdim, facets), V)
+            dirichletbc(
+                Constant(mesh, bc_value),
+                locate_dofs_topological(V, entity_dimension, entities),
+                V,
+            )
         )
     if not dirichlet_bcs and "disp_bc" in fem:
         disp_facets = locate_entities_boundary(mesh, fdim, fem["disp_bc"])

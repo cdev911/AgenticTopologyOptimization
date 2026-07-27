@@ -9,7 +9,7 @@ Last updated: 2026-07-27
 
 - **Release**: v1 numerical/execution behavior remains complete, and the post-v1
   conversational Phase 1 is now the released Streamlit entry path.
-- **Verification**: 294 tests plus 194 subtests pass in the pinned Docker image,
+- **Verification**: 303 tests plus 197 subtests pass in the pinned Docker image,
   and `pip check` reports no broken requirements. This includes historical
   numerical baselines, exact resultant integration, deterministic selector/error
   behavior, UI approval behavior, and solver lifecycle tests.
@@ -25,11 +25,10 @@ Last updated: 2026-07-27
   orchestrator's typed `prepare_formulation()` method. Requested changes revoke
   the prior approvable proposal before the new model call; explicit approval
   remains the only path to solver execution.
-- **Just planned**: the first user-led acceptance exposed boundary conditions as
-  the main formulation bottleneck. Section 8 now defines an authorized,
-  two-increment improvement: first make existing clamp/distributed-load physics
-  genuinely conversational and mesh-verifiable, then place roller/symmetry/pin
-  support physics behind a separate versioned contract gate.
+- **BC program**: the first user-led acceptance exposed boundary conditions as
+  the main formulation bottleneck. Section 8 records the now-completed
+  two-increment improvement: conversational mesh-verifiable distributed
+  conditions followed by separately versioned roller/symmetry/pin physics.
 - **Just implemented**: BC Work Package 0 adds a provider-independent semantic
   evaluation contract, deterministic grader, and 53-case versioned corpus. It
   includes the supplied six-turn transcript, both previously failing complete
@@ -91,9 +90,15 @@ Last updated: 2026-07-27
   Sol/medium run passed 53/53 with zero solver starts, zero context recoveries,
   and no transport retries. The complete deterministic/numerical gate also
   passes, closing the first BC increment.
-- **Next action**: execute BC Work Package 8's explicit component-support
-  checkpoint: version and test the roller/symmetry/point-pin physics contract
-  before changing the supported solver surface.
+- **Just implemented**: BC Work Package 8 versions canonical config `2.1`, tool
+  contract `5.1.0`, live adapter v4, and BC corpus v7. It adds explicit
+  zero-displacement components, boundary-node selection with visible snap
+  evidence, component-aware rigid-body/duplicate/load validation, Dolfinx
+  subspace constraints, roller/symmetry/pin compilation, UI cards/preview, and a
+  real roller+pin numerical baseline. Valid 2.0 inputs migrate deterministically.
+  The clean v7 Sol/medium gate passed 53/53 with zero solver starts.
+- **Next action**: complete Work Package 9 documentation/release bookkeeping and
+  use the released workflow for broader user-led acceptance.
 
 ## 1. Product
 
@@ -118,7 +123,8 @@ Supported agent-safe physics:
 
 - rectangular 2D plane strain with unit thickness;
 - isotropic single-material compliance or compliant-mechanism optimization;
-- full-vector zero clamps;
+- full-vector zero clamps, zero-component rollers/symmetry boundaries, and true
+  boundary-node pins;
 - distributed boundary traction, pressure, uniform total resultant, and body
   force;
 - volume fraction and declarative 2D selection regions;
@@ -129,8 +135,7 @@ Not supported in v1:
 
 - agent-safe 3D, non-rectangular domains, plane stress, nonlinear/dynamic/thermal
   physics, or multiple materials;
-- roller/component supports, nonzero prescribed displacement, or mathematical
-  point loads;
+- nonzero prescribed displacement or mathematical point loads;
 - parallel tool execution, multiple concurrent solves, or browser/LLM control of
   paths, solver profiles, limits, timeouts, or safety policy.
 
@@ -224,7 +229,8 @@ The live Streamlit formulation configuration is:
 - `gpt-5.6-sol` through `OPENAI_FORMULATION_MODEL`;
 - medium reasoning through `OPENAI_FORMULATION_REASONING_EFFORT`;
 - `reasoning.context=all_turns` and `previous_response_id`;
-- prompt `formulation-system-v3`;
+- prompt `formulation-system-v4`, composed from the released v3 base plus the
+  Package 8 component-support addendum;
 - strict `OpenAIFormulationTurn` output with a 7,162-character schema and flat
   first-class BC operations;
 - SDK retries disabled, one application-owned deterministic patch repair, and one
@@ -253,6 +259,14 @@ three attempts; semantic failures receive exactly one. The final clean run passe
 53/53 over 64 API calls with 393,486 input, 45,631 output, 18,314 reasoning, and
 364,507 cached tokens in 804.885 seconds, with no context recoveries, no
 transport retries, and zero solver starts.
+
+The Package 8 evaluator uses `boundary-condition-evals-v7` and the
+`formulation-system-v4` / `openai-responses-v4` live contract. The fixed corpus
+changes only the three newly supported roller/symmetry/pin outcomes and removes
+their obsolete capability limits. The clean Sol/medium run passed 53/53 over 64
+API calls with 412,596 input, 45,137 output, 17,813 reasoning, and 377,843 cached
+tokens in 851.383 seconds, with no context recoveries, no retries, and zero
+solver starts.
 
 ## 7. Testing
 
@@ -404,6 +418,44 @@ This is a physics-contract change and receives an explicit checkpoint before cod
 changes; the formulator must already recognize these terms honestly even while
 the capability is gated.
 
+#### Package 8 component-support checkpoint
+
+The first-increment 53/53 gate is closed, so the following second-increment
+contract is authorized:
+
+- Canonical `AgentSafeConfig` advances from `2.0` to `2.1`; tool envelopes and
+  exported schemas advance from `5.0.0` to `5.1.0`. Valid `2.0` inputs migrate
+  deterministically to `2.1`, just as `1.1` inputs already migrate through the
+  application-owned adapter.
+- Existing `kind="fixed"` remains the full-vector zero clamp. A new
+  `kind="zero_displacement"` carries an ordered, unique nonempty component list
+  drawn from `["x", "y"]`. Values remain exactly zero; nonzero prescribed
+  displacement remains unsupported.
+- Facet supports continue using `rectangle_edge` or `expert_region`. A new
+  `boundary_node` selector carries one requested physical point. It is valid only
+  on the rectangle boundary and resolves to exactly one nearest boundary mesh
+  node. Validation reports the requested point, resolved point, and snap
+  distance; a nonzero snap is visible as a warning before approval.
+- Language semantics remain outside the solver schema. A normal roller or
+  symmetry condition on left/right compiles to component `x`; on bottom/top it
+  compiles to `y`. Explicit `roller_x` and `roller_y` mean constrained
+  displacement component, not permitted travel direction. A true pin compiles to
+  both components on one `boundary_node`; it is never compiled as a clamped
+  facet.
+- Geometry validation expands every support into actual `(node, component)` rows.
+  Rigid-body rank uses those rows. Repeated constraints on the same row are
+  rejected as `duplicate_constrained_dof`; the zero-only contract has no
+  contradictory values to reconcile.
+- The existing `traction_on_fixed_support` rejection is retained. For component
+  supports, a load is rejected only when every nonzero load component is
+  constrained over all of its selected nodes; a tangential effective component
+  remains valid.
+- Dolfinx applies component constraints through vector subspaces. The gate
+  requires schema/migration tests, node-resolution evidence, duplicate and
+  rigid-body tests, FEM construction tests, real numerical roller/pin baselines,
+  UI/approval coverage, and a versioned live language gate with zero solver
+  starts.
+
 ### 8.6 Work packages and gates
 
 0. **Corpus first** — turn the supplied cantilever transcript, both previously
@@ -454,6 +506,29 @@ contract, prompt update, numerical tests, and an explicit decision.
 
 Reverse chronological; final decisions only.
 
+- **2026-07-27 — Version zero-component supports and true boundary-node pins**:
+  advance canonical config to 2.1 and tool contracts to 5.1.0 while migrating
+  valid 2.0 inputs deterministically. Keep `fixed` for full clamps; represent new
+  support physics as `zero_displacement` plus canonical `x`/`y` components.
+  Resolve a requested boundary point to one nearest mesh node with visible snap
+  evidence, compute rigid-body rank from actual `(node, component)` rows, reject
+  duplicate rows, and apply components through Dolfinx vector subspaces. Compile
+  edge-normal rollers/symmetry to the normal component and true pins to both
+  components at a node. Reason: language labels must not leak ambiguous roller
+  terminology into solver physics, and a pin must never become a clamped facet.
+  A real FEM test caught the trusted normalizer dropping `components`; preserving
+  that field changed the compliance baseline from the accidentally clamped model
+  to the intended component model. The final v7 live gate passed 53/53 with zero
+  solver starts.
+- **2026-07-27 — Distinguish named sides from bare directional locations**: an
+  unqualified “right side/edge/face/boundary” denotes the complete rectangle
+  edge, while “the load on the right” identifies the edge but not its extent.
+  Qualifiers such as “somewhere,” “center,” “near,” or “segment” also prevent a
+  whole-edge inference. Enforce this in application-owned BC normalization and
+  prompt v4. Do not infer a global N-mm-MPa system solely from a
+  capability-limited `N mm` moment. Reason: two 52/53-style live differences
+  exposed an inconsistent selector convention and an irrelevant unit assumption;
+  focused cases and the final full gate now pass.
 - **2026-07-27 — Preserve named edge centers independently of selector
   completeness**: when a current-turn source quote names the center/middle of an
   already identified edge, deterministically retain `selector.center=0.5` even
@@ -703,11 +778,9 @@ Reverse chronological; final decisions only.
 
 ## 10. Open Questions
 
-- No architecture question blocks the first BC increment.
-- The component-support checkpoint remains intentionally open until the first
-  increment's conversation, selection, and numerical evidence is reviewed. The
-  recommended next physics surface is zero-valued rollers/symmetry plus true
-  point-node pins; nonzero prescribed displacement remains out of scope.
+- No architecture question blocks the released BC increments.
+- Nonzero prescribed displacement, mathematical point loads, applied moments,
+  and varying tractions remain separate future physics contracts.
 
 ## 11. Implementation Checklist
 
@@ -751,7 +824,8 @@ Reverse chronological; final decisions only.
       correction UX.
 - [x] BC Work Package 7 — complete deterministic, numerical, UI, and 53/53 billed
       live first-increment gate with zero solver starts.
-- [ ] BC Work Package 8 — explicit component-support checkpoint and optional
-      roller/symmetry/point-pin implementation.
+- [x] BC Work Package 8 — versioned component-support checkpoint,
+      roller/symmetry/point-pin implementation, numerical/UI coverage, and 53/53
+      v7 live gate.
 - [ ] BC Work Package 9 — shipped-behavior documentation, learning record, and
       release verification.

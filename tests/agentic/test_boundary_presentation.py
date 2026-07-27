@@ -101,6 +101,50 @@ def _draft():
 
 
 class BoundaryPresentationTests(unittest.TestCase):
+    def test_component_support_and_pin_are_visible_in_cards_and_preview(self):
+        draft = _draft()
+        roller = _condition(
+            "S4",
+            "support",
+            {
+                "support.kind": "roller_normal",
+                "selector.kind": "whole_edge",
+                "selector.edge": "bottom",
+            },
+        )
+        pin = _condition(
+            "S5",
+            "support",
+            {
+                "support.kind": "pin",
+                "selector.kind": "boundary_point",
+                "selector.point": [0, 4],
+            },
+        )
+        load = draft.boundary_state.condition("L7")
+        draft = draft.model_copy(update={
+            "boundary_state": BoundaryDraftState(
+                conditions=(roller, pin, load),
+                next_support_number=6,
+                next_load_number=8,
+            )
+        })
+        compilation = compile_formulation_draft(draft)
+        validation = ValidateConfigResponse.model_validate(
+            validate_config_tool({"config": compilation.config})
+        )
+
+        cards = validated_boundary_cards(compilation.config, validation)
+        self.assertIn("zero displacement in y", cards[0].physics)
+        self.assertIn("zero displacement in x, y", cards[1].physics)
+        self.assertTrue(
+            any("Resolved node: [0, 4]" in item for item in cards[1].details)
+        )
+        preview = boundary_preview_svg(compilation.config, validation)
+        self.assertIn(">S4</text>", preview)
+        self.assertIn(">S5</text>", preview)
+        self.assertIn('<circle', preview)
+
     def test_partial_card_preserves_known_facts_and_names_missing_fields(self):
         load = _condition(
             "L2",
@@ -167,7 +211,7 @@ class BoundaryPresentationTests(unittest.TestCase):
         compilation = compile_formulation_draft(_draft())
         failed = ValidateConfigResponse.model_validate(
             {
-                "contract_version": "5.0.0",
+                "contract_version": "5.1.0",
                 "tool": "validate_config",
                 "status": "error",
                 "warnings": [],

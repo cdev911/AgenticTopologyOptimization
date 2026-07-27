@@ -383,8 +383,8 @@ docker compose run --rm -T fenitop \
 ```
 
 Its complete billed release evaluator calls only the live formulation adapter,
-never the orchestrator or solver. It retries connection/timeouts up to three
-times but never retries a semantic failure:
+never the orchestrator or solver. It retries connection, timeout, and provider
+internal-server failures up to three times but never retries a semantic failure:
 
 ```bash
 docker compose run --rm -T fenitop \
@@ -392,7 +392,7 @@ docker compose run --rm -T fenitop \
 ```
 
 Use `--scenarios <id> ...` for focused diagnosis. The current corpus contract is
-`boundary-condition-evals-v6`; the command incurs API cost.
+`boundary-condition-evals-v7`; the command incurs API cost.
 
 The provider-independent Package 1 core stores partial BC entities with
 stable application-owned IDs, field-level provenance, revisions, pending
@@ -458,6 +458,17 @@ recoveries, and no transport retries. Application-owned state now retains a name
 edge center even while load kind/extent are unresolved and prevents an identical
 later assumption from weakening that derived fact.
 
+Package 8 versions component support as `AgentSafeConfig 2.1`, tool contract
+`5.1.0`, and `formulation-system-v4` / `openai-responses-v4`. Zero-displacement
+components are explicit solver facts: normal rollers and symmetry constrain the
+edge-normal component, while a true pin constrains both components at one
+boundary mesh node. Validation shows requested/resolved pin points and snap
+distance, calculates rigid-body rank from actual constrained components, rejects
+duplicate constrained DOFs and wholly ineffective loads, and preserves valid 2.0
+inputs through deterministic migration. The UI shows component support cards and
+pin nodes in the validated preview. A real Dolfinx roller+pin baseline passes,
+and the complete v7 live gate is 53/53 with zero solver starts.
+
 ## Supported natural-language scope
 
 The natural-language workflow supports:
@@ -466,7 +477,8 @@ The natural-language workflow supports:
 - isotropic linear elasticity in plane strain with unit thickness;
 - compliance minimization and compliant-mechanism optimization;
 - one consistent user unit system;
-- full-vector zero clamps;
+- full-vector zero clamps, zero-component rollers/symmetry boundaries, and true
+  boundary-node pins;
 - constant distributed boundary tractions, pressure, uniform total resultants,
   and constant body force;
 - a volume-fraction constraint;
@@ -482,7 +494,7 @@ This demo intentionally does not support:
 
 - 3D or non-rectangular geometry in the agent-safe workflow;
 - plane stress, nonlinear, dynamic, thermal, or multi-material physics;
-- roller/component-wise supports or nonzero prescribed displacement;
+- nonzero prescribed displacement;
 - mathematical point loads;
 - user-provided code/lambdas in serialized regions;
 - parallel/MPI execution through `run_topopt`;
@@ -535,7 +547,7 @@ docker compose run --rm -T fenitop python -m pip check
 docker compose run --rm -T fenitop pytest -q
 ```
 
-Current checkpoint: **294 tests plus 194 subtests pass**. The suite
+Current checkpoint: **303 tests plus 197 subtests pass**. The suite
 includes schema and adversarial-input tests, real compliance/mechanism baselines,
 finite-difference sensitivities, geometry validation, resource calibration,
 process timeout/cancellation/crash behavior, secret scrubbing, path and

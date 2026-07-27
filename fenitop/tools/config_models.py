@@ -24,7 +24,8 @@ from fenitop.tools.mechanical_units import (
 )
 from fenitop.tools.schema import FieldError
 
-CONFIG_SCHEMA_VERSION = "2.0"
+CONFIG_SCHEMA_VERSION = "2.1"
+PREVIOUS_CONFIG_SCHEMA_VERSION = "2.0"
 LEGACY_CONFIG_SCHEMA_VERSION = "1.1"
 
 
@@ -280,6 +281,19 @@ BoundarySelector = Annotated[
 ]
 
 
+class BoundaryNodeSelector(StrictModel):
+    kind: Literal["boundary_node"] = "boundary_node"
+    point: Point2D = Field(
+        description="Requested physical point on the rectangular domain boundary."
+    )
+
+
+SupportSelector = Annotated[
+    Union[RectangleEdgeSelector, ExpertRegionSelector, BoundaryNodeSelector],
+    Field(discriminator="kind"),
+]
+
+
 class FixedBoundaryCondition(StrictModel):
     bc_id: str = Field(pattern=r"^S[1-9][0-9]*$")
     kind: Literal["fixed"] = "fixed"
@@ -291,8 +305,27 @@ class FixedBoundaryCondition(StrictModel):
     def _zero_only(cls, value):
         if any(float(component) != 0.0 for component in value):
             raise ValueError(
-                "agent-safe 2.0 supports only full-vector zero clamps [0,0]."
+                "agent-safe 2.1 supports only full-vector zero clamps [0,0]."
             )
+        return value
+
+
+class ZeroDisplacementBoundaryCondition(StrictModel):
+    bc_id: str = Field(pattern=r"^S[1-9][0-9]*$")
+    kind: Literal["zero_displacement"]
+    selector: SupportSelector
+    components: Annotated[
+        tuple[Literal["x", "y"], ...],
+        Field(min_length=1, max_length=2),
+    ]
+
+    @field_validator("components")
+    @classmethod
+    def _canonical_components(cls, value):
+        if len(set(value)) != len(value):
+            raise ValueError("components must be unique.")
+        if tuple(sorted(value)) != value:
+            raise ValueError("components must use canonical order ['x', 'y'].")
         return value
 
 
@@ -313,6 +346,7 @@ class UniformResultantBoundaryCondition(StrictModel):
 BoundaryCondition = Annotated[
     Union[
         FixedBoundaryCondition,
+        ZeroDisplacementBoundaryCondition,
         UniformTractionBoundaryCondition,
         UniformResultantBoundaryCondition,
     ],
@@ -339,8 +373,13 @@ class FemModel(StrictModel):
         ids = [bc.bc_id for bc in self.boundary_conditions]
         if len(ids) != len(set(ids)):
             raise ValueError("boundary-condition IDs must be unique.")
-        if not any(bc.kind == "fixed" for bc in self.boundary_conditions):
-            raise ValueError("at least one fixed boundary condition is required.")
+        if not any(
+            bc.kind in {"fixed", "zero_displacement"}
+            for bc in self.boundary_conditions
+        ):
+            raise ValueError(
+                "at least one zero-displacement boundary condition is required."
+            )
         return self
 
 
@@ -374,8 +413,31 @@ class AgentSafeConfig(StrictModel):
         return self
 
 
+class PreviousFemModel(FemModel):
+    boundary_conditions: Annotated[
+        list[
+            Annotated[
+                Union[
+                    FixedBoundaryCondition,
+                    UniformTractionBoundaryCondition,
+                    UniformResultantBoundaryCondition,
+                ],
+                Field(discriminator="kind"),
+            ]
+        ],
+        Field(min_length=1),
+    ]
+
+
+class PreviousAgentSafeConfig(AgentSafeConfig):
+    """Read-only parser for deterministic canonical 2.0 migration."""
+
+    schema_version: Literal[PREVIOUS_CONFIG_SCHEMA_VERSION]
+    fem: PreviousFemModel
+
+
 AgentSafeConfigInput = Annotated[
-    Union[AgentSafeConfig, LegacyAgentSafeConfig],
+    Union[AgentSafeConfig, PreviousAgentSafeConfig, LegacyAgentSafeConfig],
     Field(discriminator="schema_version"),
 ]
 
@@ -385,7 +447,7 @@ ConfigModel = AgentSafeConfig
 
 
 def migrate_legacy_config(config: dict) -> dict:
-    """Convert a validated 1.1 config to canonical 2.0 without model help."""
+    """Convert a validated 1.1 config to canonical 2.1 without model help."""
     legacy = LegacyAgentSafeConfig.model_validate({
         **config,
         "schema_version": config.get(
@@ -429,14 +491,26 @@ def migrate_legacy_config(config: dict) -> dict:
 
 
 def parse_agent_safe_config(
-    config: AgentSafeConfig | LegacyAgentSafeConfig | dict,
+    config: (
+        AgentSafeConfig
+        | PreviousAgentSafeConfig
+        | LegacyAgentSafeConfig
+        | dict
+    ),
 ) -> tuple[AgentSafeConfig, bool]:
-    """Parse canonical 2.0 or deterministically migrate legacy 1.1."""
-    if isinstance(config, AgentSafeConfig):
+    """Parse canonical 2.1 or deterministically migrate 2.0/legacy 1.1."""
+    if isinstance(config, PreviousAgentSafeConfig):
+        config = config.model_dump(mode="json")
+    elif isinstance(config, AgentSafeConfig):
         return config, False
     if isinstance(config, LegacyAgentSafeConfig):
         config = config.model_dump(mode="json")
     version = config.get("schema_version")
+    if version == PREVIOUS_CONFIG_SCHEMA_VERSION:
+        previous = PreviousAgentSafeConfig.model_validate(config)
+        migrated = previous.model_dump(mode="json")
+        migrated["schema_version"] = CONFIG_SCHEMA_VERSION
+        return AgentSafeConfig.model_validate(migrated), True
     looks_legacy = (
         version == LEGACY_CONFIG_SCHEMA_VERSION
         or (
@@ -514,10 +588,14 @@ def compile_solver_config(
                 {
                     "bc_id": bc.bc_id,
                     "selector": bc.selector.model_dump(mode="json"),
-                    "value": list(bc.value),
+                    **(
+                        {"value": list(bc.value)}
+                        if bc.kind == "fixed"
+                        else {"components": list(bc.components)}
+                    ),
                 }
                 for bc in model.fem.boundary_conditions
-                if bc.kind == "fixed"
+                if bc.kind in {"fixed", "zero_displacement"}
             ],
             "traction_bcs": [
                 {

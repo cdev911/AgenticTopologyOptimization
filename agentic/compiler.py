@@ -293,6 +293,37 @@ def _rectangle_selector(
     return {"kind": "rectangle_edge", "edge": edge, "interval": interval}
 
 
+def _boundary_node_selector(
+    condition: BoundaryConditionDraft,
+    bounds,
+) -> dict:
+    values = condition.values()
+    if values.get("selector.kind") != "boundary_point":
+        raise FormulationFinalizationError(
+            f"{condition.bc_id} point pin requires one boundary-point selector."
+        )
+    point = values.get("selector.point")
+    if point is None:
+        edge = values.get("selector.edge")
+        center = values.get("selector.center")
+        if edge is None or center is None:
+            raise FormulationFinalizationError(
+                f"{condition.bc_id} boundary point is incomplete."
+            )
+        (x0, y0), (x1, y1) = bounds
+        fraction = float(center)
+        point = {
+            "left": (x0, y0 + fraction * (y1 - y0)),
+            "right": (x1, y0 + fraction * (y1 - y0)),
+            "bottom": (x0 + fraction * (x1 - x0), y0),
+            "top": (x0 + fraction * (x1 - x0), y1),
+        }[str(edge)]
+    return {
+        "kind": "boundary_node",
+        "point": tuple(float(value) for value in point),
+    }
+
+
 def _first_class_boundary_conditions(
     state: BoundaryDraftState,
     *,
@@ -353,22 +384,52 @@ def _first_class_boundary_conditions(
 
     compiled = []
     for condition in state.conditions:
-        selector = _rectangle_selector(condition, bounds)
         values = condition.values()
         if condition.kind == "support":
-            if values["support.kind"] != "fixed_all":
+            support_kind = values["support.kind"]
+            if support_kind == "pin":
+                compiled.append({
+                    "bc_id": condition.bc_id,
+                    "kind": "zero_displacement",
+                    "selector": _boundary_node_selector(condition, bounds),
+                    "components": ("x", "y"),
+                })
+                continue
+            selector = _rectangle_selector(condition, bounds)
+            if support_kind == "fixed_all":
+                compiled.append({
+                    "bc_id": condition.bc_id,
+                    "kind": "fixed",
+                    "selector": selector,
+                    "value": (0.0, 0.0),
+                })
+                continue
+            if support_kind in {"roller_normal", "symmetry"}:
+                edge = values.get("selector.edge")
+                if edge is None:
+                    raise FormulationFinalizationError(
+                        f"{condition.bc_id} normal component requires a named "
+                        "rectangle edge."
+                    )
+                component = "x" if edge in {"left", "right"} else "y"
+            elif support_kind == "roller_x":
+                component = "x"
+            elif support_kind == "roller_y":
+                component = "y"
+            else:
                 raise FormulationFinalizationError(
                     f"{condition.bc_id} support kind is outside the current "
-                    "full-vector clamp contract."
+                    "zero-displacement contract."
                 )
             compiled.append({
                 "bc_id": condition.bc_id,
-                "kind": "fixed",
+                "kind": "zero_displacement",
                 "selector": selector,
-                "value": (0.0, 0.0),
+                "components": (component,),
             })
             continue
 
+        selector = _rectangle_selector(condition, bounds)
         if legacy_migration:
             compiled.append({
                 "bc_id": condition.bc_id,
@@ -653,7 +714,7 @@ def _compile_problem(
 
 
 def compile_intent(intent: ProblemIntent) -> CompilationResult:
-    """Compile the retained legacy intent through the canonical 2.0 contract."""
+    """Compile the retained legacy intent through the canonical 2.1 contract."""
     return _compile_problem(
         _source_from_intent(intent),
         boundary_conditions=_legacy_boundary_conditions(intent),
