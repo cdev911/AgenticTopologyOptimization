@@ -624,6 +624,36 @@ their provenance, but current finalization still reads the legacy facts. Running
 both representations side by side for this checkpoint gives us tests for the new
 state without silently changing live or numerical behavior.
 
+Package 2 made the distinction between unit syntax and physical meaning concrete.
+A library can prove that `kN` is a force and `MPa` is a stress, but it cannot
+decide whether the number the user supplied was a total force or a distributed
+traction. We therefore use Pint only inside deterministic normalization code and
+keep `traction` versus `resultant` as an explicit semantic type. JSON-safe models
+retain the original value and unit beside the normalized value; Pint objects
+never cross the formulation, approval, or solver boundaries.
+
+The unit system is itself conversational state. Length, force, and stress are
+three ordinary draft facts with the same explicit/derived/assumption/confirmed
+provenance as other parameters. A plausible N-mm-MPa system inferred from context
+is still pending until the user confirms it. Once confirmed, an omitted per-load
+unit can refer visibly to that mechanical context instead of triggering a silent
+conversion.
+
+Direction words also need deterministic semantics after language interpretation.
+Global `up`, `down`, `left`, and `right` map directly to vectors. `inward` and
+`outward` require a named rectangle edge and use its normal. Bare `normal`, `x`,
+`y`, or `tangential` remain ambiguous because they omit a sign or along-edge
+sense. Rejecting these states is more reliable than letting model prose conceal a
+guessed vector.
+
+Most importantly, normalization stops at the correct knowledge boundary. A
+traction has stress dimensions under the current unit-thickness plane-strain
+contract and can be normalized immediately. A total resultant has force
+dimensions; converting it requires the actual selected boundary measure times
+the one-length-unit thickness. Package 2 therefore marks it semantically ready
+but execution-deferred. Package 3 must provide the mesh-resolved measure and
+verify the integrated force before execution can become ready.
+
 ## 17. How we will continue learning
 
 We will use these rules for the remaining work:
@@ -678,4 +708,8 @@ This condensed trail connects the lessons above to the implementation order:
 - **2026-07-27** — implemented stable application-owned BC identities, partial
   field facts, revisions, readiness, pending confirmations, typed patch
   operations, and explicit legacy migration without switching the live path.
-- **Next** — implement typed units and semantic traction/resultant resolution.
+- **2026-07-27** — pinned Pint in Docker, added provenance-bearing mechanical
+  unit facts, retained display/normalized quantities, deterministic
+  direction/pressure resolution, and explicit traction versus deferred-resultant
+  state without switching the live finalizer.
+- **Next** — implement the shared mesh boundary resolver and evidence contract.
