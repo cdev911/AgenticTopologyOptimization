@@ -32,7 +32,7 @@ from fenitop.tools.contracts import (
 )
 from fenitop.tools.logging_config import get_logger
 from fenitop.tools.logreader import count_warnings, read_history
-from fenitop.tools.safety import DEFAULT_MAX_COMPLEXITY, estimate_cost
+from fenitop.tools.safety import estimate_cost, resource_limit_errors
 from fenitop.tools.schema import FieldError, error_envelope, ok_envelope
 from fenitop.tools.validate_config import validate_config_tool
 
@@ -138,17 +138,35 @@ def _render_snapshot(result: Dict[str, Any], opt: Dict[str, Any]
     return paths, warnings
 
 
-def _reject_oversized(cost: Dict[str, Any], policy: TrustedRunPolicy, validation: Optional[Dict[str, Any]]
-                       ) -> Optional[Dict[str, Any]]:
-    ceiling = policy.max_complexity or DEFAULT_MAX_COMPLEXITY
-    if policy.allow_large_run or cost["complexity_score"] <= ceiling:
+def _reject_oversized(
+    cost: Dict[str, Any],
+    policy: TrustedRunPolicy,
+    validation: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    if policy.allow_large_run:
+        return None
+    limits = policy.resource_limits.model_copy(
+        update={
+            "max_estimated_wall_time_seconds": min(
+                policy.resource_limits.max_estimated_wall_time_seconds,
+                policy.timeout_seconds,
+            )
+        }
+    )
+    errors = resource_limit_errors(cost, limits)
+    if not errors:
         return None
     return error_envelope(
-        "run_topopt", [], stage="safety_check", estimated_cost=cost, validation=validation,
+        "run_topopt",
+        errors,
+        stage="safety_check",
+        estimated_cost=cost,
+        validation=validation,
         message=(
-            f"estimated_cost.complexity_score={cost['complexity_score']:.3g} exceeds the "
-            f"trusted safety ceiling ({ceiling:.3g}). The agent-facing request cannot "
-            "override this application-owned policy."))
+            "Estimated resource demand exceeds application-owned limits. "
+            "The agent-facing request cannot override this policy."
+        ),
+    )
 
 
 def _response(data: dict) -> dict:
@@ -193,7 +211,13 @@ def run_topopt_tool(
     # mesh spec, etc.) is swallowed -- the full validation below reports it
     # properly with field paths instead.
     try:
-        quick_cost = estimate_cost(config.mesh.model_dump(mode="json"), config.opt.max_iter)
+        quick_cost = estimate_cost(
+            config.mesh.model_dump(mode="json"),
+            config.opt.max_iter,
+            problem_type=config.opt.problem_type,
+            solver_profile=run_policy.solver_profile,
+            output_interval=run_policy.output_interval,
+        )
         quick_reject = _reject_oversized(quick_cost, run_policy, validation=None)
         if quick_reject is not None:
             logger.warning("run_topopt: rejected on cheap pre-check, complexity_score=%s",
@@ -205,7 +229,13 @@ def run_topopt_tool(
     logger.info("run_topopt: re-validating config (full structural + geometry check)...")
     check = validate_config_tool(
         {"config": config},
-        policy=TrustedValidationPolicy(check_geometry=True),
+        policy=TrustedValidationPolicy(
+            check_geometry=True,
+            enforce_resource_limits=not run_policy.allow_large_run,
+            solver_profile=run_policy.solver_profile,
+            output_interval=run_policy.output_interval,
+            resource_limits=run_policy.resource_limits,
+        ),
     )
     if check["status"] == "error":
         logger.warning("run_topopt: pre-flight validation failed with %d error(s)", len(check["errors"]))

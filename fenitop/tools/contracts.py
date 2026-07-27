@@ -23,19 +23,42 @@ class IssueRecord(ContractModel):
 
 
 class CostEstimate(ContractModel):
+    cell_type: Literal["quadrilateral", "triangle"]
+    solver_profile: Literal["iterative", "direct"]
     num_elements: int
     num_nodes: int
     displacement_dofs: int
     num_design_variables: int
     max_iter: int
+    linear_solves_per_iteration: int
     complexity_score: float
+    work_units: float
+    estimated_peak_memory_mb: float
+    estimated_output_mb: float
+    estimated_wall_time_seconds: float
     risk_level: Literal["low", "medium", "high"]
     exceeds_default_safety_ceiling: bool
 
 
 class CheckRecord(ContractModel):
     structural: bool
+    resource: bool
     geometry: bool
+
+
+class EntityMatchRecord(ContractModel):
+    path: str
+    entity_kind: Literal["facet", "node", "cell"]
+    count: int
+    bounds: tuple[tuple[float, float], tuple[float, float]]
+
+
+class GeometryReport(ContractModel):
+    total_boundary_facets: int
+    total_nodes: int
+    total_cells: int
+    rigid_body_rank: int
+    entities: list[EntityMatchRecord]
 
 
 class ArtifactRecord(ContractModel):
@@ -52,10 +75,27 @@ class RunTopoptRequest(ContractModel):
     config: AgentSafeConfig
 
 
+class ResourceLimits(ContractModel):
+    """Trusted serial-demo admission limits; never exported as an LLM schema."""
+
+    max_elements: int = Field(default=250_000, gt=0)
+    max_nodes: int = Field(default=300_000, gt=0)
+    max_displacement_dofs: int = Field(default=600_000, gt=0)
+    max_iterations: int = Field(default=2_000, gt=0)
+    max_work_units: float = Field(default=500_000_000.0, gt=0)
+    max_peak_memory_mb: float = Field(default=2_048.0, gt=0)
+    max_output_mb: float = Field(default=1_024.0, gt=0)
+    max_estimated_wall_time_seconds: float = Field(default=900.0, gt=0)
+
+
 class TrustedValidationPolicy(ContractModel):
     """Application-owned validation controls; never exported as an LLM schema."""
 
     check_geometry: bool = True
+    enforce_resource_limits: bool = True
+    solver_profile: Literal["auto", "iterative", "direct"] = "auto"
+    output_interval: int = Field(default=20, ge=1, le=100)
+    resource_limits: ResourceLimits = Field(default_factory=ResourceLimits)
 
 
 class TrustedRunPolicy(ContractModel):
@@ -73,7 +113,7 @@ class TrustedRunPolicy(ContractModel):
     solver_profile: Literal["auto", "iterative", "direct"] = "auto"
     output_interval: int = Field(default=20, ge=1, le=100)
     allow_large_run: bool = False
-    max_complexity: float | None = Field(default=None, gt=0)
+    resource_limits: ResourceLimits = Field(default_factory=ResourceLimits)
     timeout_seconds: float = Field(default=900.0, gt=0)
 
 
@@ -98,6 +138,7 @@ class ValidateConfigResponse(ContractModel):
     problem_type: Literal["minimize_compliance", "compliant_mechanism"] | None = None
     normalized_config: AgentSafeConfig | None = None
     estimated_cost: CostEstimate | None = None
+    geometry_report: GeometryReport | None = None
 
 
 class RunMetrics(ContractModel):

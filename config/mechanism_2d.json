@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "mesh": {
     "kind": "rectangle",
     "bounds": [[0, -5], [10, 5]],

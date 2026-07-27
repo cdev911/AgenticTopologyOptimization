@@ -100,7 +100,7 @@ class RunTopoptSmokeTests(unittest.TestCase):
 
         config = _load_smoke_config()
         config["mesh"]["divisions"] = [2000, 2000]
-        config["opt"]["max_iter"] = 50000
+        config["opt"]["max_iter"] = 1
         start = time.perf_counter()
         result = run_topopt_tool({"config": config}, policy=self._policy())
         elapsed = time.perf_counter() - start
@@ -108,15 +108,19 @@ class RunTopoptSmokeTests(unittest.TestCase):
         self.assertEqual(result["stage"], "safety_check")
         self.assertLess(elapsed, 5.0, "safety_check rejection should be near-instant; topopt() must not run")
 
-    def test_max_complexity_override_can_reject_even_a_tiny_problem(self):
-        # Deliberately does NOT inflate mesh/max_iter -- lowering the ceiling
-        # below the smoke config's own tiny complexity_score (160) is enough,
+    def test_trusted_resource_policy_can_reject_even_a_tiny_problem(self):
+        # Deliberately does NOT inflate mesh/max_iter -- lowering the work limit
+        # below the smoke config's own tiny estimate is enough,
         # and keeps this test fast regardless of outcome.
         from fenitop.tools.run_topopt import run_topopt_tool
 
+        from fenitop.tools.contracts import ResourceLimits
+
         result = run_topopt_tool(
             {"config": _load_smoke_config()},
-            policy=self._policy(max_complexity=1),
+            policy=self._policy(
+                resource_limits=ResourceLimits(max_work_units=1)
+            ),
         )
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["stage"], "safety_check")
@@ -127,16 +131,28 @@ class RunTopoptSmokeTests(unittest.TestCase):
         # smoke config -- this exercises the override path without ever
         # attempting to actually solve a genuinely huge problem.
         from fenitop.tools.run_topopt import run_topopt_tool
+        from fenitop.tools.contracts import ResourceLimits
 
         result = run_topopt_tool(
             {"config": _load_smoke_config()},
             policy=self._policy(
-                max_complexity=1,
+                resource_limits=ResourceLimits(max_work_units=1),
                 allow_large_run=True,
                 render_snapshot=False,
             ),
         )
         self.assertEqual(result["status"], "ok", result.get("error"))
+
+    def test_timeout_budget_participates_in_preflight_admission(self):
+        from fenitop.tools.run_topopt import run_topopt_tool
+
+        result = run_topopt_tool(
+            {"config": _load_smoke_config()},
+            policy=self._policy(timeout_seconds=0.1),
+        )
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["stage"], "safety_check")
+        self.assertIn("estimated_timeout", {e["code"] for e in result["errors"]})
 
 
 if __name__ == "__main__":

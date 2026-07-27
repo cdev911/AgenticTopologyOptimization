@@ -90,13 +90,14 @@ policy. Generated output files are ignored by Git.
 
 Beyond the example scripts, `fenitop/tools/` exposes the config-driven workflow as three composable tools for an agent (or any script) to call, each usable as a plain Python function, a `--input`/`--output` JSON CLI, or an MCP tool — one implementation behind all three. The tool wrappers send their own logging to stderr so stdout can be reserved for machine-readable responses; the hardening note below records a remaining solver-level violation of that contract.
 
-> **Hardening status (2026-07-26):** TH-0 and TH-1 are complete. The runtime and
-> numerical baselines are pinned; the public tools now use strict contract
-> `1.0.0` and physics-only config schema `1.0`. Source strings and execution
-> controls are absent from the agent surface. Semantic/resource validation,
-> numerical-state correctness, subprocess containment, transport isolation, and a
-> verified run manifest remain. Agentic development stays paused until the full
-> blocking [tool-hardening plan](docs/tool-hardening-plan.md) passes;
+> **Hardening status (2026-07-26):** TH-0 through TH-2 are complete. The runtime
+> and numerical baselines are pinned; the public tools now use contract `1.1.0`
+> and physics-only config schema `1.1`. Source strings and execution controls are
+> absent from the agent surface, semantic/mesh-backed validation covers every
+> current solver input, and independent resource ceilings are calibrated in the
+> pinned image. Numerical-state correctness, subprocess containment, transport
+> isolation, and a verified run manifest remain. Agentic development stays paused
+> until the full blocking [tool-hardening plan](docs/tool-hardening-plan.md) passes;
 > `docs/spec.md` is the live status source.
 
 ### `validate_config`
@@ -113,12 +114,24 @@ displacements and component-wise roller supports are rejected in v1.
 Beyond structural checks, it runs logical/physical checks an agent is likely to get wrong — all hard errors, not warnings, since a config that fails them cannot produce a meaningful result:
 
 - `opt.filter_radius` must be smaller than the domain's smallest extent (derived from `mesh.bounds`) — a filter radius at or beyond the domain size would smooth the density field across the entire domain into a uniformly gray design. (Also warns, non-fatally, if the filter radius is smaller than one mesh element — no real smoothing effect.)
-- `fem.dirichlet_bcs` must be non-empty. Trusted validation policy enables a real mesh build that checks every boundary/load region matches at least one facet and that the supports resist all three planar rigid-body modes. Geometry validation is not an agent-controlled switch.
-- Warns (non-fatally) if there's no load at all — `fem.traction_bcs` empty and `fem.body_force` effectively zero — in compliance-minimization mode: there's nothing for the optimizer to act against.
+- Volume fraction and optional initial density are strictly between zero and one;
+  move and SIMP epsilon are positive; beta continuation uses a power-of-two cap.
+  Both problem modes require a nonzero external load.
+- `fem.dirichlet_bcs` must be non-empty. Trusted validation builds the real mesh
+  and checks support/load facets, rigid-body rank, spring nodes, passive-zone
+  cells, traction/support/spring overlaps, solid/void conflicts, required material
+  neighborhoods, and forced-solid feasibility against the volume budget.
+- Mechanism spring stiffness is checked relative to Young's modulus. Entity counts
+  and physical bounds are returned in a typed geometry report.
+- Before any mesh build, pure arithmetic independently estimates elements, nodes,
+  displacement DOFs, iterations, solver-weighted work, peak memory, output, and
+  wall time. The application-owned defaults are calibrated against committed
+  medium compliance and mechanism measurements.
 
 Errors and warnings are structured records containing `code`, `path`, `message`,
 `severity`, and `retryable`. The response includes the normalized config (defaults
-filled in, still JSON-safe and re-runnable) plus an estimated problem size/cost.
+filled in, still JSON-safe and re-runnable), resource estimate, and geometry
+entity report.
 
 ### `run_topopt` and `analyze_results`
 
@@ -187,7 +200,8 @@ default unittest discovery can silently skip nested test modules. A zero-test ru
 now exits nonzero. The suite includes fast real solves for compliance and
 compliant-mechanism modes with tolerance-based references in
 `tests/fixtures/numerical_baselines.json`. One expected failure records the known
-`initial_density` bug until TH-3 fixes it.
+`initial_density` bug until TH-3 fixes it. The TH-2 checkpoint runs 66 tests with
+that one expected failure.
 
 ## Repository layout
 

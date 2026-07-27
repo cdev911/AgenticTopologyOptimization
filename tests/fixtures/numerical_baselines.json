@@ -1,6 +1,6 @@
 {
   "baseline_schema_version": "1",
-  "tool_contract_version": "1.0.0",
+  "tool_contract_version": "1.1.0",
   "execution_scope": "serial",
   "characterized_from_commit": "de06b50b99334f9631be3ca0cf11d5260c004dca",
   "runtime": {
@@ -15,7 +15,7 @@
   "cases": {
     "compliance": {
       "fixture": "smoke_beam_2d.json",
-      "config_sha256": "3c0578553f44388a680d16d613c4a40a003ba93491c8af49ba95ad10576df98d",
+      "config_sha256": "b2639e023c4cd2bee298627d9c9e71edd004b207572dcb32f64b5880cd3f5d2a",
       "problem_type": "minimize_compliance",
       "iterations": 5,
       "stop_reason": "max_iterations_reached",
@@ -31,7 +31,7 @@
     },
     "mechanism": {
       "fixture": "smoke_mechanism_2d.json",
-      "config_sha256": "68b9c2e2d57272d150e5c32242a79af394d411ee7e95e3bad2a029580a396daa",
+      "config_sha256": "b1f2eb4d1859fe979cffefe048375c16240fac9584e6d0e229a6568cf489a2f6",
       "problem_type": "compliant_mechanism",
       "iterations": 5,
       "stop_reason": "max_iterations_reached",

@@ -10,7 +10,7 @@ import dataclasses
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-TOOL_CONTRACT_VERSION = "1.0.0"
+TOOL_CONTRACT_VERSION = "1.1.0"
 
 
 @dataclasses.dataclass
