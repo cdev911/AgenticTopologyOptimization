@@ -8,6 +8,7 @@ from agentic.boundary_draft import (
     BoundaryDraftState,
     BoundaryFieldFact,
 )
+from agentic.approval import format_run_approval_request
 from agentic.compiler import (
     DEFAULT_PROFILE_VERSION,
     FormulationFinalizationError,
@@ -28,6 +29,7 @@ from fenitop.tools.config_models import (
     ComplianceOptimization,
     MechanismOptimization,
 )
+from fenitop.tools.contracts import ValidateConfigResponse
 from fenitop.tools.validate_config import validate_config_tool
 
 
@@ -135,6 +137,163 @@ def first_class_draft(*, load_kind="resultant_vector", assumed_field=None):
 
 
 class CompilerTests(unittest.TestCase):
+    def test_named_corner_pin_resolves_from_nonzero_negative_domain_bounds(self):
+        draft = first_class_draft()
+        pin = _condition(
+            "S4",
+            "support",
+            {
+                "support.kind": "pin",
+                "selector.kind": "boundary_point",
+                "selector.from_corner": "lower_left",
+            },
+        )
+        load = draft.boundary_state.condition("L7")
+        facts = tuple(
+            fact.model_copy(update={"value": [[-5, -2], [5, 2]]})
+            if fact.path == "domain.bounds"
+            else fact
+            for fact in draft.facts
+        )
+        draft = draft.model_copy(update={
+            "facts": facts,
+            "boundary_state": BoundaryDraftState(
+                conditions=(pin, load),
+                next_support_number=5,
+                next_load_number=8,
+            ),
+        })
+
+        result = compile_formulation_draft(draft)
+        self.assertEqual(
+            result.config.fem.boundary_conditions[0].selector.point,
+            (-5.0, -2.0),
+        )
+
+    def test_semantic_mechanism_springs_compile_regions_and_convert_units(self):
+        draft = first_class_draft(load_kind="traction_vector")
+        ordinary = {
+            fact.path: fact for fact in draft.facts
+        }
+        ordinary["problem_type"] = _draft_fact(
+            "problem_type", "compliant_mechanism"
+        )
+        ordinary["compliance_bound"] = _draft_fact("compliance_bound", 10)
+        ordinary["units.length"] = _draft_fact("units.length", "mm")
+        ordinary["units.force"] = _draft_fact("units.force", "N")
+        ordinary["units.stress"] = _draft_fact("units.stress", "MPa")
+        spring_fields = {
+            "spring.direction": "x",
+            "spring.stiffness": 10,
+            "spring.unit": "N/m",
+            "selector.kind": "centered_fraction",
+            "selector.center": 0.5,
+            "selector.span": 0.2,
+        }
+        input_spring = _condition(
+            "I1", "input_spring", {**spring_fields, "selector.edge": "left"}
+        )
+        output_spring = _condition(
+            "O1", "output_spring", {**spring_fields, "selector.edge": "right"}
+        )
+        supports = tuple(
+            _condition(
+                f"S{index}",
+                "support",
+                {
+                    "support.kind": "fixed_all",
+                    "selector.kind": "fraction_interval",
+                    "selector.edge": edge,
+                    "selector.start": start,
+                    "selector.end": end,
+                },
+            )
+            for index, (edge, start, end) in enumerate(
+                (
+                    ("left", 0.0, 0.2),
+                    ("left", 0.8, 1.0),
+                    ("right", 0.0, 0.2),
+                    ("right", 0.8, 1.0),
+                ),
+                start=1,
+            )
+        )
+        load = _condition(
+            "L1",
+            "load",
+            {
+                "load.kind": "traction_vector",
+                "load.vector": [1, 0],
+                "load.distribution": "uniform",
+                "selector.kind": "centered_fraction",
+                "selector.edge": "left",
+                "selector.center": 0.5,
+                "selector.span": 0.2,
+            },
+        )
+        draft = draft.model_copy(update={
+            "facts": tuple(
+                ordinary[path] for path in DRAFT_PATHS if path in ordinary
+            ),
+            "boundary_state": BoundaryDraftState(
+                conditions=(
+                    *supports,
+                    load,
+                    input_spring,
+                    output_spring,
+                ),
+                next_support_number=5,
+                next_load_number=2,
+                next_input_spring_number=2,
+                next_output_spring_number=2,
+            ),
+        })
+
+        self.assertTrue(assess_draft(draft).ready, assess_draft(draft))
+        result = compile_formulation_draft(draft)
+        self.assertAlmostEqual(result.config.opt.in_spring.stiffness, 0.01)
+        self.assertEqual(
+            result.config.opt.in_spring.region.model_dump(mode="json"),
+            {
+                "op": "and",
+                "regions": [
+                    {
+                        "op": "plane",
+                        "axis": "x",
+                        "value": 0,
+                        "tol": 1e-8,
+                    },
+                    {
+                        "op": "range",
+                        "axis": "y",
+                        "min": 1.6,
+                        "max": 2.4,
+                        "min_inclusive": True,
+                        "max_inclusive": True,
+                    },
+                ],
+            },
+        )
+        self.assertEqual(result.spring_evidence[0].spring_id, "I1")
+        self.assertEqual(result.spring_evidence[0].original_unit, "N/m")
+        self.assertEqual(result.spring_evidence[0].normalized_unit, "(N)/(mm)")
+        validation = validate_config_tool({"config": result.config})
+        self.assertEqual(validation["status"], "ok", validation["errors"])
+        spring_records = [
+            item
+            for item in validation["geometry_report"]["entities"]
+            if ".spring.region" in item["path"]
+            or "_spring.region" in item["path"]
+        ]
+        self.assertEqual([item["count"] for item in spring_records], [1, 1])
+        approval = format_run_approval_request(
+            result,
+            ValidateConfigResponse.model_validate(validation),
+        )
+        self.assertIn("I1 Input spring", approval)
+        self.assertIn("10 N/m → 0.01 (N)/(mm)", approval)
+        self.assertIn("1 matched directional nodal DOFs", approval)
+
     def test_roller_and_true_pin_compile_to_component_and_node_constraints(self):
         draft = first_class_draft()
         roller = _condition(

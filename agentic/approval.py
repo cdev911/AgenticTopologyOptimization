@@ -69,6 +69,34 @@ def format_run_approval_request(
         + (f"; Warning: {card.warning}" if card.warning else "")
         for card in validated_boundary_cards(config, validation)
     ]
+    spring_lines = []
+    if compilation.spring_evidence:
+        records = {
+            item.path: item for item in validation.geometry_report.entities
+        }
+        for item in compilation.spring_evidence:
+            path = (
+                "config.opt.in_spring.region"
+                if item.role == "input"
+                else "config.opt.out_spring.region"
+            )
+            record = records.get(path)
+            matched = (
+                f"{record.count} matched directional nodal DOFs"
+                if record is not None
+                else "matched-node evidence unavailable"
+            )
+            spring_lines.append(
+                f"- {item.spring_id} {item.role.title()} spring — "
+                f"{item.direction}-direction at {item.location}; "
+                f"{item.original_stiffness:g} {item.original_unit} → "
+                f"{item.normalized_stiffness:g} {item.normalized_unit} per "
+                f"matched directional DOF; {matched}"
+            )
+    warning_lines = [
+        f"- `{warning.code}`: {warning.message}"
+        for warning in validation.warnings
+    ]
     estimated = validation.estimated_cost
     cost_line = (
         f"- Estimated run: {estimated.num_elements} elements, "
@@ -105,6 +133,20 @@ def format_run_approval_request(
             ),
             "- Boundary conditions (requested → mesh-resolved):",
             *boundary_lines,
+            *(
+                ("- Mechanism springs:", *spring_lines)
+                if spring_lines
+                else ()
+            ),
+            *(
+                (
+                    "",
+                    "Validation warnings requiring review:",
+                    *warning_lines,
+                )
+                if warning_lines
+                else ()
+            ),
             cost_line,
             "",
             "Do you approve these parameters and want me to start the run? "

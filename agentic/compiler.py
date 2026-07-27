@@ -30,7 +30,10 @@ from agentic.intent import (
 )
 from agentic.load_semantics import resolve_boundary_load_state
 from fenitop.tools.config_models import AgentSafeConfig
-from fenitop.tools.mechanical_units import MechanicalUnitContext
+from fenitop.tools.mechanical_units import (
+    MechanicalUnitContext,
+    normalize_scalar,
+)
 
 DEFAULT_PROFILE_VERSION = "agentic-defaults-v1"
 TARGET_SQUARE_DIVISIONS = 50
@@ -56,6 +59,22 @@ class CompilationResult(BaseModel):
     defaults_profile: Literal["agentic-defaults-v1"] = DEFAULT_PROFILE_VERSION
     applied_defaults: tuple[AppliedDefault, ...]
     defaults_notice: str
+    spring_evidence: tuple["SpringCompilationEvidence", ...] = ()
+
+
+class SpringCompilationEvidence(BaseModel):
+    """Review evidence retained while semantic springs compile to solver regions."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    spring_id: str
+    role: Literal["input", "output"]
+    location: str
+    direction: Literal["x", "y"]
+    original_stiffness: float
+    original_unit: str
+    normalized_stiffness: float
+    normalized_unit: str
 
 
 class CompilationProblem(BaseModel):
@@ -84,10 +103,9 @@ class CompilationProblem(BaseModel):
             self.output_spring,
         )
         if self.problem_type == "compliant_mechanism":
-            if any(item is None for item in mechanism_values):
+            if self.compliance_bound is None:
                 raise ValueError(
-                    "compliant mechanisms require compliance_bound, "
-                    "input_spring, and output_spring."
+                    "compliant mechanisms require compliance_bound."
                 )
         elif any(item is not None for item in mechanism_values):
             raise ValueError(
@@ -187,12 +205,14 @@ def _source_from_draft(draft: ProblemDraft) -> CompilationProblem:
         },
     }
     if values["problem_type"] == "compliant_mechanism":
-        for path in ("compliance_bound", "input_spring", "output_spring"):
-            if path not in values:
-                raise FormulationFinalizationError(
-                    f"Missing mechanism fact: {path}."
-                )
-            payload[path] = values[path]
+        if "compliance_bound" not in values:
+            raise FormulationFinalizationError(
+                "Missing mechanism fact: compliance_bound."
+            )
+        payload["compliance_bound"] = values["compliance_bound"]
+        for path in ("input_spring", "output_spring"):
+            if path in values:
+                payload[path] = values[path]
     return CompilationProblem.model_validate(payload)
 
 
@@ -304,20 +324,30 @@ def _boundary_node_selector(
         )
     point = values.get("selector.point")
     if point is None:
-        edge = values.get("selector.edge")
-        center = values.get("selector.center")
-        if edge is None or center is None:
-            raise FormulationFinalizationError(
-                f"{condition.bc_id} boundary point is incomplete."
-            )
-        (x0, y0), (x1, y1) = bounds
-        fraction = float(center)
-        point = {
-            "left": (x0, y0 + fraction * (y1 - y0)),
-            "right": (x1, y0 + fraction * (y1 - y0)),
-            "bottom": (x0 + fraction * (x1 - x0), y0),
-            "top": (x0 + fraction * (x1 - x0), y1),
-        }[str(edge)]
+        corner = values.get("selector.from_corner")
+        if corner is not None:
+            (x0, y0), (x1, y1) = bounds
+            point = {
+                "lower_left": (x0, y0),
+                "upper_left": (x0, y1),
+                "lower_right": (x1, y0),
+                "upper_right": (x1, y1),
+            }[str(corner)]
+        else:
+            edge = values.get("selector.edge")
+            center = values.get("selector.center")
+            if edge is None or center is None:
+                raise FormulationFinalizationError(
+                    f"{condition.bc_id} boundary point is incomplete."
+                )
+            (x0, y0), (x1, y1) = bounds
+            fraction = float(center)
+            point = {
+                "left": (x0, y0 + fraction * (y1 - y0)),
+                "right": (x1, y0 + fraction * (y1 - y0)),
+                "bottom": (x0 + fraction * (x1 - x0), y0),
+                "top": (x0 + fraction * (x1 - x0), y1),
+            }[str(edge)]
     return {
         "kind": "boundary_node",
         "point": tuple(float(value) for value in point),
@@ -384,6 +414,8 @@ def _first_class_boundary_conditions(
 
     compiled = []
     for condition in state.conditions:
+        if condition.kind in {"input_spring", "output_spring"}:
+            continue
         values = condition.values()
         if condition.kind == "support":
             support_kind = values["support.kind"]
@@ -455,6 +487,87 @@ def _first_class_boundary_conditions(
             ): vector,
         })
     return compiled
+
+
+def _selector_region(condition: BoundaryConditionDraft, bounds) -> tuple[dict, str]:
+    """Compile one semantic spring selector to the existing safe region DSL."""
+    selector = _rectangle_selector(condition, bounds)
+    if selector["kind"] == "expert_region":
+        return selector["region"], "expert region"
+    edge = selector["edge"]
+    interval = selector["interval"]
+    low, high = _edge_limits(edge, bounds)
+    if interval["kind"] == "fraction":
+        start = low + float(interval["start"]) * (high - low)
+        end = low + float(interval["end"]) * (high - low)
+    else:
+        start, end = float(interval["start"]), float(interval["end"])
+    (x0, y0), (x1, y1) = bounds
+    fixed_axis, fixed_value, span_axis = {
+        "left": ("x", float(x0), "y"),
+        "right": ("x", float(x1), "y"),
+        "bottom": ("y", float(y0), "x"),
+        "top": ("y", float(y1), "x"),
+    }[edge]
+    return (
+        {
+            "op": "and",
+            "regions": [
+                {"op": "plane", "axis": fixed_axis, "value": fixed_value},
+                {
+                    "op": "range",
+                    "axis": span_axis,
+                    "min": start,
+                    "max": end,
+                },
+            ],
+        },
+        f"{edge} edge from {start:g} to {end:g}",
+    )
+
+
+def _first_class_mechanism_springs(
+    state: BoundaryDraftState,
+    *,
+    bounds,
+    context: MechanicalUnitContext,
+) -> tuple[dict[str, MechanismSpringIntent], tuple[SpringCompilationEvidence, ...]]:
+    compiled: dict[str, MechanismSpringIntent] = {}
+    evidence: list[SpringCompilationEvidence] = []
+    for kind, config_name, role in (
+        ("input_spring", "input_spring", "input"),
+        ("output_spring", "output_spring", "output"),
+    ):
+        matches = [item for item in state.conditions if item.kind == kind]
+        if len(matches) != 1:
+            raise FormulationFinalizationError(
+                f"Exactly one {kind.replace('_', ' ')} is required."
+            )
+        condition = matches[0]
+        values = condition.values()
+        region, location = _selector_region(condition, bounds)
+        normalized = normalize_scalar(
+            values["spring.stiffness"],
+            values["spring.unit"],
+            "spring_stiffness",
+            context,
+        )
+        compiled[config_name] = MechanismSpringIntent(
+            region=region,
+            direction=values["spring.direction"],
+            stiffness=normalized.normalized_value,
+        )
+        evidence.append(SpringCompilationEvidence(
+            spring_id=condition.bc_id,
+            role=role,
+            location=location,
+            direction=values["spring.direction"],
+            original_stiffness=float(values["spring.stiffness"]),
+            original_unit=str(values["spring.unit"]),
+            normalized_stiffness=normalized.normalized_value,
+            normalized_unit=normalized.normalized_unit,
+        ))
+    return compiled, tuple(evidence)
 
 
 def format_defaults_notice(
@@ -541,6 +654,8 @@ def _compile_problem(
     *,
     boundary_conditions: list[dict],
     units: dict,
+    mechanism_springs: dict[str, MechanismSpringIntent] | None = None,
+    spring_evidence: tuple[SpringCompilationEvidence, ...] = (),
 ) -> CompilationResult:
     """Compile already-finalized facts without consulting an LLM."""
     defaults: list[AppliedDefault] = []
@@ -683,18 +798,26 @@ def _compile_problem(
         "void_zone": void_zone,
     }
     if source.problem_type == "compliant_mechanism":
+        springs = mechanism_springs or {
+            "input_spring": source.input_spring,
+            "output_spring": source.output_spring,
+        }
+        if any(value is None for value in springs.values()):
+            raise FormulationFinalizationError(
+                "A compliant mechanism requires complete input and output springs."
+            )
         opt.update(
             {
                 "compliance_bound": source.compliance_bound,
                 "in_spring": {
-                    "region": source.input_spring.region,
-                    "direction": source.input_spring.direction,
-                    "stiffness": source.input_spring.stiffness,
+                    "region": springs["input_spring"].region,
+                    "direction": springs["input_spring"].direction,
+                    "stiffness": springs["input_spring"].stiffness,
                 },
                 "out_spring": {
-                    "region": source.output_spring.region,
-                    "direction": source.output_spring.direction,
-                    "stiffness": source.output_spring.stiffness,
+                    "region": springs["output_spring"].region,
+                    "direction": springs["output_spring"].direction,
+                    "stiffness": springs["output_spring"].stiffness,
                 },
             }
         )
@@ -710,6 +833,7 @@ def _compile_problem(
         config=config,
         applied_defaults=applied,
         defaults_notice=format_defaults_notice(DEFAULT_PROFILE_VERSION, applied),
+        spring_evidence=spring_evidence,
     )
 
 
@@ -737,6 +861,10 @@ def compile_formulation_draft(draft: ProblemDraft) -> CompilationResult:
     )
     state = finalized.boundary_state
     has_boundary_load = any(item.kind == "load" for item in state.conditions)
+    has_semantic_spring = any(
+        item.kind in {"input_spring", "output_spring"}
+        for item in state.conditions
+    )
     body_force_nonzero = any(float(item) != 0.0 for item in source.body_force)
     if not has_boundary_load and not body_force_nonzero:
         raise FormulationFinalizationError(
@@ -748,7 +876,7 @@ def compile_formulation_draft(draft: ProblemDraft) -> CompilationResult:
         units = {"kind": "legacy_consistent"}
     else:
         unit_readiness = assess_mechanical_units(draft)
-        if has_boundary_load and not unit_readiness.ready:
+        if (has_boundary_load or has_semantic_spring) and not unit_readiness.ready:
             details = [
                 *(f"missing {path}" for path in unit_readiness.missing_fields),
                 *(
@@ -778,8 +906,25 @@ def compile_formulation_draft(draft: ProblemDraft) -> CompilationResult:
         context=context,
         legacy_migration=legacy_migration,
     )
+    mechanism_springs = None
+    spring_evidence = ()
+    if source.problem_type == "compliant_mechanism" and any(
+        item.kind in {"input_spring", "output_spring"}
+        for item in state.conditions
+    ):
+        if context is None:
+            raise FormulationFinalizationError(
+                "First-class mechanism springs require explicit mechanical units."
+            )
+        mechanism_springs, spring_evidence = _first_class_mechanism_springs(
+            state,
+            bounds=source.domain.bounds,
+            context=context,
+        )
     return _compile_problem(
         source,
         boundary_conditions=conditions,
         units=units,
+        mechanism_springs=mechanism_springs,
+        spring_evidence=spring_evidence,
     )

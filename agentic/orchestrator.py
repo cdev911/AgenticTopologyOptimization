@@ -545,6 +545,24 @@ class DeterministicOrchestrator:
                 events=tuple(events),
             )
 
+        analysis_warnings = list(getattr(analysis, "warnings", ()))
+        existing_warnings = {
+            (item.code, item.path, item.message) for item in analysis_warnings
+        }
+        inherited_warnings = []
+        for item in (
+            *getattr(validation, "warnings", ()),
+            *getattr(run, "warnings", ()),
+        ):
+            identity = (item.code, item.path, item.message)
+            if identity not in existing_warnings:
+                existing_warnings.add(identity)
+                inherited_warnings.append(item)
+        if inherited_warnings:
+            analysis = analysis.model_copy(
+                update={"warnings": [*analysis_warnings, *inherited_warnings]}
+            )
+
         self._emit(
             events,
             "completed",

@@ -91,6 +91,22 @@ class ApprovalTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "successful mesh validation"):
             format_run_approval_request(compilation, validation)
 
+    def test_validation_warnings_are_visible_before_approval(self):
+        compilation = _compilation()
+        config = compilation.config.model_copy(update={
+            "fem": compilation.config.fem.model_copy(
+                update={"poisson_ratio": 0.495}
+            )
+        })
+        compilation = compilation.model_copy(update={"config": config})
+        validation = ValidateConfigResponse.model_validate(
+            validate_config_tool({"config": config})
+        )
+
+        message = format_run_approval_request(compilation, validation)
+        self.assertIn("Validation warnings requiring review", message)
+        self.assertIn("near incompressible in plane strain", message)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -67,6 +67,16 @@ and the workflow exposes
 the geometry report rather than pretending the value is a
 mesh-independent total spring constant.
 
+In the conversational contract, springs are first-class entities: `I…` identifies
+the input spring and `O…` the output spring. They use the same semantic rectangle
+selectors as supports and loads and retain `spring.direction`,
+`spring.stiffness`, and a dimensional `spring.unit`. Pint requires
+force-per-length dimensionality and normalizes into
+`configured force unit / configured length unit`; for example, `10 N/m` becomes
+`0.01 N/mm`. The compiler—not the model or user—turns a centered fraction or
+physical span into the bounded region DSL consumed by the unchanged solver
+kernel.
+
 The region DSL supports `plane`, `range`, `circle`, `all`, `none`, `and`, `or`,
 and `not`. It is strictly 2D, finite, bounded in depth and node count, and rejects
 unknown fields. Regions describe geometric selection; they do not execute code.
@@ -113,15 +123,19 @@ conversational `ProblemDraft` compiles through the first-class path:
 5. convert semantic rectangle selectors into positive fraction or coordinate
    intervals inside the named edge; and
 6. compile full clamps, edge-normal roller/symmetry components, explicit zero
-   components, and true point pins without changing their physics; and
-7. emit the original stable `S…`/`L…` IDs in canonical schema 2.1.
+   components, and true point pins without changing their physics;
+7. compile stable semantic `I…`/`O…` springs and normalize their
+   force-per-length stiffness; and
+8. emit the original stable identities in canonical schema 2.1.
 
 Supported facet conversions are whole edge, centered fraction, fraction interval,
 coordinate interval, physical width about a fractional center, physical
 length/offset from a corner on the named edge, and expert region. A true pin
-converts an absolute boundary point or edge-relative fractional point into
-`boundary_node`. Unspecified extents, invalid corner/edge pairs, and intervals
-outside the edge fail before tool validation.
+converts an absolute boundary point, named rectangle corner, or edge-relative
+fractional point into `boundary_node`. Named corners are resolved from confirmed
+bounds, so negative and nonzero origins require no model arithmetic. Unspecified
+extents, invalid corner/edge pairs, and intervals outside the edge fail before
+tool validation.
 
 The mesh resolver accepts a boundary-node request only on the rectangle boundary,
 selects one nearest boundary mesh node, and reports `requested_point`,
@@ -201,6 +215,10 @@ mesh-resolved facet count, extent, measure, centroid, outward normal, and any
 resolution warning. Load rows additionally show quantity kind, input vector,
 effective traction, integrated resultant, explicit unit labels, and the
 one-length-unit thickness when available. Missing per-BC evidence fails closed.
+Mechanism rows additionally show stable spring ID/role, requested semantic
+location, original-to-normalized force-per-length stiffness, direction, and
+matched directional nodal DOF count. Validation warnings are a prominent approval
+section, not trace-only diagnostics.
 
 The Streamlit pre-run view consumes the same successful config/report pair. It
 renders stable-ID cards and a deterministic SVG rectangle: dashed orange

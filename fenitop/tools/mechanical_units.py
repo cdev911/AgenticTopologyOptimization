@@ -20,7 +20,7 @@ from pydantic import (
 )
 
 
-QuantityKind = Literal["length", "force", "stress"]
+QuantityKind = Literal["length", "force", "stress", "spring_stiffness"]
 
 
 def _nonblank_unit(value: str) -> str:
@@ -45,6 +45,7 @@ _REFERENCE_UNITS = {
     "length": _REGISTRY.meter,
     "force": _REGISTRY.newton,
     "stress": _REGISTRY.pascal,
+    "spring_stiffness": _REGISTRY.newton / _REGISTRY.meter,
 }
 
 
@@ -77,9 +78,17 @@ def _stress_unit(value: str) -> str:
     return value
 
 
+def _spring_stiffness_unit(value: str) -> str:
+    _require_dimension(value, "spring_stiffness")
+    return value
+
+
 LengthUnitName = Annotated[UnitName, AfterValidator(_length_unit)]
 ForceUnitName = Annotated[UnitName, AfterValidator(_force_unit)]
 StressUnitName = Annotated[UnitName, AfterValidator(_stress_unit)]
+SpringStiffnessUnitName = Annotated[
+    UnitName, AfterValidator(_spring_stiffness_unit)
+]
 
 
 class MechanicalUnitContext(StrictUnitModel):
@@ -120,6 +129,9 @@ class MechanicalUnitContext(StrictUnitModel):
             "length": self.length_unit,
             "force": self.force_unit,
             "stress": self.stress_unit,
+            "spring_stiffness": (
+                f"({self.force_unit})/({self.length_unit})"
+            ),
         }[quantity_kind]
 
 

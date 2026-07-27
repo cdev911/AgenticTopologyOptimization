@@ -159,7 +159,7 @@ without weakening the solver boundary:
   `previous_response_id`, and persisted all-turn reasoning. The canonical draft
   is included on every call, and an expired continuation triggers exactly one
   full-history recovery; generic provider retries remain disabled.
-- The strict API transport is 7,162 characters versus 235,234 for the v1 one-shot
+- The strict API transport is 6,787 characters versus 235,234 for the v1 one-shot
   schema. Ordinary and boundary field values travel as compact JSON strings and
   are decoded immediately through existing deterministic validators. Flat
   create/update/delete/confirm BC operations avoid exposing the recursive solver
@@ -496,6 +496,23 @@ inputs through deterministic migration. The UI shows component support cards and
 pin nodes in the validated preview. A real Dolfinx roller+pin baseline passes,
 and the complete v7 live gate is 53/53 with zero solver starts.
 
+The acceptance-repair v5 formulation contract extends the same application-owned
+entity state to mechanism springs. Input and output springs receive stable `I…`
+and `O…` identities, retain partial semantic edge selectors and per-field
+provenance, and carry an explicit force-per-length stiffness unit. Deterministic
+compilation converts fractional/physical selectors to the bounded region DSL and
+normalizes values such as `N/m` into the configured `N/mm` context. Approval shows
+the original and normalized stiffness, active direction, and matched directional
+nodal DOF count. Named pin corners are likewise retained semantically and resolved
+from the confirmed rectangle bounds. Deterministic readiness supplies a
+human-readable fallback question whenever a model turn omits one.
+
+Validation warnings now appear in the approval request and flow into final
+evidence. Compliance results name compliance as the objective instead of showing
+the mechanism-only zero objective field. The OC updater keeps its non-descent
+safeguard but clips only scale-insignificant positive sensitivity noise; the
+previously failing mixed-load beta transition now completes normally.
+
 ## Supported natural-language scope
 
 The natural-language workflow supports:
@@ -512,8 +529,9 @@ The natural-language workflow supports:
 - quadrilateral or triangular meshes;
 - declarative `plane`, `range`, `circle`, `all`, `none`, `and`, `or`, and `not`
   regions; and
-- compliant-mechanism input/output springs with explicit direction, region, and
-  positive per-matched-directional-DOF stiffness.
+- compliant-mechanism input/output springs with stable identities, semantic edge
+  selectors or expert regions, explicit direction, dimensioned stiffness, and
+  positive per-matched-directional-DOF application.
 
 ## Known limitations
 
@@ -574,7 +592,7 @@ docker compose run --rm -T fenitop python -m pip check
 docker compose run --rm -T fenitop pytest -q
 ```
 
-Current checkpoint: **303 tests plus 197 subtests pass**. The suite
+Current checkpoint: **311 tests plus 197 subtests pass**. The suite
 includes schema and adversarial-input tests, real compliance/mechanism baselines,
 finite-difference sensitivities, geometry validation, resource calibration,
 process timeout/cancellation/crash behavior, secret scrubbing, path and

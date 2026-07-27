@@ -25,7 +25,9 @@ from pydantic import (
 from fenitop.regions import RegionSpec
 
 
-BoundaryKind = Literal["support", "load"]
+BoundaryKind = Literal[
+    "support", "load", "input_spring", "output_spring"
+]
 BoundaryFactBasis = Literal["explicit", "derived", "assumption", "confirmed"]
 BoundaryUpdateBasis = Literal["explicit", "derived", "assumption"]
 BoundaryField = Literal[
@@ -39,6 +41,9 @@ BoundaryField = Literal[
     "load.direction",
     "load.unit",
     "load.distribution",
+    "spring.direction",
+    "spring.stiffness",
+    "spring.unit",
     "selector.kind",
     "selector.edge",
     "selector.start",
@@ -63,6 +68,9 @@ BOUNDARY_FIELDS: tuple[BoundaryField, ...] = (
     "load.direction",
     "load.unit",
     "load.distribution",
+    "spring.direction",
+    "spring.stiffness",
+    "spring.unit",
     "selector.kind",
     "selector.edge",
     "selector.start",
@@ -79,7 +87,7 @@ BOUNDARY_FIELDS: tuple[BoundaryField, ...] = (
 
 
 def _id_order(bc_id: str) -> tuple[int, int]:
-    return (0 if bc_id.startswith("S") else 1, int(bc_id[1:]))
+    return ({"S": 0, "L": 1, "I": 2, "O": 3}[bc_id[0]], int(bc_id[1:]))
 
 
 class StrictBoundaryModel(BaseModel):
@@ -169,6 +177,9 @@ _FIELD_ADAPTERS: dict[BoundaryField, TypeAdapter] = {
     "load.direction": TypeAdapter(Direction),
     "load.unit": TypeAdapter(UnitText),
     "load.distribution": TypeAdapter(Distribution),
+    "spring.direction": TypeAdapter(Literal["x", "y"]),
+    "spring.stiffness": TypeAdapter(PositiveFiniteNumber),
+    "spring.unit": TypeAdapter(UnitText),
     "selector.kind": TypeAdapter(SelectorKind),
     "selector.edge": TypeAdapter(Edge),
     "selector.start": TypeAdapter(FiniteNumber),
@@ -250,11 +261,11 @@ class BoundaryCreate(StrictBoundaryModel):
 
 
 class BoundaryUpdate(BoundaryFieldInput):
-    bc_id: str = Field(pattern=r"^[SL][1-9][0-9]*$")
+    bc_id: str = Field(pattern=r"^[SLIO][1-9][0-9]*$")
 
 
 class BoundaryDelete(StrictBoundaryModel):
-    bc_id: str = Field(pattern=r"^[SL][1-9][0-9]*$")
+    bc_id: str = Field(pattern=r"^[SLIO][1-9][0-9]*$")
     source_quote: str
     rationale: str
 
@@ -265,7 +276,7 @@ class BoundaryDelete(StrictBoundaryModel):
 
 
 class BoundaryConfirm(StrictBoundaryModel):
-    bc_id: str = Field(pattern=r"^[SL][1-9][0-9]*$")
+    bc_id: str = Field(pattern=r"^[SLIO][1-9][0-9]*$")
     field: BoundaryField
     source_quote: str
     rationale: str
@@ -319,14 +330,19 @@ class BoundaryFieldFact(StrictBoundaryModel):
 
 
 class BoundaryConditionDraft(StrictBoundaryModel):
-    bc_id: str = Field(pattern=r"^[SL][1-9][0-9]*$")
+    bc_id: str = Field(pattern=r"^[SLIO][1-9][0-9]*$")
     kind: BoundaryKind
     created_turn: int = Field(ge=1)
     facts: tuple[BoundaryFieldFact, ...] = ()
 
     @model_validator(mode="after")
     def _canonical_facts_and_id(self):
-        prefix = "S" if self.kind == "support" else "L"
+        prefix = {
+            "support": "S",
+            "load": "L",
+            "input_spring": "I",
+            "output_spring": "O",
+        }[self.kind]
         if not self.bc_id.startswith(prefix):
             raise ValueError(f"{self.kind} IDs must start with {prefix}.")
         names = [fact.field for fact in self.facts]
@@ -334,8 +350,17 @@ class BoundaryConditionDraft(StrictBoundaryModel):
             raise ValueError("BC facts must have unique fields.")
         if names != sorted(names, key=BOUNDARY_FIELDS.index):
             raise ValueError("BC facts must use canonical field ordering.")
-        disallowed_prefix = "load." if self.kind == "support" else "support."
-        if any(name.startswith(disallowed_prefix) for name in names):
+        allowed_prefix = {
+            "support": "support.",
+            "load": "load.",
+            "input_spring": "spring.",
+            "output_spring": "spring.",
+        }[self.kind]
+        if any(
+            name.startswith(("support.", "load.", "spring."))
+            and not name.startswith(allowed_prefix)
+            for name in names
+        ):
             raise ValueError(f"{self.kind} BC contains incompatible fields.")
         return self
 
@@ -363,6 +388,8 @@ class BoundaryDraftState(StrictBoundaryModel):
     revisions: tuple[BoundaryRevision, ...] = ()
     next_support_number: int = Field(default=1, ge=1)
     next_load_number: int = Field(default=1, ge=1)
+    next_input_spring_number: int = Field(default=1, ge=1)
+    next_output_spring_number: int = Field(default=1, ge=1)
 
     @model_validator(mode="after")
     def _unique_ids_and_monotonic_counters(self):
@@ -374,6 +401,8 @@ class BoundaryDraftState(StrictBoundaryModel):
         for prefix, next_number in (
             ("S", self.next_support_number),
             ("L", self.next_load_number),
+            ("I", self.next_input_spring_number),
+            ("O", self.next_output_spring_number),
         ):
             used = [int(item[1:]) for item in ids if item.startswith(prefix)]
             if used and next_number <= max(used):
@@ -508,7 +537,8 @@ def assess_boundary_state(state: BoundaryDraftState) -> BoundaryDraftReadiness:
             has_relative = (
                 "selector.edge" in values and "selector.center" in values
             )
-            if not has_absolute and not has_relative:
+            has_corner = "selector.from_corner" in values
+            if not has_absolute and not has_relative and not has_corner:
                 missing.append("selector.point_or_edge_center")
         elif selector_kind == "expert_region":
             if "selector.region" not in values:
@@ -529,7 +559,7 @@ def assess_boundary_state(state: BoundaryDraftState) -> BoundaryDraftReadiness:
                 )
             ):
                 capabilities.append("nonzero_prescribed_displacement")
-        else:
+        elif condition.kind == "load":
             load_kind = values.get("load.kind")
             if load_kind is None:
                 missing.append("load.kind")
@@ -548,6 +578,14 @@ def assess_boundary_state(state: BoundaryDraftState) -> BoundaryDraftReadiness:
                         missing.append(field)
             if load_kind is not None and "load.distribution" not in values:
                 missing.append("load.distribution")
+        else:
+            for field in (
+                "spring.direction",
+                "spring.stiffness",
+                "spring.unit",
+            ):
+                if field not in values:
+                    missing.append(field)
 
         unconfirmed = tuple(
             fact.field
@@ -571,10 +609,14 @@ def assess_boundary_state(state: BoundaryDraftState) -> BoundaryDraftReadiness:
 
 
 def _field_allowed(kind: BoundaryKind, field: BoundaryField) -> bool:
-    return not (
-        (kind == "support" and field.startswith("load."))
-        or (kind == "load" and field.startswith("support."))
-    )
+    entity_prefixes = ("support.", "load.", "spring.")
+    allowed = {
+        "support": "support.",
+        "load": "load.",
+        "input_spring": "spring.",
+        "output_spring": "spring.",
+    }[kind]
+    return not field.startswith(entity_prefixes) or field.startswith(allowed)
 
 
 def _selector_is_complete(values: dict[str, object]) -> bool:
@@ -689,6 +731,58 @@ def _retain_named_edge_center(
         source_quote=source.source_quote,
         rationale=(
             "A named edge center fixes the along-edge fractional position at 0.5."
+        ),
+    )
+    return condition.model_copy(update={
+        "facts": tuple(
+            facts[name] for name in BOUNDARY_FIELDS if name in facts
+        )
+    })
+
+
+def _retain_named_boundary_point_corner(
+    condition: BoundaryConditionDraft,
+    *,
+    turn_number: int,
+) -> BoundaryConditionDraft:
+    """Keep a named pin corner semantic until domain bounds can resolve it."""
+    if (
+        condition.kind != "support"
+        or condition.values().get("support.kind") != "pin"
+        or condition.values().get("selector.kind") != "boundary_point"
+        or condition.fact("selector.point") is not None
+        or condition.fact("selector.from_corner") is not None
+    ):
+        return condition
+    patterns = {
+        "lower_left": r"\b(?:lower|bottom)[ -]left\s+corner\b",
+        "upper_left": r"\b(?:upper|top)[ -]left\s+corner\b",
+        "lower_right": r"\b(?:lower|bottom)[ -]right\s+corner\b",
+        "upper_right": r"\b(?:upper|top)[ -]right\s+corner\b",
+    }
+    source = next(
+        (
+            (fact, corner)
+            for fact in condition.facts
+            if fact.source_turn == turn_number and fact.source_quote
+            for corner, pattern in patterns.items()
+            if re.search(pattern, fact.source_quote, re.IGNORECASE)
+        ),
+        None,
+    )
+    if source is None:
+        return condition
+    fact, corner = source
+    facts = {item.field: item for item in condition.facts}
+    facts["selector.from_corner"] = BoundaryFieldFact(
+        field="selector.from_corner",
+        value=corner,
+        basis="derived",
+        source_turn=turn_number,
+        source_quote=fact.source_quote,
+        rationale=(
+            "The named rectangle corner is retained semantically and will be "
+            "resolved from the confirmed domain bounds."
         ),
     )
     return condition.model_copy(update={
@@ -839,6 +933,8 @@ def merge_boundary_patch(
     issues: list[BoundaryPatchIssue] = []
     next_support = state.next_support_number
     next_load = state.next_load_number
+    next_input_spring = state.next_input_spring_number
+    next_output_spring = state.next_output_spring_number
 
     for create in patch.creates:
         facts: list[BoundaryFieldFact] = []
@@ -868,9 +964,15 @@ def merge_boundary_patch(
         if create.kind == "support":
             bc_id = f"S{next_support}"
             next_support += 1
-        else:
+        elif create.kind == "load":
             bc_id = f"L{next_load}"
             next_load += 1
+        elif create.kind == "input_spring":
+            bc_id = f"I{next_input_spring}"
+            next_input_spring += 1
+        else:
+            bc_id = f"O{next_output_spring}"
+            next_output_spring += 1
         condition = BoundaryConditionDraft(
             bc_id=bc_id,
             kind=create.kind,
@@ -959,6 +1061,8 @@ def merge_boundary_patch(
             revisions=tuple(revisions),
             next_support_number=next_support,
             next_load_number=next_load,
+            next_input_spring_number=next_input_spring,
+            next_output_spring_number=next_output_spring,
         ).pending_confirmations()
     }
     generic_confirmation = (
@@ -1056,10 +1160,13 @@ def merge_boundary_patch(
 
     conditions = {
         bc_id: _derive_constant_traction_distribution(
-            _retain_named_edge_center(
-                _resolve_unqualified_named_side(
-                    condition,
-                    user_message=user_message,
+            _retain_named_boundary_point_corner(
+                _retain_named_edge_center(
+                    _resolve_unqualified_named_side(
+                        condition,
+                        user_message=user_message,
+                        turn_number=turn_number,
+                    ),
                     turn_number=turn_number,
                 ),
                 turn_number=turn_number,
@@ -1076,6 +1183,8 @@ def merge_boundary_patch(
         revisions=tuple(revisions),
         next_support_number=next_support,
         next_load_number=next_load,
+        next_input_spring_number=next_input_spring,
+        next_output_spring_number=next_output_spring,
     )
     return BoundaryMergeResult(
         state=merged,

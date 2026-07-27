@@ -33,3 +33,6 @@ results/
 
 # Local comparison snapshot, not part of the runnable package.
 reference-code/
+
+# User-owned acceptance transcripts/screenshots; reviewed locally, never committed.
+Test-Run-Examples/

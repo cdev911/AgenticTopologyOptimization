@@ -119,6 +119,7 @@ def _condition_observation(
         boundary_point_complete = (
             "point" in payload
             or {"edge", "center"}.issubset(payload)
+            or "from_corner" in payload
         )
         required = set() if boundary_point_complete else {"point"}
     if required and not required.issubset(payload):

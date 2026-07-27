@@ -155,12 +155,18 @@ def build_evidence_ledger(analysis: AnalyzeResultsResponse) -> EvidenceLedger:
         f"Converged: {convergence.converged}; stop reason: "
         f"{convergence.stop_reason}; iterations: {convergence.iterations}.",
     )
-    add(
-        "metrics",
-        "required",
-        f"Final compliance: {metrics.final_compliance}; final volume: "
-        f"{metrics.final_volume}; final objective: {metrics.final_objective}.",
-    )
+    if constraints.compliance_bound is None:
+        metric_text = (
+            f"Final compliance objective: {metrics.final_compliance}; "
+            f"final volume: {metrics.final_volume}."
+        )
+    else:
+        metric_text = (
+            f"Final compliance: {metrics.final_compliance}; final volume: "
+            f"{metrics.final_volume}; signed output objective: "
+            f"{metrics.final_objective}."
+        )
+    add("metrics", "required", metric_text)
     add(
         "constraints",
         "required",
