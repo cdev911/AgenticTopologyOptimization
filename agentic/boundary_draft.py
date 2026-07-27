@@ -29,6 +29,9 @@ BoundaryFactBasis = Literal["explicit", "derived", "assumption", "confirmed"]
 BoundaryUpdateBasis = Literal["explicit", "derived", "assumption"]
 BoundaryField = Literal[
     "support.kind",
+    "support.direction",
+    "support.magnitude",
+    "support.unit",
     "load.kind",
     "load.vector",
     "load.magnitude",
@@ -50,6 +53,9 @@ BoundaryField = Literal[
 ]
 BOUNDARY_FIELDS: tuple[BoundaryField, ...] = (
     "support.kind",
+    "support.direction",
+    "support.magnitude",
+    "support.unit",
     "load.kind",
     "load.vector",
     "load.magnitude",
@@ -153,6 +159,9 @@ Distribution = Literal["uniform", "point", "varying"]
 
 _FIELD_ADAPTERS: dict[BoundaryField, TypeAdapter] = {
     "support.kind": TypeAdapter(SupportKind),
+    "support.direction": TypeAdapter(Direction),
+    "support.magnitude": TypeAdapter(PositiveFiniteNumber),
+    "support.unit": TypeAdapter(UnitText),
     "load.kind": TypeAdapter(LoadKind),
     "load.vector": TypeAdapter(Vector2D),
     "load.magnitude": TypeAdapter(PositiveFiniteNumber),
@@ -516,6 +525,15 @@ def assess_boundary_state(state: BoundaryDraftState) -> BoundaryDraftReadiness:
                 missing.append("support.kind")
             elif support_kind in _CAPABILITY_SUPPORTS:
                 capabilities.append(_CAPABILITY_SUPPORTS[support_kind])
+            if any(
+                field in values
+                for field in (
+                    "support.direction",
+                    "support.magnitude",
+                    "support.unit",
+                )
+            ):
+                capabilities.append("nonzero_prescribed_displacement")
         else:
             load_kind = values.get("load.kind")
             if load_kind is None:
@@ -562,6 +580,85 @@ def _field_allowed(kind: BoundaryKind, field: BoundaryField) -> bool:
         (kind == "support" and field.startswith("load."))
         or (kind == "load" and field.startswith("support."))
     )
+
+
+def _selector_is_complete(values: dict[str, object]) -> bool:
+    required = {
+        "whole_edge": {"selector.edge"},
+        "centered_fraction": {
+            "selector.edge",
+            "selector.center",
+            "selector.span",
+        },
+        "fraction_interval": {
+            "selector.edge",
+            "selector.start",
+            "selector.end",
+        },
+        "coordinate_interval": {
+            "selector.edge",
+            "selector.start",
+            "selector.end",
+        },
+        "centered_width": {
+            "selector.edge",
+            "selector.center",
+            "selector.width",
+        },
+        "distance_from_corner": {
+            "selector.edge",
+            "selector.from_corner",
+            "selector.offset",
+            "selector.length",
+        },
+    }.get(values.get("selector.kind"))
+    return required is not None and required.issubset(values)
+
+
+def _derive_constant_traction_distribution(
+    condition: BoundaryConditionDraft,
+    *,
+    turn_number: int,
+) -> BoundaryConditionDraft:
+    """Make uniformity deterministic for a constant traction on a finite region."""
+    values = condition.values()
+    if (
+        condition.kind != "load"
+        or values.get("load.kind")
+        not in {"traction_vector", "traction_magnitude"}
+        or not _selector_is_complete(values)
+    ):
+        return condition
+    existing = condition.fact("load.distribution")
+    if existing is not None and not (
+        existing.basis == "assumption" and existing.value == "uniform"
+    ):
+        return condition
+    quoted = next(
+        (
+            fact
+            for field in ("load.vector", "load.magnitude", "load.kind")
+            if (fact := condition.fact(field)) is not None
+            and fact.source_quote
+        ),
+        None,
+    )
+    facts = {fact.field: fact for fact in condition.facts}
+    facts["load.distribution"] = BoundaryFieldFact(
+        field="load.distribution",
+        value="uniform",
+        basis="derived",
+        source_turn=quoted.source_turn if quoted else turn_number,
+        source_quote=quoted.source_quote if quoted else "",
+        rationale=(
+            "A constant traction over a complete finite selector is uniform."
+        ),
+    )
+    return condition.model_copy(update={
+        "facts": tuple(
+            facts[name] for name in BOUNDARY_FIELDS if name in facts
+        )
+    })
 
 
 def _fact_from_input(
@@ -844,6 +941,13 @@ def merge_boundary_patch(
             bc_id=delete.bc_id,
         ))
 
+    conditions = {
+        bc_id: _derive_constant_traction_distribution(
+            condition,
+            turn_number=turn_number,
+        )
+        for bc_id, condition in conditions.items()
+    }
     merged = BoundaryDraftState(
         conditions=tuple(sorted(
             conditions.values(),

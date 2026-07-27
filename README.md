@@ -159,7 +159,7 @@ without weakening the solver boundary:
   `previous_response_id`, and persisted all-turn reasoning. The canonical draft
   is included on every call, and an expired continuation triggers exactly one
   full-history recovery; generic provider retries remain disabled.
-- The strict API transport is 6,491 characters versus 235,234 for the v1 one-shot
+- The strict API transport is 7,162 characters versus 235,234 for the v1 one-shot
   schema. Ordinary and boundary field values travel as compact JSON strings and
   are decoded immediately through existing deterministic validators. Flat
   create/update/delete/confirm BC operations avoid exposing the recursive solver
@@ -382,6 +382,18 @@ docker compose run --rm -T fenitop \
   pytest -q tests/agentic/test_bc_evaluation.py
 ```
 
+Its complete billed release evaluator calls only the live formulation adapter,
+never the orchestrator or solver. It retries connection/timeouts up to three
+times but never retries a semantic failure:
+
+```bash
+docker compose run --rm -T fenitop \
+  python scripts/boundary_live_eval.py --summary-only
+```
+
+Use `--scenarios <id> ...` for focused diagnosis. The current corpus contract is
+`boundary-condition-evals-v6`; the command incurs API cost.
+
 The provider-independent Package 1 core stores partial BC entities with
 stable application-owned IDs, field-level provenance, revisions, pending
 confirmations, and typed create/update/delete/confirm patches.
@@ -433,6 +445,17 @@ effective traction, integrated resultant, units, thickness, and warnings where
 applicable. Exact field provenance and revisions remain in the diagnostic
 expander; neither the cards nor the diagram perform geometry resolution or grant
 run authority.
+
+Package 7 adds the fixed 53-conversation live gate and the deterministic
+normalization needed to grade engineering meaning rather than model spelling.
+Equivalent fractional selector forms compare as the same interval, exact points
+may carry a redundant consistent corner label, and constant traction over a
+complete finite selector is deterministically uniform. Unsupported semantics,
+assumptions, clarifications, silent conversions, and the no-solver rule remain
+exactly graded. The complete local gate passes; the latest clean live run reached
+51/53 before the final constant-traction normalization, and those remaining two
+cases then passed a focused 2/2 rerun. A fresh clean 53/53 invocation remains the
+release checkpoint.
 
 ## Supported natural-language scope
 
@@ -511,7 +534,7 @@ docker compose run --rm -T fenitop python -m pip check
 docker compose run --rm -T fenitop pytest -q
 ```
 
-Current checkpoint: **280 tests plus 194 subtests pass**. The suite
+Current checkpoint: **292 tests plus 194 subtests pass**. The suite
 includes schema and adversarial-input tests, real compliance/mechanism baselines,
 finite-difference sensitivities, geometry validation, resource calibration,
 process timeout/cancellation/crash behavior, secret scrubbing, path and

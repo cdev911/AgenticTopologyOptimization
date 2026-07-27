@@ -142,9 +142,24 @@ Boundary fields and meanings
 Support:
 - support.kind:
   "fixed_all", "roller_normal", "roller_x", "roller_y", "symmetry", or "pin".
+- support.direction: "x" or "y", support.magnitude: positive number, and
+  support.unit: displacement length unit are formulation-only retention fields
+  for an explicitly nonzero prescribed displacement. Such a support remains
+  capability-limited and must list "nonzero_prescribed_displacement"; never
+  compile it or alias it to fixed_all, roller_x, roller_y, roller_normal,
+  symmetry, or pin. Leave support.kind absent because a nonzero prescribed
+  displacement is not a zero-valued support kind.
 - Only fixed_all is executable now. Recognize other kinds faithfully, list
   "component_support" for rollers/symmetry or "point_node_pin" for a true pin,
   and never alias them to fixed_all.
+- A roller along a named rectangle edge constrains the displacement normal to
+  that edge and uses roller_normal. Use roller_x or roller_y only when the user
+  explicitly names the zero displacement component rather than describing a
+  nonzero prescribed displacement.
+- A generic phrase such as “supported on the left” leaves support.kind
+  ambiguous, but absent any partial/near/segment qualifier it still refers to
+  the whole left edge. Preserve selector.kind="whole_edge" while asking whether
+  the support is a clamp, roller, or pin.
 
 Load:
 - load.kind:
@@ -159,6 +174,10 @@ Load:
 - load.unit: explicit unit for this load. Traction/pressure uses stress units;
   resultant uses force units.
 - load.distribution: "uniform", "point", or "varying".
+- A single constant traction vector or magnitude stated over an entire named
+  edge is a uniform traction; record load.distribution="uniform" as derived.
+  This does not require a separate confirmation. Do not apply this derivation
+  to a resultant, an unresolved extent, or wording that says the load varies.
 
 Do not confuse load quantities:
 - traction/pressure is distributed force per area under the unit-thickness model
@@ -176,6 +195,14 @@ Do not confuse load quantities:
   quantity kind and direction, and do not invent units.
 - “Pressure” without inward/outward orientation requires clarification. Bare
   normal, tangential, x, or y lacks a sign/sense and requires clarification.
+- “Tip load” or “end load” does not by itself establish a mathematical point
+  force. Preserve the free edge, magnitude, direction, and unit, leave load.kind
+  and finite extent unresolved, and ask whether the user means traction, a
+  distributed resultant, or an exact point load.
+- A clockwise/counterclockwise moment is not a right/left load direction. The
+  current direction enum cannot retain rotational sense, so omit load.direction,
+  preserve load.kind="moment", magnitude, unit, and an unspecified extent, then
+  explain the applied-moment capability limit.
 
 Selector:
 - selector.kind:
@@ -193,13 +220,20 @@ Selector:
 - distance_from_corner uses selector.from_corner
   (lower_left/upper_left/lower_right/upper_right), nonnegative selector.offset,
   and positive selector.length. Keep these values semantic.
+- A named corner is a known relative-location fact even when the user says only
+  “near” that corner and the edge/extent are unresolved. Always retain it as
+  selector.from_corner; use selector.kind="unspecified" until the user chooses
+  the edge and finite extent. Never discard the corner merely because the
+  selector is incomplete.
 - boundary_point uses selector.point [x,y], or selector.edge plus fractional
   selector.center when absolute geometry is unknown.
 - expert_region uses selector.region=REGION.
 - unspecified_extent preserves a known edge whose along-edge extent is missing.
 - unspecified preserves a BC whose boundary location is not yet known.
 - On a vertical edge, ambiguous “width” may mean vertical extent or horizontal
-  domain width. Ask what it means instead of choosing.
+  domain width. Ask what it means instead of choosing. Keep
+  selector.kind="unspecified_extent"; do not store selector.span or
+  selector.width until the user resolves the axis meaning and location.
 
 Units and assumptions
 =====================
@@ -211,6 +245,18 @@ assumptions, explain them, and ask for confirmation. Otherwise ask which
 consistent unit system to use. Never invent units silently. The implicit
 out-of-plane thickness is one configured length unit; mention this when a total
 resultant is requested.
+- When dimensions are unlabeled but force is N and Young's modulus is MPa,
+  propose the coherent N-mm-MPa context as explicit ordinary assumptions and ask
+  the user to confirm them; do not merely ask an open-ended unit question.
+- Whenever a total resultant is requested and uniform distribution is not
+  explicit, propose load.distribution="uniform" as an assumption and ask for
+  confirmation—even when its finite segment is not resolved yet. Do not leave
+  the proposal only in prose and do not omit it while asking for the extent.
+- A direct reassignment of the same named quantity, such as
+  “external_load is 10” after “external_load is 1 N,” is correction authority
+  for that quantity. Update its magnitude and retain its unrelated direction,
+  selector, and unit. This does not weaken the rule that a newly implied geometry
+  conflicting with explicit dimensions requires clarification.
 
 Common BC examples
 ==================

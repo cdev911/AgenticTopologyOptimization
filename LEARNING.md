@@ -803,6 +803,65 @@ preserved the deterministic vector artifact without adding a rasterization
 dependency. The lesson is small but reusable: test the presentation transport,
 not just the generated content.
 
+### 16.8 The evaluator is part of the product contract
+
+Package 7 began with a six-scenario live script, but the planned release claim
+covered 53 fixed conversations. We therefore built a separate evaluator that
+uses the real formulation adapter while importing neither orchestration nor the
+solver. Each case starts from a fresh session, normalizes the resulting
+application-owned draft, grades exact semantic and safety codes, records API
+usage, and reports `solver_executed=false`.
+
+The first clean attempt crashed because a partial centered selector contained an
+edge and span but no center. The application response was safely incomplete; the
+strict evaluation model simply could not represent it. Downgrading incomplete
+selectors to a typed unresolved selector—and turning that crash into a
+regression—taught an important lesson: a grader that cannot represent safe
+partial behavior will report false product failures.
+
+Other apparent failures came from stale or overly syntactic expectations:
+
+- a boundary point can be absolute coordinates or an edge-relative center;
+- upper-half `[0.5,1]` and center/span `(0.75,0.5)` are identical fractional
+  geometry;
+- an exact point may redundantly retain its consistent corner name; and
+- `unspecified_extent` has no distinct meaning from `unspecified` until an edge
+  is known.
+
+We canonicalized only these proven equivalences. We did not weaken comparison of
+load kind, value, direction, units, support kind, clarification, assumption,
+capability limit, silent conversion, or solver execution.
+
+### 16.9 Separate model semantics, deterministic derivation, and provider health
+
+The billed runs exposed three different failure classes that should not be fixed
+the same way.
+
+First, real model failures required prompt or intermediate-representation work:
+the model sometimes dropped a named corner, omitted a uniform-resultant proposal,
+or could not retain nonzero prescribed-displacement direction/magnitude/unit.
+Those became explicit v3 prompt rules and typed formulation-only fields.
+
+Second, constant-traction uniformity should not depend on model phrasing. A
+constant vector or magnitude over a complete finite selector is mathematically
+uniform. Some calls marked that fact derived while others proposed it as an
+assumption. The durable fix was application-owned normalization in the BC merger,
+not repeated prompt tuning. Resultants deliberately remain different because
+their distribution is a user-visible modeling assumption.
+
+Third, one run suffered a provider outage: after 27 cases, connection/timeouts
+replaced nearly every remaining response. Counting those as language failures
+would corrupt the measurement. The release harness now retries only connection
+and timeout failures, up to three attempts, and never retries a semantic miss.
+Usage is accumulated across attempts.
+
+The latest clean post-contract run reached 51/53 with zero solver starts. Its two
+remaining constant-traction cases then passed a focused 2/2 live rerun after the
+deterministic merger fix. The complete Docker suite passed 292 tests plus 194
+subtests. We record this as strong implementation evidence, but not as a 53/53
+release pass: a clean post-fix full invocation is still required. Honest release
+bookkeeping is part of the learning.
+
 ## 17. How we will continue learning
 
 We will use these rules for the remaining work:
@@ -877,5 +936,11 @@ This condensed trail connects the lessons above to the implementation order:
   correction guidance, deterministic requested/resolved SVG preview, visible
   load conversion, complete BC provenance in the UI expander, and human-readable
   approval rows.
-- **Next** — run the complete first-increment release gate, including the fixed
-  billed BC conversations, without starting the solver.
+- **2026-07-27** — built the 53-case formulation-only billed gate, repaired
+  evaluator representational defects, separated provider retry from semantic
+  grading, strengthened the v3 BC prompt/IR, and made constant-traction
+  uniformity deterministic in application code. The local gate passes; the clean
+  live gate reached 51/53 before the final fix and the affected cases passed 2/2
+  afterward.
+- **Next** — rerun the clean post-fix first-increment billed gate, including the
+  fixed billed BC conversations, without starting the solver.

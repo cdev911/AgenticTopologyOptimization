@@ -1,5 +1,5 @@
 {
-  "version": "boundary-condition-evals-v1",
+  "version": "boundary-condition-evals-v6",
   "description": "Provider-independent semantic targets for natural-language supports and boundary loads. These cases grade retained meaning and safety behavior; they never authorize a solver run.",
   "global_forbidden_behaviors": [
     "solver_start",
@@ -138,7 +138,7 @@
       "family": "support_segments",
       "purpose": "Retain the known vicinity without inventing a segment extent.",
       "turns": ["Clamp the boundary near the lower-left corner."],
-      "expected": {"semantic_state": "ambiguous", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "partial", "support_kind": "fixed_all", "selector_kind": "unspecified_extent"}], "clarifications": ["boundary_edge", "boundary_extent"]},
+      "expected": {"semantic_state": "ambiguous", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "partial", "support_kind": "fixed_all", "selector_kind": "unspecified", "from_corner": "lower_left"}], "clarifications": ["boundary_edge", "boundary_extent"]},
       "tags": ["vague-location"]
     },
 
@@ -225,7 +225,7 @@
       "family": "distributed_loads",
       "purpose": "Retain the known edge while asking for quantity, magnitude, and direction.",
       "turns": ["Put a load on the right side."],
-      "expected": {"semantic_state": "incomplete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "completeness": "partial", "edge": "right", "selector_kind": "unspecified_extent"}], "clarifications": ["boundary_extent", "load_direction", "load_magnitude", "load_quantity_kind"]},
+      "expected": {"semantic_state": "incomplete", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "completeness": "partial", "edge": "right", "selector_kind": "whole_edge"}], "clarifications": ["load_direction", "load_magnitude", "load_quantity_kind"]},
       "tags": ["partial"]
     },
 
@@ -261,7 +261,7 @@
       "expected": {"semantic_state": "incomplete", "boundary_conditions": [
         {"bc_id": "S1", "kind": "support", "support_kind": "fixed_all", "edge": "left", "selector_kind": "whole_edge"},
         {"bc_id": "L1", "kind": "load", "completeness": "partial", "load_kind": "resultant_magnitude", "edge": "right", "selector_kind": "centered_fraction", "center": 0.5, "span": 0.1, "magnitude": 10.0, "unit": "N"}
-      ], "clarifications": ["load_direction", "unit_system"]},
+      ], "clarifications": ["load_direction", "unit_system", "confirm_uniform_distribution"], "assumptions": ["uniform_distribution", "unit_system_n_mm_mpa"]},
       "tags": ["supplied-transcript", "correction", "units"]
     },
     {
@@ -310,7 +310,7 @@
       "id": "two_distinct_boundary_loads",
       "family": "multiple_and_corrections",
       "purpose": "Keep two loads separate and ordered.",
-      "turns": ["Apply [0,-1] on the whole right edge and [2,0] on the upper half of the left edge."],
+      "turns": ["Apply traction [0,-1] on the whole right edge and traction [2,0] on the upper half of the left edge."],
       "expected": {"semantic_state": "complete", "boundary_conditions": [
         {"bc_id": "L1", "kind": "load", "load_kind": "traction_vector", "edge": "right", "selector_kind": "whole_edge", "vector": [0.0, -1.0], "distribution": "uniform"},
         {"bc_id": "L2", "kind": "load", "load_kind": "traction_vector", "edge": "left", "selector_kind": "fraction_interval", "start": 0.5, "end": 1.0, "vector": [2.0, 0.0], "distribution": "uniform"}
@@ -399,7 +399,7 @@
       "id": "conflicting_top_and_right_location",
       "family": "ambiguity_and_conflicts",
       "purpose": "Detect contradictory edge descriptions.",
-      "turns": ["Apply L1 on the top edge, specifically on the right edge at x=10."],
+      "turns": ["Apply a load on the top edge, specifically on the right edge at x=10."],
       "expected": {"semantic_state": "ambiguous", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "completeness": "partial", "selector_kind": "unspecified"}], "clarifications": ["conflicting_boundary_location", "load_direction", "load_magnitude", "load_quantity_kind"]},
       "tags": ["conflict"]
     },
@@ -408,7 +408,7 @@
       "family": "ambiguity_and_conflicts",
       "purpose": "Do not choose between mutually different support semantics.",
       "turns": ["The left edge is fully fixed, but make that same edge a horizontal roller."],
-      "expected": {"semantic_state": "ambiguous", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "partial", "edge": "left", "selector_kind": "whole_edge"}], "clarifications": ["conflicting_support_kind"]},
+      "expected": {"semantic_state": "ambiguous", "boundary_conditions": [{"bc_id": "S1", "kind": "support", "completeness": "partial", "edge": "left", "selector_kind": "whole_edge"}], "clarifications": ["conflicting_support_kind"], "capability_limits": ["component_support"]},
       "tags": ["conflict", "roller"]
     },
     {
@@ -473,7 +473,7 @@
       "family": "capability_boundaries",
       "purpose": "Do not turn an applied couple into a force vector.",
       "turns": ["Apply a clockwise moment of 20 N mm at the free end."],
-      "expected": {"semantic_state": "requires_capability", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "completeness": "capability_limited", "load_kind": "moment", "selector_kind": "unspecified_extent", "magnitude": 20.0, "unit": "N mm"}], "capability_limits": ["applied_moment"]},
+      "expected": {"semantic_state": "requires_capability", "boundary_conditions": [{"bc_id": "L1", "kind": "load", "completeness": "capability_limited", "load_kind": "moment", "selector_kind": "unspecified", "magnitude": 20.0, "unit": "N mm"}], "clarifications": ["boundary_extent"], "capability_limits": ["applied_moment"]},
       "tags": ["moment", "backlog"]
     },
     {

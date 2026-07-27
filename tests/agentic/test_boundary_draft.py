@@ -227,6 +227,44 @@ class BoundaryDraftMergeTests(unittest.TestCase):
         self.assertEqual(pending[0].field, "load.distribution")
         self.assertEqual(pending[0].value, "uniform")
 
+    def test_complete_constant_traction_upgrades_uniform_assumption_to_derived(self):
+        quote = "traction [2,0] on the upper quarter of the right edge"
+        create = BoundaryCreate(
+            local_ref="new_load",
+            kind="load",
+            fields=(
+                field("load.kind", "traction_vector", quote),
+                field("load.vector", [2, 0], quote),
+                field(
+                    "load.distribution",
+                    "uniform",
+                    basis="assumption",
+                    rationale="The model proposed uniformity.",
+                ),
+                field("selector.kind", "fraction_interval", quote),
+                field("selector.edge", "right", quote),
+                field("selector.start", 0.75, quote),
+                field("selector.end", 1.0, quote),
+            ),
+        )
+
+        result = merge_boundary_patch(
+            BoundaryDraftState(),
+            BoundaryPatch(creates=(create,)),
+            user_message=quote,
+            turn_number=1,
+        )
+
+        distribution = result.state.condition("L1").fact(
+            "load.distribution"
+        )
+        self.assertEqual(distribution.value, "uniform")
+        self.assertEqual(distribution.basis, "derived")
+        self.assertEqual(result.state.pending_confirmations(), ())
+        self.assertTrue(
+            assess_boundary_state(result.state).conditions[0].ready
+        )
+
     def test_generic_yes_confirms_exactly_one_assumption(self):
         initial = merge_boundary_patch(
             BoundaryDraftState(),
