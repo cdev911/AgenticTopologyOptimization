@@ -83,7 +83,9 @@ These files are written under the output folder defined in the config file, typi
 
 ## Agent-tool layer
 
-Beyond the example scripts, `fenitop/tools/` exposes the config-driven workflow as three composable tools for an agent (or any script) to call, each usable as a plain Python function, a `--input`/`--output` JSON CLI, or an MCP tool — one implementation behind all three. Each tool logs through Python's standard `logging` module to **stderr only**; stdout (the CLI's JSON response, the MCP server's JSON-RPC stream) always stays clean and machine-parseable.
+Beyond the example scripts, `fenitop/tools/` exposes the config-driven workflow as three composable tools for an agent (or any script) to call, each usable as a plain Python function, a `--input`/`--output` JSON CLI, or an MCP tool — one implementation behind all three. The tool wrappers send their own logging to stderr so stdout can be reserved for machine-readable responses; the hardening note below records a remaining solver-level violation of that contract.
+
+> **Hardening status (2026-07-26):** the direct happy path is implemented and tested, but a deeper pre-agent audit found that the underlying solver still writes progress to stdout during `run_topopt`, along with validation, path/capability, numerical-state, and result-composition gaps. Do not treat the CLI/MCP solve surface or lambda-string config support as agent-safe yet. Agentic development is paused until the blocking [tool-hardening plan](docs/tool-hardening-plan.md) passes; `docs/spec.md` is the live status source.
 
 ### `validate_config`
 
@@ -140,4 +142,3 @@ Scope note: this layer currently covers the two config-driven, 2D problem types 
   - fenitop/tools/: the agent-tool layer (validate_config, run_topopt, analyze_results, mcp_server)
 - config/: JSON config files for the examples
 - tests/: unit tests; tests/fixtures/ holds small configs and committed run artifacts used by the tools' tests
-
