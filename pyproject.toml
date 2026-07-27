@@ -26,4 +26,7 @@ fenitop-mcp-server = "fenitop.tools.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["fenitop*"]
+include = ["agentic*", "fenitop*"]
+
+[tool.setuptools.package-data]
+agentic = ["prompts/*.txt"]

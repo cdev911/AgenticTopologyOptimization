@@ -180,6 +180,46 @@ Example scripts write these files under `results/` beneath the repository root.
 The tool layer assigns a fresh per-run directory through trusted application
 policy. Generated output files are ignored by Git.
 
+## Agentic workflow (Stage 1 in progress)
+
+The first agentic boundary is implemented in `agentic/intent.py`. It converts the
+idea of a free-text request into one of three strict, mutually exclusive outcomes:
+
+- `ready`: all problem-defining physics is present in a typed `ProblemIntent`.
+- `needs_clarification`: required physics is missing or ambiguous, so the workflow
+  returns focused questions and does not solve.
+- `unsupported`: the request needs physics outside the v1 tool contract, so the
+  workflow explains the mismatch and does not solve.
+
+`ProblemIntent` separates structural meaning from numerical tuning. Geometry,
+material, supports, loads, volume fraction, and mechanism-specific fields are
+physics and must be present for `ready`. Mesh divisions/cell type, filter radius,
+and iteration limit are optional preferences. When they are omitted, deterministic
+application code—not the LLM—will apply versioned defaults and show each selected
+value and reason to the user before proceeding. This is a transparency notice, not
+a confirmation gate: the user can request changes, while an unchanged supported
+request continues automatically.
+
+This separation makes an important agent-design rule concrete: use the LLM where
+language judgment is needed, and use typed deterministic code for defaults,
+validation, execution authority, and side effects.
+
+`agentic/interpreter.py` now provides the LLM boundary. It loads the versioned
+capability prompt from `agentic/prompts/intent_system_v1.txt`, sends the free-text
+request as JSON-escaped untrusted data, and accepts only the strict outcome schema.
+CrewAI is configured with low reasoning effort and hidden SDK retries disabled;
+the application owns a bounded two-attempt retry policy and reports only sanitized
+failure metadata. The interpreter cannot compile configs, choose defaults, call
+solver tools, or launch work.
+
+The OpenAI structured-output API accepts a stricter JSON Schema subset than
+Pydantic normally emits for fixed tuples and recursive region expressions. A
+transport-only schema adapter therefore converts tuple `prefixItems` to compatible
+`items` schemas and ensures every object rejects extra properties. The semantic
+Pydantic models remain unchanged, so this compatibility layer does not weaken
+runtime validation. Tests snapshot these transport invariants, and a billed smoke
+check exercises ready, clarification, and unsupported outcomes.
+
 ## Agent-tool layer
 
 Beyond the example scripts, `fenitop/tools/` exposes the config-driven workflow as three composable tools for an agent (or any script) to call, each usable as a plain Python function, a `--input`/`--output` JSON CLI, or an MCP tool — one implementation behind all three. Logs and solver progress stay on stderr or in captured run files; CLI stdout is exactly one JSON response and real stdio MCP composition is tested.
@@ -318,10 +358,14 @@ cancellation/signal recovery, generated malformed inputs, corrupt artifacts,
 calibrated heuristics, CLI purity, and real MCP composition. Focused development
 commands are listed in the [tool reference](docs/tool-reference.md); the full
 command above remains the checkpoint gate. All 107 tests pass in the pinned image.
+The Stage 1 intent and interpreter additions bring the current checkpoint to 123
+passing tests plus 103 passing subtests.
 
 ## Repository layout
 
 - scripts/: example entry points
+- agentic/: typed natural-language interpretation and deterministic workflow
+  modules (Stage 1 in progress)
 - fenitop/: core FEM, sensitivity, optimization, and utility modules
   - fenitop/regions.py: declarative boundary/load region DSL
   - fenitop/tools/: the agent-tool layer (validate_config, run_topopt, analyze_results, mcp_server)
