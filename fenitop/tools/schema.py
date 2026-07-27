@@ -8,32 +8,44 @@ has one robust branch to check regardless of which tool it called.
 """
 import dataclasses
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Iterable, Optional
 
-TOOL_CONTRACT_VERSION = "0.1.0"
-
-
-def get_or(mapping: Dict[str, Any], key: str, default: Any = None) -> Any:
-    """Like dict.get(key, default), but also falls back to `default` when the
-    key is present with an explicit None value.
-
-    Plain dict.get only substitutes the default when the key is *absent* --
-    it returns None as-is when the key is present with value None. That
-    distinction doesn't matter for a Python caller building a request dict by
-    hand (who just omits keys they don't want to set), but it matters a lot
-    for a JSON-RPC/MCP caller, which represents "use the default" as an
-    explicit `null` for an optional parameter rather than omitting the key.
-    """
-    value = mapping.get(key)
-    return default if value is None else value
+TOOL_CONTRACT_VERSION = "1.0.0"
 
 
 @dataclasses.dataclass
 class FieldError:
     """A single validation/runtime error, pointed at a dotted config path."""
     path: str
-    kind: str
+    code: str
     message: str
+    severity: str = "error"
+    retryable: bool = False
+
+
+@dataclasses.dataclass
+class WarningRecord:
+    code: str
+    path: str
+    message: str
+    severity: str = "warning"
+    retryable: bool = False
+
+
+def _warning_records(warnings: Optional[Iterable[Any]]) -> list:
+    records = []
+    for warning in warnings or []:
+        if isinstance(warning, str):
+            records.append(
+                WarningRecord(
+                    code="general_warning",
+                    path="<root>",
+                    message=warning,
+                )
+            )
+        else:
+            records.append(warning)
+    return records
 
 
 def jsonify(value: Any) -> Any:
@@ -67,7 +79,8 @@ def ok_envelope(tool: str, *, warnings: Optional[Iterable[str]] = None, **payloa
         "contract_version": TOOL_CONTRACT_VERSION,
         "tool": tool,
         "status": "ok",
-        "warnings": list(warnings or []),
+        "warnings": _warning_records(warnings),
+        "errors": [],
     }
     envelope.update(payload)
     return jsonify(envelope)
@@ -88,7 +101,7 @@ def error_envelope(tool: str, errors: Optional[Iterable[FieldError]] = None, *,
         "status": "error",
         "stage": stage,
         "errors": list(errors or []),
-        "warnings": list(warnings or []),
+        "warnings": _warning_records(warnings),
     }
     envelope.update(payload)
     return jsonify(envelope)

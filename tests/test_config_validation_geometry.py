@@ -23,6 +23,7 @@ import unittest
 from pathlib import Path
 
 from fenitop.tools.validate_config import validate_config_tool
+from fenitop.tools.contracts import TrustedValidationPolicy
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -34,22 +35,24 @@ def _load(name: str, from_fixtures: bool = False):
 
 
 class GeometryValidationTests(unittest.TestCase):
+    policy = TrustedValidationPolicy(check_geometry=True)
+
     def test_beam_2d_passes_full_validation(self):
-        result = validate_config_tool({"config": _load("beam_2d"), "check_geometry": True})
+        result = validate_config_tool({"config": _load("beam_2d")}, policy=self.policy)
         self.assertEqual(result["status"], "ok", result.get("errors"))
         self.assertEqual(result["checked"], {"structural": True, "geometry": True})
         # A real, well-posed support (the full left edge) must not trip the
         # rigid-body warning.
-        self.assertFalse(any("rigid-body" in w for w in result["warnings"]))
+        self.assertFalse(any("rigid-body" in w["message"] for w in result["warnings"]))
 
     def test_mechanism_2d_passes_full_validation(self):
-        result = validate_config_tool({"config": _load("mechanism_2d"), "check_geometry": True})
+        result = validate_config_tool({"config": _load("mechanism_2d")}, policy=self.policy)
         self.assertEqual(result["status"], "ok", result.get("errors"))
         self.assertEqual(result["checked"], {"structural": True, "geometry": True})
 
     def test_smoke_fixture_passes_full_validation(self):
         result = validate_config_tool(
-            {"config": _load("smoke_beam_2d", from_fixtures=True), "check_geometry": True})
+            {"config": _load("smoke_beam_2d", from_fixtures=True)}, policy=self.policy)
         self.assertEqual(result["status"], "ok", result.get("errors"))
 
     def test_dirichlet_marker_matching_zero_facets_is_rejected(self):
@@ -58,19 +61,19 @@ class GeometryValidationTests(unittest.TestCase):
         # exists to close.
         raw = _load("beam_2d")
         raw["fem"]["dirichlet_bcs"][0]["marker"] = {"op": "plane", "axis": "x", "value": 9999}
-        result = validate_config_tool({"config": raw, "check_geometry": True})
+        result = validate_config_tool({"config": raw}, policy=self.policy)
         self.assertEqual(result["status"], "error")
         self.assertTrue(any(
-            e["path"] == "fem.dirichlet_bcs[0].marker" and "matched 0 of" in e["message"]
+            e["path"] == "config.fem.dirichlet_bcs[0].marker" and "matched 0 of" in e["message"]
             for e in result["errors"]))
 
     def test_traction_locator_matching_zero_facets_is_rejected(self):
         raw = _load("beam_2d")
         raw["fem"]["traction_bcs"][0]["locator"] = {"op": "plane", "axis": "y", "value": 9999}
-        result = validate_config_tool({"config": raw, "check_geometry": True})
+        result = validate_config_tool({"config": raw}, policy=self.policy)
         self.assertEqual(result["status"], "error")
         self.assertTrue(any(
-            e["path"] == "fem.traction_bcs[0].locator" and "matched 0 of" in e["message"]
+            e["path"] == "config.fem.traction_bcs[0].locator" and "matched 0 of" in e["message"]
             for e in result["errors"]))
 
     def test_zero_facet_error_takes_priority_over_estimated_cost(self):
@@ -78,7 +81,7 @@ class GeometryValidationTests(unittest.TestCase):
         # claim to have a usable estimated_cost-backed "ok" result.
         raw = _load("beam_2d")
         raw["fem"]["dirichlet_bcs"][0]["marker"] = {"op": "plane", "axis": "x", "value": 9999}
-        result = validate_config_tool({"config": raw, "check_geometry": True})
+        result = validate_config_tool({"config": raw}, policy=self.policy)
         self.assertIsNone(result["normalized_config"])
 
 

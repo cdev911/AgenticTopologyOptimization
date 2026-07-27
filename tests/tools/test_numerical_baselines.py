@@ -34,6 +34,15 @@ class SerialNumericalBaselineTests(unittest.TestCase):
         self.tmp_dir = tempfile.mkdtemp(prefix="fenitop_baseline_")
         self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
 
+    def _policy(self, prefix):
+        from fenitop.tools.contracts import TrustedRunPolicy
+
+        return TrustedRunPolicy(
+            output_root=Path(self.tmp_dir),
+            output_prefix=prefix,
+            render_snapshot=False,
+        )
+
     def _run_case(self, case_name):
         from fenitop.tools.run_topopt import run_topopt_tool
 
@@ -44,11 +53,10 @@ class SerialNumericalBaselineTests(unittest.TestCase):
             expected["config_sha256"],
             "The fixture changed; review the physics and deliberately refresh its baseline.",
         )
-        result = run_topopt_tool({
-            "config": _load_json(expected["fixture"]),
-            "output_root": self.tmp_dir,
-            "render_snapshot": False,
-        })
+        result = run_topopt_tool(
+            {"config": _load_json(expected["fixture"])},
+            policy=self._policy(Path(expected["fixture"]).stem),
+        )
         self.assertEqual(result["status"], "ok", result.get("error"))
         self.assertEqual(result["contract_version"], self.baselines["tool_contract_version"])
         self.assertEqual(result["contract_version"], TOOL_CONTRACT_VERSION)
@@ -112,11 +120,9 @@ class SerialNumericalBaselineTests(unittest.TestCase):
 
         config = _load_json("smoke_beam_2d.json")
         config["opt"]["move"] = 0.0
-        result = run_topopt_tool({
-            "config": config,
-            "output_root": self.tmp_dir,
-            "render_snapshot": False,
-        })
+        result = run_topopt_tool(
+            {"config": config}, policy=self._policy("smoke_beam_2d")
+        )
         self.assertEqual(result["status"], "ok", result.get("error"))
         self.assertTrue(result["converged"])
         self.assertEqual(result["stop_reason"], "tolerance_met")
@@ -160,11 +166,9 @@ class SerialNumericalBaselineTests(unittest.TestCase):
         config = copy.deepcopy(_load_json("smoke_beam_2d.json"))
         config["opt"]["max_iter"] = 1
         config["opt"]["initial_density"] = 0.2
-        result = run_topopt_tool({
-            "config": config,
-            "output_root": self.tmp_dir,
-            "render_snapshot": False,
-        })
+        result = run_topopt_tool(
+            {"config": config}, policy=self._policy("smoke_beam_2d")
+        )
         self.assertEqual(result["status"], "ok", result.get("error"))
         run_log = next(
             Path(item["path"]) for item in result["artifacts"] if item["role"] == "run_log"

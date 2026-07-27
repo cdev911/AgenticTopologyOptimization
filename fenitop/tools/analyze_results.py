@@ -12,30 +12,52 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from pydantic import ValidationError
+
+from fenitop.tools.config_models import translate_validation_error
+from fenitop.tools.contracts import (
+    AnalyzeResultsRequest,
+    AnalyzeResultsResponse,
+    TrustedAnalysisPolicy,
+)
 from fenitop.tools.logging_config import get_logger
 from fenitop.tools.logreader import read_history
 from fenitop.tools.narrative import build_narrative
 from fenitop.tools.plotting import plot_convergence, plot_density_grid_fallback
-from fenitop.tools.schema import error_envelope, get_or, ok_envelope
+from fenitop.tools.schema import FieldError, error_envelope, ok_envelope
 
 logger = get_logger(__name__)
-_DEFAULT_GRAYNESS_THRESHOLD = 0.4
-_DEFAULT_CHECKERBOARD_THRESHOLD = 0.15
-_DEFAULT_DENSITY_THRESHOLD = 0.5
 
 
 def _artifact_paths_from_envelope(envelope: Dict[str, Any]) -> Dict[str, str]:
     return {a["role"]: a["path"] for a in envelope.get("artifacts", []) if a.get("path")}
 
 
-def _artifact_paths_from_prefix(output_folder: str, output_prefix: str) -> Dict[str, str]:
-    base = Path(output_folder)
-    return {
-        "run_log": str(base / f"{output_prefix}_run.log"),
-        "summary": str(base / f"{output_prefix}_summary.json"),
-        "density_grid": str(base / f"{output_prefix}_density_grid.npz"),
-        "density_snapshot_png": str(base / f"{output_prefix}_density_snapshot.png"),
-    }
+def _check_artifact_containment(
+    envelope: Dict[str, Any], allowed_roots: tuple[Path, ...]
+) -> list[FieldError]:
+    """Reject artifact paths that resolve outside application-owned roots."""
+    roots = [root.resolve() for root in allowed_roots]
+    errors: list[FieldError] = []
+    if not roots:
+        return [
+            FieldError(
+                "run_topopt_envelope.artifacts",
+                "no_trusted_artifact_root",
+                "Application policy did not configure an allowed artifact root.",
+            )
+        ]
+    for index, artifact in enumerate(envelope.get("artifacts", [])):
+        candidate = Path(artifact["path"]).resolve()
+        if not any(candidate.is_relative_to(root) for root in roots):
+            errors.append(
+                FieldError(
+                    f"run_topopt_envelope.artifacts[{index}].path",
+                    "artifact_outside_trusted_root",
+                    "Artifact path resolves outside the application-owned analysis roots.",
+                )
+            )
+    return errors
 
 
 def _read_summary(path: Optional[str]) -> Dict[str, Any]:
@@ -85,8 +107,7 @@ def _derive_convergence(history: List[Dict[str, Any]], opt_tol: Optional[float],
 
 
 def _check_load_path_connected(coords_xyz, labeled, config: Dict[str, Any]) -> Optional[bool]:
-    """Reuses fenitop.config._materialize (the same sandboxed lambda-string/
-    region-DSL compiler used everywhere else) to find which labeled
+    """Compile safe region DSL specs to find which labeled
     connected component the Dirichlet (support) and traction (load) regions
     land in. Dilates each region's grid mask by a couple of cells first,
     since the exact boundary nodes are not guaranteed to be solid even in a
@@ -96,7 +117,7 @@ def _check_load_path_connected(coords_xyz, labeled, config: Dict[str, Any]) -> O
     import numpy as np
     from scipy.ndimage import binary_dilation
 
-    from fenitop.config import _materialize
+    from fenitop.regions import compile_region
 
     fem_cfg = config.get("fem", {})
     dirichlet_bcs = fem_cfg.get("dirichlet_bcs", [])
@@ -116,9 +137,7 @@ def _check_load_path_connected(coords_xyz, labeled, config: Dict[str, Any]) -> O
         """
         if spec is None:
             return None
-        region_fn = spec if callable(spec) else _materialize(spec)
-        if not callable(region_fn):
-            return None
+        region_fn = compile_region(spec)
         mask = region_fn(coords_xyz).reshape(labeled.shape)
         if not mask.any():
             return None
@@ -187,54 +206,92 @@ def _analyze_density_grid(grid_path: str, density_threshold: float, checkerboard
     return flags, warnings
 
 
-def analyze_results_tool(request: Dict[str, Any]) -> Dict[str, Any]:
-    """request = {"run_topopt_envelope"?: dict} OR {"output_folder", "output_prefix"},
-    plus optional "config", "opt_tol", "move_limit", "grayness_threshold",
-    "checkerboard_threshold", "density_threshold", "make_plots"=True."""
-    envelope = request.get("run_topopt_envelope")
-    config = request.get("config")
+def _response(data: dict) -> dict:
+    AnalyzeResultsResponse.model_validate(data)
+    return data
+
+
+def analyze_results_tool(
+    request: Dict[str, Any] | AnalyzeResultsRequest,
+    *,
+    policy: TrustedAnalysisPolicy | None = None,
+) -> Dict[str, Any]:
+    """Analyze only the exact typed result of Tool 2."""
+    analysis_policy = policy or TrustedAnalysisPolicy()
+    try:
+        parsed_request = (
+            request
+            if isinstance(request, AnalyzeResultsRequest)
+            else AnalyzeResultsRequest.model_validate(request)
+        )
+    except ValidationError as exc:
+        return _response(error_envelope(
+            "analyze_results",
+            translate_validation_error(exc),
+            stage="request",
+            message="Request did not match AnalyzeResultsRequest.",
+        ))
+    except Exception as exc:
+        return _response(error_envelope(
+            "analyze_results",
+            [FieldError("<root>", "malformed_request", str(exc))],
+            stage="request",
+        ))
+
+    envelope = parsed_request.run_topopt_envelope.model_dump(mode="json")
+    if envelope["status"] != "ok":
+        return _response(error_envelope(
+            "analyze_results",
+            [FieldError(
+                "run_topopt_envelope.status",
+                "run_not_successful",
+                "Only a successful run_topopt envelope can be analyzed.",
+            )],
+            stage="request",
+        ))
+
+    containment_errors = _check_artifact_containment(
+        envelope, analysis_policy.allowed_roots
+    )
+    if containment_errors:
+        return _response(error_envelope(
+            "analyze_results",
+            containment_errors,
+            stage="request",
+            message="Run artifacts are outside the trusted analysis boundary.",
+        ))
+
+    validation = envelope.get("validation") or {}
+    config = validation.get("normalized_config")
     opt_cfg = config.get("opt", {}) if config else {}
-
-    prior_converged = prior_stop_reason = prior_iterations = None
-    run_id = None
-
-    if envelope is not None:
-        if envelope.get("status") != "ok":
-            logger.error("analyze_results: run_topopt_envelope.status was %r, not 'ok'", envelope.get("status"))
-            return error_envelope("analyze_results", [], stage="request",
-                                   message="run_topopt_envelope.status was not 'ok'; nothing to analyze.")
-        paths = _artifact_paths_from_envelope(envelope)
-        output_prefix = request.get("output_prefix") or envelope.get("run_id") or "fenitop"
-        run_id = envelope.get("run_id")
-        problem_type = get_or(envelope, "problem_type", "minimize_compliance")
-        opt_tol = get_or(request, "opt_tol", envelope.get("metrics", {}).get("opt_tol"))
-        prior_converged = envelope.get("converged")
-        prior_stop_reason = envelope.get("stop_reason")
-        prior_iterations = envelope.get("iterations")
-    else:
-        output_folder = request.get("output_folder")
-        output_prefix = request.get("output_prefix")
-        if not output_folder or not output_prefix:
-            return error_envelope(
-                "analyze_results", [], stage="request",
-                message="request must include either 'run_topopt_envelope' or both "
-                        "'output_folder' and 'output_prefix'.")
-        paths = _artifact_paths_from_prefix(output_folder, output_prefix)
-        problem_type = get_or(request, "problem_type", "minimize_compliance")
-        opt_tol = get_or(request, "opt_tol", opt_cfg.get("opt_tol"))
+    paths = _artifact_paths_from_envelope(envelope)
+    run_id = envelope.get("run_id")
+    output_prefix = run_id or "fenitop"
+    problem_type = envelope.get("problem_type") or "minimize_compliance"
+    opt_tol = (envelope.get("metrics") or {}).get("opt_tol")
+    prior_converged = envelope.get("converged")
+    prior_stop_reason = envelope.get("stop_reason")
+    prior_iterations = envelope.get("iterations")
 
     logger.info("analyze_results: analyzing output_prefix=%s run_id=%s", output_prefix, run_id)
-    move_limit = get_or(request, "move_limit", opt_cfg.get("move"))
-    grayness_threshold = get_or(request, "grayness_threshold", _DEFAULT_GRAYNESS_THRESHOLD)
-    checkerboard_threshold = get_or(request, "checkerboard_threshold", _DEFAULT_CHECKERBOARD_THRESHOLD)
-    density_threshold = get_or(request, "density_threshold", _DEFAULT_DENSITY_THRESHOLD)
-    make_plots = get_or(request, "make_plots", True)
+    move_limit = opt_cfg.get("move")
+    grayness_threshold = analysis_policy.grayness_threshold
+    checkerboard_threshold = analysis_policy.checkerboard_threshold
+    density_threshold = analysis_policy.density_threshold
+    make_plots = analysis_policy.make_plots
 
     run_log_path = paths.get("run_log")
     if not run_log_path or not Path(run_log_path).is_file():
         logger.error("analyze_results: run_log not found at %r", run_log_path)
-        return error_envelope("analyze_results", [], stage="request",
-                               message=f"run_log not found at {run_log_path!r}; cannot analyze.")
+        return _response(error_envelope(
+            "analyze_results",
+            [FieldError(
+                "run_topopt_envelope.artifacts",
+                "run_log_missing",
+                f"run_log not found at {run_log_path!r}; cannot analyze.",
+            )],
+            stage="request",
+        ))
 
     history = read_history(run_log_path)
     summary = _read_summary(paths.get("summary"))
@@ -302,11 +359,11 @@ def analyze_results_tool(request: Dict[str, Any]) -> Dict[str, Any]:
     logger.info("analyze_results: status=ok converged=%s stop_reason=%s (%d warning(s))",
                 convergence["converged"], convergence["stop_reason"], len(warnings))
 
-    return ok_envelope(
+    return _response(ok_envelope(
         "analyze_results", warnings=warnings,
         source={"output_folder": str(Path(run_log_path).parent), "output_prefix": output_prefix, "run_id": run_id},
         convergence=convergence, quality_flags=quality_flags, metrics=metrics,
-        plots=plots, narrative=narrative)
+        plots=plots, narrative=narrative))
 
 
 def main() -> int:

@@ -16,6 +16,7 @@ from typing import Any, Dict
 
 _WARN_THRESHOLD = 1.0e7
 _REJECT_THRESHOLD = 1.0e8
+DEFAULT_MAX_COMPLEXITY = _REJECT_THRESHOLD
 
 
 def estimate_cost(mesh_spec: Dict[str, Any], max_iter: int) -> Dict[str, Any]:

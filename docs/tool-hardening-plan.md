@@ -1,6 +1,6 @@
 # Tool Hardening Plan
 
-Status: TH-0 complete; TH-1 is next
+Status: TH-0 and TH-1 complete; TH-2 is next
 Created: 2026-07-26
 Owner/source of truth for status: `docs/spec.md` §0 and §11
 
@@ -224,6 +224,29 @@ Exit criteria:
   fields.
 - Execution/safety/path capabilities are absent from the LLM-visible schema.
 - Reference configs validate and solve through the new safe path.
+
+Completion (2026-07-26):
+
+- Introduced strict contract `1.0.0` and config schema `1.0`, with typed requests,
+  responses, nested metrics/analysis/error records, and structured issues for all
+  three tools.
+- Split physics-only `AgentSafeConfig` from trusted validation/run/analysis
+  policies. The actual LLM/MCP schema has no path, PETSc, ghost-mode, rendering,
+  timeout, output, or safety authority.
+- Replaced serialized marker strings and positional springs with the bounded,
+  finite, exact-2D discriminated region DSL and named positive spring models.
+  Removed string evaluation from JSON materialization and migrated all reference
+  and smoke configs.
+- Made the supported plane-strain/unit-thickness/distributed-traction/full-vector
+  zero-clamp semantics explicit; nonzero and component-wise displacement
+  constraints are rejected for agent-safe v1.
+- Snapshot-tested the real MCP input/output schemas and runtime unknown-argument
+  rejection, including the pinned MCP 1.28.1 outer-model strictness workaround.
+- Contained Tool 3 artifact reads beneath application-owned allowed roots, with
+  resolved-path checks that also reject symlink escapes from fabricated envelopes.
+- Verified 50 root-discovered tests (one intentional TH-3 expected failure) and
+  both real compliance/mechanism smoke solves with unchanged TH-0 numerical
+  metrics.
 
 ### TH-2 — Complete semantic and geometry validation
 

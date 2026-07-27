@@ -21,11 +21,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from pydantic import ValidationError
+
+from fenitop.tools.config_models import compile_solver_config, translate_validation_error
+from fenitop.tools.contracts import (
+    RunTopoptRequest,
+    RunTopoptResponse,
+    TrustedRunPolicy,
+    TrustedValidationPolicy,
+)
 from fenitop.tools.logging_config import get_logger
 from fenitop.tools.logreader import count_warnings, read_history
-from fenitop.tools.safety import effective_ceiling, estimate_cost
-from fenitop.tools.schema import error_envelope, get_or, ok_envelope
-from fenitop.tools.validate_config import load_raw_config, validate_config_tool
+from fenitop.tools.safety import DEFAULT_MAX_COMPLEXITY, estimate_cost
+from fenitop.tools.schema import FieldError, error_envelope, ok_envelope
+from fenitop.tools.validate_config import validate_config_tool
 
 _MMA_WARNING_MARKER = "mma_inner_iteration_cap_reached"
 logger = get_logger(__name__)
@@ -129,28 +138,51 @@ def _render_snapshot(result: Dict[str, Any], opt: Dict[str, Any]
     return paths, warnings
 
 
-def _reject_oversized(cost: Dict[str, Any], request: Dict[str, Any], validation: Optional[Dict[str, Any]]
+def _reject_oversized(cost: Dict[str, Any], policy: TrustedRunPolicy, validation: Optional[Dict[str, Any]]
                        ) -> Optional[Dict[str, Any]]:
-    ceiling = effective_ceiling(request.get("max_complexity_override"))
-    if get_or(request, "allow_large_run", False) or cost["complexity_score"] <= ceiling:
+    ceiling = policy.max_complexity or DEFAULT_MAX_COMPLEXITY
+    if policy.allow_large_run or cost["complexity_score"] <= ceiling:
         return None
     return error_envelope(
         "run_topopt", [], stage="safety_check", estimated_cost=cost, validation=validation,
         message=(
             f"estimated_cost.complexity_score={cost['complexity_score']:.3g} exceeds the "
-            f"default safety ceiling ({ceiling:.3g}). Pass allow_large_run=true or "
-            "max_complexity_override=<number> to proceed, or invoke this problem under "
-            "mpirun directly (see README.md) for a legitimately large run."))
+            f"trusted safety ceiling ({ceiling:.3g}). The agent-facing request cannot "
+            "override this application-owned policy."))
 
 
-def run_topopt_tool(request: Dict[str, Any]) -> Dict[str, Any]:
-    """request = {"config": dict|path, "run_id"?, "output_root"?, "scoped_output"=True,
-    "allow_large_run"=False, "max_complexity_override"?, "render_snapshot"=True}."""
-    config = request.get("config")
-    if config is None:
-        logger.error("run_topopt: request missing required 'config' key")
-        return error_envelope("run_topopt", [], stage="request",
-                               message="request must include a 'config' key.")
+def _response(data: dict) -> dict:
+    RunTopoptResponse.model_validate(data)
+    return data
+
+
+def run_topopt_tool(
+    request: Dict[str, Any] | RunTopoptRequest,
+    *,
+    policy: TrustedRunPolicy | None = None,
+) -> Dict[str, Any]:
+    """Run a safe config under an application-owned execution policy."""
+    run_policy = policy or TrustedRunPolicy()
+    try:
+        parsed_request = (
+            request
+            if isinstance(request, RunTopoptRequest)
+            else RunTopoptRequest.model_validate(request)
+        )
+    except ValidationError as exc:
+        return _response(error_envelope(
+            "run_topopt",
+            translate_validation_error(exc),
+            stage="request",
+            message="Request did not match RunTopoptRequest.",
+        ))
+    except Exception as exc:
+        return _response(error_envelope(
+            "run_topopt",
+            [FieldError("<root>", "malformed_request", str(exc))],
+            stage="request",
+        ))
+    config = parsed_request.config
 
     # Cheap pre-check on raw arithmetic (divisions x max_iter, no mesh build)
     # BEFORE the full validate_config_tool call, which -- with
@@ -161,30 +193,32 @@ def run_topopt_tool(request: Dict[str, Any]) -> Dict[str, Any]:
     # mesh spec, etc.) is swallowed -- the full validation below reports it
     # properly with field paths instead.
     try:
-        raw_config = load_raw_config(config)
-        quick_cost = estimate_cost(raw_config["mesh"], raw_config["opt"]["max_iter"])
-        quick_reject = _reject_oversized(quick_cost, request, validation=None)
+        quick_cost = estimate_cost(config.mesh.model_dump(mode="json"), config.opt.max_iter)
+        quick_reject = _reject_oversized(quick_cost, run_policy, validation=None)
         if quick_reject is not None:
             logger.warning("run_topopt: rejected on cheap pre-check, complexity_score=%s",
                             quick_cost["complexity_score"])
-            return quick_reject
+            return _response(quick_reject)
     except Exception:  # noqa: BLE001 - fall through to full validation for a proper diagnosis
         pass
 
     logger.info("run_topopt: re-validating config (full structural + geometry check)...")
-    check = validate_config_tool({"config": config, "check_geometry": True})
+    check = validate_config_tool(
+        {"config": config},
+        policy=TrustedValidationPolicy(check_geometry=True),
+    )
     if check["status"] == "error":
         logger.warning("run_topopt: pre-flight validation failed with %d error(s)", len(check["errors"]))
-        return error_envelope(
+        return _response(error_envelope(
             "run_topopt", check["errors"], stage="pre_flight_validation",
-            warnings=check.get("warnings", []), validation=check)
+            warnings=check.get("warnings", []), validation=check))
 
     normalized_config = check["normalized_config"]
-    reject = _reject_oversized(check["estimated_cost"], request, validation=check)
+    reject = _reject_oversized(check["estimated_cost"], run_policy, validation=check)
     if reject is not None:
         logger.warning("run_topopt: rejected by safety ceiling, complexity_score=%s",
                         check["estimated_cost"]["complexity_score"])
-        return reject
+        return _response(reject)
 
     from mpi4py import MPI
 
@@ -192,15 +226,23 @@ def run_topopt_tool(request: Dict[str, Any]) -> Dict[str, Any]:
     from fenitop.topopt import topopt
 
     comm = MPI.COMM_WORLD
-    output_prefix = normalized_config["opt"].get("output_prefix", "fenitop")
-    run_id = request.get("run_id") or _make_run_id(output_prefix)
-    scoped = get_or(request, "scoped_output", True)
-    output_root = Path(get_or(request, "output_root", normalized_config["opt"].get("output_folder", "results")))
+    problem_type = config.opt.problem_type
+    output_prefix = run_policy.output_prefix or (
+        "compliance_2d" if problem_type == "minimize_compliance" else "mechanism_2d"
+    )
+    run_id = run_policy.run_id or _make_run_id(output_prefix)
+    scoped = run_policy.scoped_output
+    output_root = run_policy.output_root
     output_dir = (output_root / run_id) if scoped else output_root
 
-    fem, opt = build_fem_opt(normalized_config, comm=comm)
-    opt["output_folder"] = str(output_dir)
-    opt["output_prefix"] = output_prefix
+    solver_config = compile_solver_config(
+        config,
+        solver_profile=run_policy.solver_profile,
+        output_folder=str(output_dir),
+        output_prefix=output_prefix,
+        output_interval=run_policy.output_interval,
+    )
+    fem, opt = build_fem_opt(solver_config, comm=comm)
     run_log_path = output_dir / f"{output_prefix}_run.log"
     logger.info("run_topopt: run_id=%s output_dir=%s max_iter=%s", run_id, output_dir, opt["max_iter"])
 
@@ -210,17 +252,18 @@ def run_topopt_tool(request: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - never let a solver failure cross as a bare traceback
         logger.exception("run_topopt: solver raised during run_id=%s", run_id)
         last_known_good = read_history(run_log_path)[-1:]
-        return error_envelope(
+        return _response(error_envelope(
             "run_topopt", [], stage="solve", run_id=run_id, validation=check,
             error={"exception_type": type(exc).__name__, "message": str(exc),
                    "traceback": _truncated_traceback(exc)},
             last_known_good_metrics=(last_known_good[0] if last_known_good else None),
-            artifacts=_list_partial_artifacts(output_dir))
+            artifacts=_list_partial_artifacts(output_dir)))
     wall_time = time.perf_counter() - start
 
     if comm.rank != 0:
-        return ok_envelope("run_topopt", run_id=run_id, rank=comm.rank,
-                            note="Non-root MPI rank; the full result envelope is produced by rank 0.")
+        return _response(ok_envelope(
+            "run_topopt", run_id=run_id, rank=comm.rank,
+            note="Non-root MPI rank; the full result envelope is produced by rank 0."))
 
     converged_raw = result["converged_raw"]
     converged = converged_raw["opt_iter"] < opt["max_iter"] or converged_raw["change"] <= opt["opt_tol"]
@@ -233,7 +276,7 @@ def run_topopt_tool(request: Dict[str, Any]) -> Dict[str, Any]:
 
     render_paths: Dict[str, Optional[str]] = {"density_snapshot_png": None, "density_grid_npz": None}
     render_warnings: List[str] = []
-    if get_or(request, "render_snapshot", True):
+    if run_policy.render_snapshot:
         render_paths, render_warnings = _render_snapshot(result, opt)
 
     summary = result.get("summary") or {}
@@ -257,7 +300,7 @@ def run_topopt_tool(request: Dict[str, Any]) -> Dict[str, Any]:
                            "path": render_paths["density_grid_npz"]})
 
     logger.info("run_topopt: status=ok run_id=%s (%d artifact(s))", run_id, len(artifacts))
-    return ok_envelope(
+    return _response(ok_envelope(
         "run_topopt", warnings=[*check.get("warnings", []), *render_warnings],
         run_id=run_id, problem_type=check["problem_type"], converged=converged,
         stop_reason=stop_reason, iterations=converged_raw["opt_iter"],
@@ -270,7 +313,7 @@ def run_topopt_tool(request: Dict[str, Any]) -> Dict[str, Any]:
             "opt_tol": opt["opt_tol"],
         },
         mma_inner_iteration_warnings=mma_warnings, wall_time_seconds=wall_time,
-        artifacts=artifacts, validation=check, error=None)
+        artifacts=artifacts, validation=check, error=None))
 
 
 def main() -> int:

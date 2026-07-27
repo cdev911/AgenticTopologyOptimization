@@ -1,14 +1,14 @@
 {
+  "schema_version": "1.0",
   "mesh": {
     "kind": "rectangle",
     "bounds": [[0, -2], [4, 2]],
     "divisions": [8, 8],
-    "cell_type": "quadrilateral",
-    "ghost_mode": "shared_facet"
+    "cell_type": "quadrilateral"
   },
   "fem": {
-    "young's modulus": 100,
-    "poisson's ratio": 0.25,
+    "young_modulus": 100,
+    "poisson_ratio": 0.25,
     "dirichlet_bcs": [
       {
         "marker": {
@@ -55,52 +55,45 @@
         }
       }
     ],
-    "body_force": [0, 0],
-    "quadrature_degree": 2,
-    "petsc_options": {
-      "ksp_type": "preonly",
-      "pc_type": "lu",
-      "pc_factor_mat_solver_type": "mumps"
-    }
+    "body_force": [0, 0]
   },
   "opt": {
+    "problem_type": "compliant_mechanism",
+    "optimizer": "mma",
     "max_iter": 5,
     "opt_tol": 1e-5,
     "vol_frac": 0.3,
     "initial_density": 0.3,
+    "solid_zone": {"op": "none"},
+    "void_zone": {"op": "none"},
     "penalty": 3,
     "epsilon": 1e-6,
     "filter_radius": 0.6,
     "beta_interval": 50,
     "beta_max": 128,
-    "use_oc": false,
     "move": 0.05,
-    "opt_compliance": false,
-    "in_spring": [
-      {
+    "in_spring": {
+      "region": {
         "op": "and",
         "regions": [
           {"op": "plane", "axis": "x", "value": 0},
           {"op": "range", "axis": "y", "min": -0.5, "max": 0.5}
         ]
       },
-      "x",
-      0.2
-    ],
-    "out_spring": [
-      {
+      "direction": "x",
+      "stiffness": 0.2
+    },
+    "out_spring": {
+      "region": {
         "op": "and",
         "regions": [
           {"op": "plane", "axis": "x", "value": 4},
           {"op": "range", "axis": "y", "min": -0.5, "max": 0.5}
         ]
       },
-      "x",
-      0.2
-    ],
-    "compliance_bound": 10,
-    "output_folder": "results",
-    "output_prefix": "smoke_mechanism_2d",
-    "output_interval": 5
+      "direction": "x",
+      "stiffness": 0.2
+    },
+    "compliance_bound": 10
   }
 }

@@ -15,20 +15,28 @@ would corrupt that stream. -T disables the pty for this one invocation.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
-
 from mcp.server.fastmcp import FastMCP
+
+from fenitop.tools.config_models import AgentSafeConfig
+from fenitop.tools.contracts import (
+    AnalyzeResultsRequest,
+    AnalyzeResultsResponse,
+    RunTopoptRequest,
+    RunTopoptResponse,
+    ValidateConfigRequest,
+    ValidateConfigResponse,
+)
 
 mcp = FastMCP("fenitop")
 
 
 @mcp.tool()
-def validate_config(config: Dict[str, Any], check_geometry: bool = True) -> Dict[str, Any]:
+def validate_config(config: AgentSafeConfig) -> ValidateConfigResponse:
     """Pedantically validate a fenitop topology-optimization JSON config before running it.
 
     Runs structural checks (mesh/material/optimizer parameters, physical
     ranges such as -1 < Poisson's ratio < 0.5, conditional-required fields
-    for compliant-mechanism mode) and, when check_geometry is true, builds a
+    for compliant-mechanism mode) and builds a
     real mesh to confirm every boundary/load marker matches at least one
     facet (a marker matching zero facets would otherwise be silently
     dropped) plus a rigid-body-motion sanity check. Returns errors with
@@ -38,24 +46,17 @@ def validate_config(config: Dict[str, Any], check_geometry: bool = True) -> Dict
     estimated problem size/cost.
     """
     from fenitop.tools.validate_config import validate_config_tool
-    return validate_config_tool({"config": config, "check_geometry": check_geometry})
+    return validate_config_tool(ValidateConfigRequest(config=config))
 
 
 @mcp.tool()
-def run_topopt(config: Dict[str, Any], run_id: Optional[str] = None,
-               output_root: Optional[str] = None, scoped_output: bool = True,
-               allow_large_run: bool = False, max_complexity_override: Optional[float] = None,
-               render_snapshot: bool = True) -> Dict[str, Any]:
+def run_topopt(config: AgentSafeConfig) -> RunTopoptResponse:
     """Run a fenitop topology optimization from a config.
 
     Supports 2D "minimize compliance" and "compliant mechanism" problems.
-    Always re-validates the config first (never trusts that validate_config
-    was already called). Rejects problems above a default cost ceiling
-    unless allow_large_run is set or max_complexity_override raises it --
-    the ceiling only guards this default single-process invocation; a
-    legitimately large job should be run under mpirun directly instead.
-    Writes outputs to a fresh, timestamped run directory by default
-    (scoped_output=false reproduces the legacy flat-overwrite behavior).
+    Always re-validates the config first. Run IDs, output roots, rendering,
+    solver profiles, and safety ceilings are application-owned policy and are
+    intentionally absent from this schema.
     Never raises past this boundary: solver failures come back as a
     structured error with the last known-good metrics rather than a bare
     traceback. On success, returns converged/stop_reason (and *why* a run
@@ -65,26 +66,15 @@ def run_topopt(config: Dict[str, Any], run_id: Optional[str] = None,
     analyze_results to consume without needing dolfinx or h5py.
     """
     from fenitop.tools.run_topopt import run_topopt_tool
-    return run_topopt_tool({
-        "config": config, "run_id": run_id, "output_root": output_root,
-        "scoped_output": scoped_output, "allow_large_run": allow_large_run,
-        "max_complexity_override": max_complexity_override, "render_snapshot": render_snapshot,
-    })
+    return run_topopt_tool(RunTopoptRequest(config=config))
 
 
 @mcp.tool()
-def analyze_results(run_topopt_envelope: Optional[Dict[str, Any]] = None,
-                     output_folder: Optional[str] = None, output_prefix: Optional[str] = None,
-                     config: Optional[Dict[str, Any]] = None, opt_tol: Optional[float] = None,
-                     move_limit: Optional[float] = None, grayness_threshold: float = 0.4,
-                     checkerboard_threshold: float = 0.15, density_threshold: float = 0.5,
-                     make_plots: bool = True) -> Dict[str, Any]:
+def analyze_results(run_topopt_envelope: RunTopoptResponse) -> AnalyzeResultsResponse:
     """Analyze a completed fenitop run and summarize it for a human.
 
-    Pass either the full result envelope from run_topopt (preferred -- reuses
-    its already-computed converged/stop_reason and artifact paths directly),
-    or an output_folder/output_prefix pointing at an older run's artifacts on
-    disk. Reports convergence (including *why* a run didn't converge, e.g.
+    Pass the exact result envelope from run_topopt. Reports convergence
+    (including *why* a run didn't converge, e.g.
     the design change was pinned at the move limit rather than genuinely
     stalling), design-quality flags (grayness/binarization score,
     disconnected material via a connected-component check, a checkerboard
@@ -96,13 +86,27 @@ def analyze_results(run_topopt_envelope: Optional[Dict[str, Any]] = None,
     available.
     """
     from fenitop.tools.analyze_results import analyze_results_tool
-    return analyze_results_tool({
-        "run_topopt_envelope": run_topopt_envelope, "output_folder": output_folder,
-        "output_prefix": output_prefix, "config": config, "opt_tol": opt_tol,
-        "move_limit": move_limit, "grayness_threshold": grayness_threshold,
-        "checkerboard_threshold": checkerboard_threshold, "density_threshold": density_threshold,
-        "make_plots": make_plots,
-    })
+    return analyze_results_tool(
+        AnalyzeResultsRequest(run_topopt_envelope=run_topopt_envelope)
+    )
+
+
+def _forbid_unknown_mcp_arguments() -> None:
+    """Close FastMCP's generated outer argument models.
+
+    MCP 1.28.1 creates strict nested Pydantic fields but defaults the generated
+    function-argument model to ignoring extra top-level keys. The dependency is
+    pinned, and the schema/runtime behavior is snapshot-tested, so make that
+    generated model explicitly forbid extras before the server starts.
+    """
+    for registered in mcp._tool_manager._tools.values():
+        argument_model = registered.fn_metadata.arg_model
+        argument_model.model_config["extra"] = "forbid"
+        argument_model.model_rebuild(force=True)
+        registered.parameters = argument_model.model_json_schema(by_alias=True)
+
+
+_forbid_unknown_mcp_arguments()
 
 
 def main() -> None:

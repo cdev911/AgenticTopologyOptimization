@@ -58,12 +58,16 @@ The example entry points now read a JSON configuration file. The repository incl
 The config file controls:
 
 - mesh generation and boundary conditions
-- constitutive law and FEM solver parameters
+- material properties and the supported plane-strain physics
 - objective and constraint settings
 - filter parameters and optimizer settings
-- output folder and output prefix
 
-Each config also carries a parameter_guidance block with human-readable descriptions and validation rules. The loader validates the values before the run begins, so invalid settings such as negative iteration counts, decimal iteration counts, or volume fractions outside $[0, 1]$ fail fast with a clear error.
+The versioned agent-safe schema deliberately does not include output paths, PETSc
+options, mesh ghost modes, rendering switches, or safety overrides. Application
+code owns those execution capabilities. The loader validates the config before a
+run begins, so invalid settings such as negative iteration counts, malformed
+vectors, non-finite values, or volume fractions outside the supported range fail
+fast with field-level errors.
 
 For a much more thorough check — a strict schema, physical sanity checks, and a real mesh build confirming boundary conditions actually apply — use the `validate_config` agent tool described below.
 
@@ -78,42 +82,62 @@ Each run writes FEniCSx-native XDMF time series output with HDF5 sidecar data:
 
 The XDMF files are intended to be opened in ParaView. Density and displacement are written as separate time series so each file has a clean, selectable field while keeping all time steps for that field in one place.
 
-These files are written under the output folder defined in the config file, typically `results/` beneath the repository root. Generated output files are ignored by Git.
+Example scripts write these files under `results/` beneath the repository root.
+The tool layer assigns a fresh per-run directory through trusted application
+policy. Generated output files are ignored by Git.
 
 ## Agent-tool layer
 
 Beyond the example scripts, `fenitop/tools/` exposes the config-driven workflow as three composable tools for an agent (or any script) to call, each usable as a plain Python function, a `--input`/`--output` JSON CLI, or an MCP tool — one implementation behind all three. The tool wrappers send their own logging to stderr so stdout can be reserved for machine-readable responses; the hardening note below records a remaining solver-level violation of that contract.
 
-> **Hardening status (2026-07-26):** TH-0 is complete: the runtime is pinned,
-> default test discovery is reliable, and both supported problem modes have serial
-> numerical baselines. The deeper audit gaps in validation, path/capability
-> separation, numerical state, subprocess containment, transport, and result
-> composition remain. Do not treat the CLI/MCP solve surface or lambda-string
-> config support as agent-safe yet. Agentic development stays paused until the
+> **Hardening status (2026-07-26):** TH-0 and TH-1 are complete. The runtime and
+> numerical baselines are pinned; the public tools now use strict contract
+> `1.0.0` and physics-only config schema `1.0`. Source strings and execution
+> controls are absent from the agent surface. Semantic/resource validation,
+> numerical-state correctness, subprocess containment, transport isolation, and a
+> verified run manifest remain. Agentic development stays paused until the full
 > blocking [tool-hardening plan](docs/tool-hardening-plan.md) passes;
 > `docs/spec.md` is the live status source.
 
 ### `validate_config`
 
-Pedantically validates a config before it ever reaches the solver, against a strict Pydantic schema (`fenitop/tools/config_models.py`) designed for an LLM-authored config: every field carries a `description` in the exported JSON schema, and unknown fields are rejected outright (`extra="forbid"`, so a typo like `"otp"` instead of `"opt"` is reported directly instead of silently ignored). Fields are split deliberately:
-
-- **Required, no default** — values that define *what problem this is*, and must be a deliberate choice: `mesh.bounds`, `mesh.divisions`, `opt.max_iter`, `opt.vol_frac`, `opt.filter_radius`, `opt.opt_compliance`, `fem."poisson's ratio"`, and `fem.dirichlet_bcs` (must be non-empty — see below).
-- **Defaulted** — numerical/solver tuning knobs with literature-standard values both reference configs already agree on: `opt.opt_tol` (1e-5), `opt.penalty` (3.0), `opt.epsilon` (1e-6), `opt.beta_interval`/`beta_max` (50/128), `opt.move` (0.02), `opt.use_oc` (true), `fem."young's modulus"` (100 — for single-material SIMP compliance minimization the optimized *topology* is invariant to E, so it's safe to default), and `fem.petsc_options` (conjugate-gradient + algebraic multigrid).
+Pedantically validates a config before it reaches the solver against
+`AgentSafeConfig` in `fenitop/tools/config_models.py`. Unknown fields are rejected,
+all vectors are exactly 2D and finite, conditional compliance/mechanism fields are
+expressed as a discriminated union, and mechanism springs use named
+`region`/`direction`/`stiffness` fields. The schema explicitly supports rectangular
+2D meshes, plane strain, unit out-of-plane thickness, consistent user units,
+distributed boundary traction, and full-vector zero clamps. Nonzero prescribed
+displacements and component-wise roller supports are rejected in v1.
 
 Beyond structural checks, it runs logical/physical checks an agent is likely to get wrong — all hard errors, not warnings, since a config that fails them cannot produce a meaningful result:
 
 - `opt.filter_radius` must be smaller than the domain's smallest extent (derived from `mesh.bounds`) — a filter radius at or beyond the domain size would smooth the density field across the entire domain into a uniformly gray design. (Also warns, non-fatally, if the filter radius is smaller than one mesh element — no real smoothing effect.)
-- `fem.dirichlet_bcs` must be non-empty, and — when `check_geometry=true` builds a real mesh — every boundary/load marker must match at least one facet (a marker matching zero facets is otherwise silently dropped by `fem.py`), and the matched Dirichlet constraints must resist all 3 planar rigid-body modes (x-translation, y-translation, rotation). If they don't, the assembled stiffness matrix is mathematically guaranteed to have a null space and the FEM solve will fail or return a meaningless result.
+- `fem.dirichlet_bcs` must be non-empty. Trusted validation policy enables a real mesh build that checks every boundary/load region matches at least one facet and that the supports resist all three planar rigid-body modes. Geometry validation is not an agent-controlled switch.
 - Warns (non-fatally) if there's no load at all — `fem.traction_bcs` empty and `fem.body_force` effectively zero — in compliance-minimization mode: there's nothing for the optimizer to act against.
 
-Errors carry dotted field paths (e.g. `fem.dirichlet_bcs[0].marker`) an agent can map straight back to the JSON it generated. The response includes the normalized config (defaults filled in, still JSON-safe and re-runnable) plus an estimated problem size/cost.
+Errors and warnings are structured records containing `code`, `path`, `message`,
+`severity`, and `retryable`. The response includes the normalized config (defaults
+filled in, still JSON-safe and re-runnable) plus an estimated problem size/cost.
 
 ### `run_topopt` and `analyze_results`
 
-- **`run_topopt`** — runs `fenitop.topopt.topopt` with an orchestration layer: always re-validates first (a cheap arithmetic-only pre-check rejects an absurdly oversized mesh before ever building it, then the full `validate_config` check runs), enforces a cost-based safety ceiling before spending CPU (`allow_large_run`/`max_complexity_override` to proceed anyway, or invoke under `mpirun` directly for a legitimately large job), writes to a fresh timestamped output directory by default (`scoped_output=false` for the legacy flat-overwrite layout), and never raises past the tool boundary — solver failures come back as a structured error with the last known-good metrics. On success: `converged`/`stop_reason` (not just iteration count), key metrics, and every output artifact including a rendered density-field PNG and a coordinate-binned `.npz` density grid.
-- **`analyze_results`** — summarizes a completed run (from `run_topopt`'s own result, or an older run's `output_folder`/`output_prefix`): convergence diagnostics (including *why* a run didn't converge, e.g. pinned at the move limit), design-quality flags (grayness/binarization, disconnected material via a connected-component check, a checkerboard heuristic, and — if the config is supplied — whether the support and load regions are connected through the same material), convergence plots, and a deterministic English narrative. Needs no dolfinx/MPI for its core metrics.
+- **`run_topopt`** — accepts only `{"config": AgentSafeConfig}`. It always
+  re-validates, performs a cheap arithmetic safety pre-check, then applies an
+  application-owned `TrustedRunPolicy` for run IDs, paths, rendering, solver
+  profile, and safety ceilings. The MCP/LLM schema cannot override that policy.
+  On success it returns convergence state, key metrics, validation evidence, and
+  typed artifact records.
+- **`analyze_results`** — accepts the exact typed successful `run_topopt` envelope,
+  so no model copies filesystem paths or resupplies a config. It derives
+  convergence diagnostics, design-quality flags, plots, and a deterministic
+  narrative without dolfinx/MPI for its core metrics. Artifact paths are resolved
+  and rejected unless they remain under application-owned allowed roots. A checksum-verified,
+  self-contained `RunManifest` and stronger artifact integrity checks remain TH-6
+  work.
 
-Boundary/load markers, solid/void zones, and mechanism springs can also be authored as a declarative JSON region DSL instead of a Python lambda string:
+All serialized boundary/load markers, solid/void zones, and mechanism spring
+regions use the strict declarative JSON region DSL:
 
 ```json
 {"op": "plane", "axis": "x", "value": 0}
@@ -122,15 +146,24 @@ Boundary/load markers, solid/void zones, and mechanism springs can also be autho
 {"op": "and", "regions": [ {"op": "plane", ...}, {"op": "range", ...} ]}
 ```
 
-See `fenitop/regions.py` for the full op list. Existing lambda-string configs keep working unchanged; the DSL is an additional, agent-friendlier authoring surface, not a replacement.
+The full op set is `plane`, `range`, `circle`, `all`, `none`, `and`, `or`, and
+`not`. Unknown fields, non-finite values, 3D axes, invalid radii/tolerances, and
+excessive recursion/node counts are rejected. JSON lambda/source strings are not
+supported and are never evaluated; trusted hardcoded Python callers may still use
+callables internally.
 
 Run a tool from the CLI (JSON request in, JSON response out):
 
 ```bash
-docker compose run --rm fenitop python -m fenitop.tools.validate_config --input config/beam_2d.json
-docker compose run --rm fenitop python -m fenitop.tools.run_topopt --input request.json
-docker compose run --rm fenitop python -m fenitop.tools.analyze_results --input request.json
+python -c 'import json; print(json.dumps({"config": json.load(open("config/beam_2d.json"))}))' > request.json
+docker compose run --rm -T fenitop python -m fenitop.tools.validate_config --input request.json
+docker compose run --rm -T fenitop python -m fenitop.tools.run_topopt --input request.json
+docker compose run --rm -T fenitop python -m fenitop.tools.analyze_results --input request.json
 ```
+
+The analyzer request is different: its `run_topopt_envelope` field must contain the
+exact Tool 2 response. Clean stdout/stdio framing is still a TH-5 gate, so direct
+Python calls are the verified integration surface at this checkpoint.
 
 Or start the MCP server (the `-T` disables the pty; stdio-transport MCP needs clean, unbuffered JSON-RPC framing on stdin/stdout, which `docker-compose.yml`'s default `tty: true` would otherwise corrupt):
 
