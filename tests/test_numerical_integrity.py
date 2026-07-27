@@ -28,7 +28,7 @@ class NumericalFailureEnvelopeTests(unittest.TestCase):
 
     def _run_with_failure(self, patch_target, failure, fixture="smoke_beam_2d.json"):
         from fenitop.tools.contracts import TrustedRunPolicy
-        from fenitop.tools.run_topopt import run_topopt_tool
+        from fenitop.tools.run_topopt import _run_topopt_in_process
 
         policy = TrustedRunPolicy(
             output_root=Path(self.tmp_dir),
@@ -36,7 +36,7 @@ class NumericalFailureEnvelopeTests(unittest.TestCase):
             render_snapshot=False,
         )
         with mock.patch(patch_target, side_effect=failure):
-            return run_topopt_tool(
+            return _run_topopt_in_process(
                 {"config": _load_config(fixture)}, policy=policy
             )
 

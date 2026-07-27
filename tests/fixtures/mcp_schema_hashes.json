@@ -1,13 +1,13 @@
 {
-  "contract_version": "2.0.0",
+  "contract_version": "3.0.0",
   "input_sha256": {
     "validate_config": "684558dd85af8ced17892a5072bb4b0b9b600e9f33172d223c0997eb949fdc96",
     "run_topopt": "0dec4cd2fecda0c9cb75f16923fc5d7980f2168840c0ab4f6e40122868444bab",
-    "analyze_results": "69d2510bdd7b0fe73b95387602190de67757ea8a54e7f2e6d1c4ac9c78328179"
+    "analyze_results": "1c67c75beec2289e87481f14b012f535ec6141c6fde5a310e1bec26a37ff9010"
   },
   "output_sha256": {
-    "validate_config": "0b65de7b97abe916435a2ae291892d138ef8f18db4e66c891fc4602c008f5068",
-    "run_topopt": "ed57a9310aaeb78ebef441fb9519304279415324c0e4a2fafedec90459c92467",
-    "analyze_results": "1958be4d5567a0942e2b4116edc6c25bcca5c520724418bd4b5d95f9f04aa4e0"
+    "validate_config": "55bb6fb448c599245e223aef1ee561b470d18d2168c4eb2e5a19639db3061c3c",
+    "run_topopt": "83b02dada9b1c9794989c548e14f134ed6cd33bcc0319847fa9294b26ed66060",
+    "analyze_results": "4aabdacd5ad209e50e31ca34766efc6dffcb9b1c3631a34d875a66350b8a5b1a"
   }
 }

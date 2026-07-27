@@ -92,15 +92,17 @@ policy. Generated output files are ignored by Git.
 
 Beyond the example scripts, `fenitop/tools/` exposes the config-driven workflow as three composable tools for an agent (or any script) to call, each usable as a plain Python function, a `--input`/`--output` JSON CLI, or an MCP tool — one implementation behind all three. The tool wrappers send their own logging to stderr so stdout can be reserved for machine-readable responses; the hardening note below records a remaining solver-level violation of that contract.
 
-> **Hardening status (2026-07-26):** TH-0 through TH-3 are complete. The runtime
-> and numerical baselines are pinned; the public tools now use contract `2.0.0`
+> **Hardening status (2026-07-26):** TH-0 through TH-4 are complete. The runtime
+> and numerical baselines are pinned; the public tools now use contract `3.0.0`
 > and physics-only config schema `1.1`. Source strings and execution controls are
 > absent from the agent surface, semantic/mesh-backed validation covers every
 > current solver input, independent resource ceilings are calibrated in the
 > pinned image, and successful solves now require checked linear solves, finite
 > bounded states, explicit optimizer success, and consistent evaluated artifacts.
-> Subprocess containment, transport isolation, and a verified run manifest remain.
-> Agentic development stays paused
+> Solves now run serially in credential-scrubbed child process groups with contained
+> per-run paths, idempotent lifecycle state, one-solve admission, and tested
+> timeout/cancel/crash/orphan handling. Clean public exception/CLI/MCP boundaries
+> and the final verified analysis manifest remain. Agentic development stays paused
 > until the full blocking [tool-hardening plan](docs/tool-hardening-plan.md) passes;
 > `docs/spec.md` is the live status source.
 
@@ -143,8 +145,13 @@ entity report.
   re-validates, performs a cheap arithmetic safety pre-check, then applies an
   application-owned `TrustedRunPolicy` for run IDs, paths, rendering, solver
   profile, and safety ceilings. The MCP/LLM schema cannot override that policy.
-  On success it returns convergence state, key metrics, validation evidence, and
-  typed artifact records.
+  The parent exclusively allocates a contained run directory, deduplicates
+  matching idempotency keys, admits only one serial solve, and launches a
+  credential-free worker process group. Its atomic lifecycle distinguishes queued,
+  running, succeeded, failed, timed-out, cancelled, and orphaned jobs; parent-side
+  crash translation records exit/signal state and marks partial artifacts
+  incomplete. On success it returns convergence state, key metrics, validation
+  evidence, lifecycle state, and typed artifact records.
 - **`analyze_results`** — accepts the exact typed successful `run_topopt` envelope,
   so no model copies filesystem paths or resupplies a config. It derives
   convergence diagnostics, design-quality flags, plots, and a deterministic
@@ -205,7 +212,9 @@ now exits nonzero. The suite includes fast real solves for compliance and
 compliant-mechanism modes with tolerance-based references in
 `tests/fixtures/numerical_baselines.json`, directional finite-difference
 sensitivity checks, injected numerical failures, initial/final-state consistency,
-and cleanup checks. The TH-3 checkpoint runs all 80 tests successfully.
+and cleanup checks, path/idempotency adversarial cases, and real isolated-worker
+timeout/cancellation/signal recovery. The TH-4 checkpoint runs all 95 tests and 54
+subtests successfully.
 
 ## Repository layout
 
