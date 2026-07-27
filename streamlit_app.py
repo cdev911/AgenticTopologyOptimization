@@ -20,6 +20,7 @@ from agentic.orchestrator import (
     ValidatedWorkflow,
     ValidationFailedWorkflow,
 )
+from agentic.presentation import verified_display_plots
 from fenitop.tools.lifecycle import read_lifecycle
 
 
@@ -216,6 +217,30 @@ def _render_trace(outcome) -> None:
             st.json(evidence)
 
 
+def _render_results(outcome) -> None:
+    if not hasattr(outcome, "analysis") or outcome.analysis.source is None:
+        return
+    plots = verified_display_plots(
+        outcome.analysis.source.run_directory,
+        outcome.analysis.plots,
+    )
+    if not plots:
+        return
+
+    st.subheader("Optimization results")
+    columns = st.columns(2)
+    for index, plot in enumerate(plots):
+        with columns[index % len(columns)]:
+            st.image(str(plot.path), caption=plot.label, width="stretch")
+            st.download_button(
+                f"Download {plot.label}",
+                data=plot.path.read_bytes(),
+                file_name=plot.path.name,
+                mime="image/png",
+                key=f"download_plot_{plot.role}",
+            )
+
+
 def _reset() -> None:
     future = st.session_state.get("job_future")
     if future is not None and not future.done():
@@ -292,6 +317,7 @@ def _job_status() -> None:
 
 
 _job_status()
+_render_results(st.session_state.outcome)
 _render_trace(st.session_state.outcome)
 
 job_running = (

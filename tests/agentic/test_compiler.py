@@ -11,6 +11,7 @@ from fenitop.tools.config_models import (
     ComplianceOptimization,
     MechanismOptimization,
 )
+from fenitop.tools.validate_config import validate_config_tool
 
 
 def compliance_data(bounds=((0, 0), (10, 10))):
@@ -82,6 +83,53 @@ class CompilerTests(unittest.TestCase):
         self.assertNotIn("mesh.cell_type", paths)
         self.assertNotIn("opt.filter_radius", paths)
         self.assertNotIn("opt.max_iter", paths)
+
+    def test_centered_percentage_edge_segment_compiles_and_matches_facets(self):
+        data = compliance_data(bounds=((0, 0), (10, 5)))
+        data["material"] = {"young_modulus": 10, "poisson_ratio": 0.499}
+        data["volume_fraction"] = 0.33
+        data["tractions"] = [
+            {
+                "edge_segment": {
+                    "edge": "right",
+                    "center_fraction": 0.5,
+                    "span_fraction": 0.1,
+                },
+                "vector": [0, -1],
+            }
+        ]
+
+        result = compile_intent(ComplianceProblemIntent.model_validate(data))
+        locator = result.config.fem.traction_bcs[0].locator.model_dump(mode="json")
+
+        self.assertEqual(locator["op"], "and")
+        self.assertEqual(
+            locator["regions"],
+            [
+                {
+                    "op": "plane",
+                    "axis": "x",
+                    "value": 10,
+                    "tol": 1e-8,
+                },
+                {
+                    "op": "range",
+                    "axis": "y",
+                    "min": 2.25,
+                    "max": 2.75,
+                    "min_inclusive": True,
+                    "max_inclusive": True,
+                },
+            ],
+        )
+        validation = validate_config_tool({"config": result.config})
+        self.assertEqual(validation["status"], "ok", validation["errors"])
+        traction_record = next(
+            item
+            for item in validation["geometry_report"]["entities"]
+            if item["path"] == "config.fem.traction_bcs[0].locator"
+        )
+        self.assertGreater(traction_record["count"], 0)
 
     def test_compliance_mapping_and_default_notice_are_explicit(self):
         result = compile_intent(

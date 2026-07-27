@@ -4,8 +4,8 @@ Agg backend set at import time so this is headless-safe regardless of the
 caller's environment (doesn't rely on an MPLBACKEND env var being set).
 Pure numpy/matplotlib -- no dolfinx needed.
 
-Each chart is a single-series line (compliance, volume, or design-change vs.
-iteration) -- one axis, no dual-axis combination, no legend (a single series
+Each chart is a single-series line (compliance, mechanism objective, volume, or
+design-change vs. iteration) -- one axis, no dual-axis combination, no legend (a single series
 needs none, the title names it), threshold/reference lines rendered as
 recessive muted dashes with a direct text label rather than a second
 competing series. Colors are the validated default palette's sequential blue
@@ -79,6 +79,18 @@ def plot_convergence(history: List[Dict[str, Any]], output_dir: Union[str, Path]
         path = output_dir / f"{prefix}_compliance_vs_iteration.png"
         _line_plot(iters, compliance, "compliance", "Compliance vs. iteration", path)
         plots.append({"role": "compliance_vs_iteration", "path": str(path)})
+
+    objective = [r.get("objective") for r in iterate]
+    if any(value is not None and abs(float(value)) > 0.0 for value in objective):
+        path = output_dir / f"{prefix}_objective_vs_iteration.png"
+        _line_plot(
+            iters,
+            objective,
+            "signed output objective",
+            "Mechanism objective vs. iteration",
+            path,
+        )
+        plots.append({"role": "objective_vs_iteration", "path": str(path)})
 
     volume = [r.get("volume") for r in iterate]
     if any(v is not None for v in volume):

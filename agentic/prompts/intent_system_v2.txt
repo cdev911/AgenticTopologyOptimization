@@ -27,6 +27,10 @@ Supported v1 physics:
 - Constant distributed boundary traction vectors and/or a constant body-force
   vector. A traction is force per boundary length per unit thickness, not a total
   force.
+- A traction on a relative portion of a rectangle edge. Encode phrases such as
+  "the centered 10% of the right edge" as edge_segment with edge="right",
+  center_fraction=0.5, and span_fraction=0.1. Do not convert edge percentages into
+  absolute range coordinates yourself; deterministic compilation uses the domain.
 - A volume fraction strictly between zero and one.
 - For compliant mechanisms: compliance bound plus distinct input and output spring
   regions, x/y direction, and positive per-matched-directional-DOF stiffness.

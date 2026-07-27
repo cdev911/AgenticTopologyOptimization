@@ -31,6 +31,7 @@ FiniteNumber = Annotated[
 ]
 PositiveFiniteNumber = Annotated[FiniteNumber, Field(gt=0)]
 OpenFraction = Annotated[FiniteNumber, Field(gt=0, lt=1)]
+ClosedFraction = Annotated[FiniteNumber, Field(ge=0, le=1)]
 PositiveInt = Annotated[StrictInt, Field(gt=0)]
 Vector2D = tuple[FiniteNumber, FiniteNumber]
 Point2D = tuple[FiniteNumber, FiniteNumber]
@@ -79,16 +80,44 @@ class FixedSupportIntent(StrictIntentModel):
         return parse_region(value)
 
 
+class EdgeSegmentIntent(StrictIntentModel):
+    """A relative segment on one rectangular-domain boundary edge."""
+
+    edge: Literal["left", "right", "bottom", "top"]
+    center_fraction: ClosedFraction
+    span_fraction: OpenFraction
+
+    @model_validator(mode="after")
+    def _segment_stays_on_edge(self):
+        half_span = float(self.span_fraction) / 2.0
+        center = float(self.center_fraction)
+        if center - half_span < 0.0 or center + half_span > 1.0:
+            raise ValueError(
+                "edge segment must fit within the edge: "
+                "center_fraction ± span_fraction/2 must stay in [0, 1]."
+            )
+        return self
+
+
 class TractionIntent(StrictIntentModel):
     """A distributed boundary traction, not a mesh-independent total force."""
 
-    region: RegionSpec
+    region: RegionSpec | None = None
+    edge_segment: EdgeSegmentIntent | None = None
     vector: Vector2D
 
     @field_validator("region")
     @classmethod
     def _bounded_region(cls, value):
-        return parse_region(value)
+        return parse_region(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def _exactly_one_location(self):
+        if (self.region is None) == (self.edge_segment is None):
+            raise ValueError(
+                "exactly one of region or edge_segment must locate the traction."
+            )
+        return self
 
     @field_validator("vector")
     @classmethod

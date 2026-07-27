@@ -98,6 +98,11 @@ defaults. For mesh resolution, it targets an element size of
 rectangle remains near 2,500 cells with nearly square elements. The default filter
 radius is 1.5 times the larger element edge.
 
+Relative boundary phrases are also kept semantic. For example, “the centered 10%
+of the right edge” is represented as `edge=right`, `center_fraction=0.5`, and
+`span_fraction=0.1`; deterministic compilation converts those fractions using the
+domain bounds. The model does not perform the coordinate arithmetic.
+
 The result explainer is not a free-form report writer. Deterministic analysis
 creates immutable fact IDs; the LLM may only organize allowed IDs under allowed
 headings. Code then checks completeness and renders the original fact text. An
@@ -321,6 +326,11 @@ Each run is placed under an application-owned directory in `results/` and includ
 Open XDMF files in ParaView. Density and displacement use separate time series so
 each file exposes a clean field while retaining all recorded iterations.
 
+After a successful run, the UI shows a downloadable result gallery containing the
+final density design, compliance objective history, volume history, and
+design-change history. Compliant-mechanism runs additionally show their signed
+output-objective history.
+
 The Streamlit “Inspectable workflow trace” shows public stage events, the compiled
 agent-safe configuration, validation/resource evidence, and deterministic analysis
 evidence. It deliberately does not expose private chain-of-thought.
@@ -336,7 +346,7 @@ docker compose run --rm -T fenitop python -m pip check
 docker compose run --rm -T fenitop pytest -q
 ```
 
-Current checkpoint: **151 tests plus 103 numerical subtests pass**. The suite
+Current checkpoint: **159 tests plus 103 numerical subtests pass**. The suite
 includes schema and adversarial-input tests, real compliance/mechanism baselines,
 finite-difference sensitivities, geometry validation, resource calibration,
 process timeout/cancellation/crash behavior, secret scrubbing, path and

@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from agentic.intent import InterpretationEnvelope, InterpretationResult
 
-PROMPT_VERSION = "intent-system-v1"
+PROMPT_VERSION = "intent-system-v2"
 DEFAULT_MAX_ATTEMPTS = 2
 
 
@@ -59,7 +59,7 @@ class InterpreterConfig:
 def load_system_prompt() -> str:
     prompt = (
         files("agentic.prompts")
-        .joinpath("intent_system_v1.txt")
+        .joinpath("intent_system_v2.txt")
         .read_text(encoding="utf-8")
         .strip()
     )
