@@ -4,24 +4,23 @@ FEniTop is a FEniCSx-based topology optimization package for 2D and 3D problems.
 
 ## Docker-based setup
 
-The recommended way to run this project is in a container based on the stable Dolfinx image.
+The recommended way to run this project is in the pinned Docker image. The
+`Dockerfile` uses an immutable Dolfinx image digest and exact Python dependency
+versions so numerical baselines do not drift when an upstream `stable` tag moves.
 
 ### Prerequisites
 
 - Docker Engine
 - Docker Compose
 
-### Pull the base image
+### Pull the base image (optional)
 
 ```bash
-docker pull dolfinx/dolfinx:stable
+docker pull dolfinx/dolfinx@sha256:2ae4bfbc0d9077268880faf04c72750528bee986c94ab223a2c159969bd56fa8
 ```
 
-If you want to target a specific release instead of the latest stable tag, you can also use:
-
-```bash
-docker pull dolfinx/dolfinx:v0.11.0
-```
+`docker compose build` pulls this digest automatically if it is not already
+available, so the explicit pull is normally unnecessary.
 
 ### Build the project image
 
@@ -85,7 +84,14 @@ These files are written under the output folder defined in the config file, typi
 
 Beyond the example scripts, `fenitop/tools/` exposes the config-driven workflow as three composable tools for an agent (or any script) to call, each usable as a plain Python function, a `--input`/`--output` JSON CLI, or an MCP tool — one implementation behind all three. The tool wrappers send their own logging to stderr so stdout can be reserved for machine-readable responses; the hardening note below records a remaining solver-level violation of that contract.
 
-> **Hardening status (2026-07-26):** the direct happy path is implemented and tested, but a deeper pre-agent audit found that the underlying solver still writes progress to stdout during `run_topopt`, along with validation, path/capability, numerical-state, and result-composition gaps. Do not treat the CLI/MCP solve surface or lambda-string config support as agent-safe yet. Agentic development is paused until the blocking [tool-hardening plan](docs/tool-hardening-plan.md) passes; `docs/spec.md` is the live status source.
+> **Hardening status (2026-07-26):** TH-0 is complete: the runtime is pinned,
+> default test discovery is reliable, and both supported problem modes have serial
+> numerical baselines. The deeper audit gaps in validation, path/capability
+> separation, numerical state, subprocess containment, transport, and result
+> composition remain. Do not treat the CLI/MCP solve surface or lambda-string
+> config support as agent-safe yet. Agentic development stays paused until the
+> blocking [tool-hardening plan](docs/tool-hardening-plan.md) passes;
+> `docs/spec.md` is the live status source.
 
 ### `validate_config`
 
@@ -133,6 +139,22 @@ docker compose run --rm -T fenitop python -m fenitop.tools.mcp_server
 ```
 
 Scope note: this layer currently covers the two config-driven, 2D problem types (`beam_2d` "minimize compliance" and `mechanism_2d` "compliant mechanism"). The 3D/legacy hardcoded scripts (`beam_3d.py`, `disk_2d.py`, `shell_3d.py`) are not yet part of it.
+
+## Tests
+
+Build the pinned image, then run the complete suite from the repository root:
+
+```bash
+docker compose build
+docker compose run --rm -T fenitop python -m unittest discover -v
+```
+
+The package marker at `tests/__init__.py` is intentional: without it Python's
+default unittest discovery can silently skip nested test modules. A zero-test run
+now exits nonzero. The suite includes fast real solves for compliance and
+compliant-mechanism modes with tolerance-based references in
+`tests/fixtures/numerical_baselines.json`. One expected failure records the known
+`initial_density` bug until TH-3 fixes it.
 
 ## Repository layout
 

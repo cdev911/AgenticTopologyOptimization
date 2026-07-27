@@ -10,6 +10,8 @@ import dataclasses
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
+TOOL_CONTRACT_VERSION = "0.1.0"
+
 
 def get_or(mapping: Dict[str, Any], key: str, default: Any = None) -> Any:
     """Like dict.get(key, default), but also falls back to `default` when the
@@ -62,6 +64,7 @@ def jsonify(value: Any) -> Any:
 def ok_envelope(tool: str, *, warnings: Optional[Iterable[str]] = None, **payload) -> dict:
     """Build the success envelope shared by all three tools."""
     envelope = {
+        "contract_version": TOOL_CONTRACT_VERSION,
         "tool": tool,
         "status": "ok",
         "warnings": list(warnings or []),
@@ -80,6 +83,7 @@ def error_envelope(tool: str, errors: Optional[Iterable[FieldError]] = None, *,
     `status` itself is always exactly "ok" or "error", never a third value.
     """
     envelope = {
+        "contract_version": TOOL_CONTRACT_VERSION,
         "tool": tool,
         "status": "error",
         "stage": stage,

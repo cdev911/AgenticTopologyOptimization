@@ -9,27 +9,29 @@ Last updated: 2026-07-26
 
 ## 0. Current Status (read this first; update it last, every session)
 
-- **Stage**: Tool Hardening planning complete; implementation has not started.
-  Agentic work is deliberately gated on the tool layer passing Stage TH (§11).
+- **Stage**: Tool Hardening implementation; TH-0 is complete and TH-1 is next.
+  Agentic work remains deliberately gated on the full Stage TH gate (§11).
 - **As of**: 2026-07-26.
-- **Just finished**: a full tool/solver audit and the detailed hardening plan in
-  `docs/tool-hardening-plan.md`. The intended Docker suite passed all 59 explicitly
-  invoked tests and real validate→run→analyze smoke paths work, but the audit found
-  contract, filesystem/code-execution, numerical-state, subprocess, transport, and
-  analysis-composition gaps that must be fixed before an LLM can safely operate the
-  tools.
+- **Just finished**: TH-0 characterization/reproducibility. The Dolfinx base image,
+  Ubuntu additions, Python compatibility, direct dependencies, and PyPI dependency
+  closure are pinned. Root `unittest discover` now finds the full suite and fails
+  on zero collection. Tiny serial compliance and DSL-only mechanism fixtures have
+  tolerance-based numerical/artifact baselines, runtime/config hashes, filter and
+  stop-condition characterizations, and an expected failure that tracks the known
+  ignored-`initial_density` bug. Existing envelopes are frozen as tool contract
+  `0.1.0`. The clean rebuilt image passes all 64 root-discovered tests (one
+  intentional expected failure for that defect).
 - **Architecture decisions updated** (§3, §6, §6a): deterministic orchestration
   replaces the three-agent tool-calling pipeline; solver execution stays in the
   same image/container but moves to a child process without the API key;
   clarification is allowed for incomplete/ambiguous requests without adding a
   pre-run confirmation gate; and `gpt-5.6-terra` replaces the old
   `gpt-4.1-mini` default.
-- **Next action**: Stage TH-0 (§11 and `docs/tool-hardening-plan.md` §4) —
-  characterize/freeze current numerical behavior, pin the runtime/dependencies,
-  make test discovery unambiguous, and establish fast compliance + mechanism
-  baselines. Do not start `agentic/` yet.
-- **No tool fixes are in progress.** This checkpoint changed planning/docs only;
-  no solver/tool implementation was modified.
+- **Next action**: Stage TH-1 (§11 and `docs/tool-hardening-plan.md` §4) — build
+  strict versioned request/response models, split AgentSafeConfig from trusted run
+  policy, migrate serialized configs fully to the typed region DSL, and eliminate
+  executable/path/PETSc/safety capabilities from the LLM-facing schema. Do not
+  start `agentic/` yet.
 - **If you're an AI assistant picking this up cold**: read this whole file before
   doing anything, then summarize your understanding of current state + proposed
   next step back to the user before acting. See `CLAUDE.md`/`AGENTS.md` at the
@@ -296,7 +298,11 @@ Existing (unittest-based, already in place):
 - Dolfinx-free unit tests: region DSL, Pydantic model rules, safety cost estimation,
   Tool 1 structural half, narrative generation, Tool 3 against committed fixture logs.
 - Docker-only tests (need dolfinx/PETSc/MPI): geometry checks, Tool 2 end-to-end
-  smoke runs.
+  smoke runs, root-discovered serial compliance/mechanism numerical baselines,
+  filter/stop semantics, config-hash guards, and artifact consistency. One expected
+  failure tracks the known ignored-`initial_density` defect until TH-3.
+- Test entry point: `docker compose run --rm -T fenitop python -m unittest discover -v`.
+  `tests/__init__.py` makes nested discovery reliable; zero collection exits 5.
 
 Planned additions for agent-workflow compatibility (not yet implemented):
 - **Tool-hardening suite (blocks agent work)**: contract/schema, generated
@@ -304,10 +310,8 @@ Planned additions for agent-workflow compatibility (not yet implemented):
   PETSc/optimizer failure injection, subprocess timeout/cancel/crash/idempotency,
   CLI stdout, actual MCP stdio, artifact integrity, and direct Tool 2→Tool 3
   composition. Full matrix: `docs/tool-hardening-plan.md` §5–§6.
-- **Test collection guard**: the documented/default command must fail if zero tests
-  are collected (the 2026-07-26 audit found plain `unittest discover` ran zero).
-- **Pinned numerical baselines**: tiny compliance and mechanism results with
-  tolerances, plus measured resource calibration in the pinned container.
+- **Measured resource calibration**: use the pinned numerical cases to choose
+  independent mesh/memory/work/output/timeout ceilings in TH-2.
 - **Mocked-LLM deterministic-flow integration test**: canned
   ready/clarification/unsupported interpreter outputs exercise the whole state
   machine without a real API call or solver duplication.
@@ -332,6 +336,14 @@ Flagged during initial planning (2026-07-25), not yet actioned:
 
 Reverse-chronological. Each entry: date, decision, why, status.
 
+- **2026-07-26** — TH-0 pins the immutable Dolfinx image digest, installed Ubuntu
+  package versions, Python 3.12 minor line, direct Python dependencies, and their
+  PyPI dependency closure. The current dict envelope is frozen as contract
+  `0.1.0`; incompatible typed-contract changes in TH-1 must increment it. Serial
+  compliance and mechanism reference cases use relative/absolute tolerances and
+  config hashes rather than byte-identical output. Reason: make later failures
+  attributable without treating floating-point artifacts as portable bytes.
+  Status: implemented and verified.
 - **2026-07-26** — Tool hardening is a blocking stage before any `agentic/`
   implementation. The tools have a real tested happy path (59 intended-runtime
   tests passed) but the audit found executable-string/path capabilities, incomplete
@@ -392,9 +404,9 @@ Reverse-chronological. Each entry: date, decision, why, status.
 
 ## 10. Open Questions / Next Checkpoint
 
-The hardening architecture and order are decided. The next checkpoint is Stage TH-0
-characterization. Items intentionally resolved by measurement/implementation rather
-than guessed now:
+The hardening architecture and order are decided. The next checkpoint is Stage TH-1
+typed agent-safe contracts. Items intentionally resolved by measurement/
+implementation rather than guessed now:
 
 - Exact independent mesh/DOF/memory/work/time ceilings after measuring the pinned
   compliance and mechanism baselines. The agent never controls them.
@@ -416,7 +428,7 @@ index; check items here only when the corresponding plan exit gate passes.
 
 **Stage TH — tool hardening** (blocks every agentic stage):
 
-- [ ] **TH-0 Characterization/reproducibility** — pin Dolfinx/dependencies; make
+- [x] **TH-0 Characterization/reproducibility** — pin Dolfinx/dependencies; make
       zero-test discovery impossible; add fast compliance+mechanism numerical
       baselines; record runtime/config/contract versions; declare agent v1 serial.
 - [ ] **TH-1 Typed agent-safe contracts** — versioned Pydantic requests/responses;
