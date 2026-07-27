@@ -30,6 +30,7 @@ class CostEstimate(ContractModel):
     displacement_dofs: int
     num_design_variables: int
     max_iter: int
+    evaluated_states: int
     linear_solves_per_iteration: int
     complexity_score: float
     work_units: float
@@ -146,14 +147,32 @@ class RunMetrics(ContractModel):
     final_volume: float | None
     final_objective: float | None
     grayness: float | None
+    binarization_score: float | None
     final_change: float | None
     opt_tol: float | None
+    final_beta: float | None
+    continuation_completed: bool | None
+
+
+class OptimizerStatusRecord(ContractModel):
+    method: Literal["oc", "mma"]
+    converged: bool
+    outer_iterations: int
+    newton_iterations: int = 0
+    line_search_iterations: int = 0
+    residual_norm: float | None = None
+    residual_max: float | None = None
 
 
 class SolverErrorRecord(ContractModel):
     exception_type: str
     message: str
     traceback: str
+    code: str | None = None
+    component: str | None = None
+    iteration: int | None = None
+    reason: int | None = None
+    residual_norm: float | None = None
 
 
 class IterationMetrics(ContractModel):
@@ -165,7 +184,9 @@ class IterationMetrics(ContractModel):
     volume: float | None = None
     objective: float | None = None
     grayness: float | None = None
+    binarization_score: float | None = None
     initial_density: float | None = None
+    optimizer_status: OptimizerStatusRecord | None = None
     time_seconds: float | None = None
 
 
@@ -183,6 +204,7 @@ class RunTopoptResponse(ContractModel):
     stop_reason: str | None = None
     iterations: int | None = None
     metrics: RunMetrics | None = None
+    optimizer_status: OptimizerStatusRecord | None = None
     mma_inner_iteration_warnings: int | None = None
     wall_time_seconds: float | None = None
     artifacts: list[ArtifactRecord] = Field(default_factory=list)
@@ -209,20 +231,22 @@ class AnalysisSource(ContractModel):
 class ConvergenceAnalysis(ContractModel):
     converged: bool | None
     stop_reason: Literal[
-        "tolerance_met", "max_iterations_reached", "unknown"
+        "tolerance_met", "max_iterations_reached", "continuation_incomplete", "unknown"
     ]
     iterations: int | None
     final_change: float | None
     opt_tol: float | None
     fraction_iterations_at_move_limit: float | None
     move_limit: float | None
+    final_beta: float | None = None
+    continuation_completed: bool | None = None
 
 
 class QualityFlags(ContractModel):
     grayness: float | None
     binarization_score: float | None
     grayness_threshold: float
-    low_grayness_warning: bool
+    high_grayness_warning: bool
     checkerboard_detected: bool | None
     checkerboard_score: float | None
     num_components: int | None

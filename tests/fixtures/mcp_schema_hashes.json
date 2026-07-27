@@ -1,13 +1,13 @@
 {
-  "contract_version": "1.1.0",
+  "contract_version": "2.0.0",
   "input_sha256": {
     "validate_config": "684558dd85af8ced17892a5072bb4b0b9b600e9f33172d223c0997eb949fdc96",
     "run_topopt": "0dec4cd2fecda0c9cb75f16923fc5d7980f2168840c0ab4f6e40122868444bab",
-    "analyze_results": "853cbe74f5ac8fe7ec5ccca8d8ddad78b2d2717fd2d5ff1d1c24fd4f0f521c79"
+    "analyze_results": "69d2510bdd7b0fe73b95387602190de67757ea8a54e7f2e6d1c4ac9c78328179"
   },
   "output_sha256": {
-    "validate_config": "9ee9b4f9d0daa5e7028f2e11d0f1f8a8a215ef7b298db641e991f00234e40e5e",
-    "run_topopt": "122a9e1d5c6fd12684f2938cb9625dde518de7f9f10ca238f9d3bc716a5dccd5",
-    "analyze_results": "f1633318db563b487547b3eb48acddbd24552cd9351d206004eb1cf0e1e28fab"
+    "validate_config": "0b65de7b97abe916435a2ae291892d138ef8f18db4e66c891fc4602c008f5068",
+    "run_topopt": "ed57a9310aaeb78ebef441fb9519304279415324c0e4a2fafedec90459c92467",
+    "analyze_results": "1958be4d5567a0942e2b4116edc6c25bcca5c520724418bd4b5d95f9f04aa4e0"
   }
 }

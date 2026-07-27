@@ -38,6 +38,12 @@ def build_narrative(convergence: Dict[str, Any], quality_flags: Dict[str, Any],
         sentences.append(
             f"The optimizer converged: the design change ({_fmt(final_change, '.2e')}) reached "
             f"the tolerance ({_fmt(opt_tol, '.2e')}).")
+    elif convergence.get("stop_reason") == "continuation_incomplete":
+        sentences.append(
+            "The optimizer did NOT fully converge: design change reached the requested "
+            "tolerance, but the Heaviside projection continuation schedule was incomplete "
+            f"(final beta={_fmt(convergence.get('final_beta'), 'g')})."
+        )
     else:
         sentences.append(
             "The optimizer did NOT converge: it stopped after reaching the iteration cap with "
@@ -51,9 +57,9 @@ def build_narrative(convergence: Dict[str, Any], quality_flags: Dict[str, Any],
                 "or iteration budget may need adjustment.")
 
     grayness = quality_flags.get("grayness")
-    low_grayness = quality_flags.get("low_grayness_warning")
+    high_grayness = quality_flags.get("high_grayness_warning")
     if grayness is not None:
-        if low_grayness:
+        if high_grayness:
             sentences.append(
                 "The final design has substantial gray (intermediate-density) material "
                 f"(grayness={_fmt(grayness, '.3g')}), meaning the topology is not yet cleanly "

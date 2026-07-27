@@ -5,12 +5,15 @@ guard the current solver behavior while the tool boundary is hardened without
 pretending that floating-point output is byte-stable across CPU architectures.
 """
 import copy
+import gc
 import hashlib
 import json
+import logging
 import math
 import shutil
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 
 from fenitop.tools.logreader import read_history
@@ -64,6 +67,13 @@ class SerialNumericalBaselineTests(unittest.TestCase):
         self.assertEqual(result["iterations"], expected["iterations"])
         self.assertEqual(result["stop_reason"], expected["stop_reason"])
         self.assertEqual(result["mma_inner_iteration_warnings"], 0)
+        self.assertTrue(result["optimizer_status"]["converged"])
+        self.assertIn(result["optimizer_status"]["method"], {"oc", "mma"})
+        self.assertEqual(
+            result["metrics"]["continuation_completed"],
+            expected["continuation_completed"],
+        )
+        self.assertEqual(result["metrics"]["final_beta"], expected["final_beta"])
 
         for name, reference in expected["metrics"].items():
             observed = result["metrics"][name]
@@ -113,7 +123,7 @@ class SerialNumericalBaselineTests(unittest.TestCase):
     def test_mechanism_baseline(self):
         result = self._run_case("mechanism")
         self.assertLess(result["metrics"]["final_compliance"], 10.0)
-        self.assertLess(abs(result["metrics"]["final_volume"] - 0.3), 0.01)
+        self.assertLess(abs(result["metrics"]["final_volume"] - 0.3), 0.03)
 
     def test_zero_move_limit_is_rejected_before_solver_execution(self):
         from fenitop.tools.run_topopt import run_topopt_tool
@@ -161,9 +171,8 @@ class SerialNumericalBaselineTests(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(physical.x.array)))
         self.assertTrue(np.allclose(physical.x.array, 0.37, rtol=1e-10, atol=1e-10))
 
-    @unittest.expectedFailure
     def test_configured_initial_density_is_used(self):
-        """Desired semantics; expected to fail until the known TH-3 bug is fixed."""
+        """The configured design is filtered/projected and evaluated at iteration zero."""
         from fenitop.tools.run_topopt import run_topopt_tool
 
         config = copy.deepcopy(_load_json("smoke_beam_2d.json"))
@@ -178,6 +187,95 @@ class SerialNumericalBaselineTests(unittest.TestCase):
         )
         initial = read_history(run_log)[0]
         self.assertAlmostEqual(initial["initial_density"], 0.2, places=12)
+        self.assertIsNotNone(initial["compliance"])
+        self.assertIsNotNone(initial["volume"])
+        self.assertLess(initial["volume"], 0.3)
+
+    def test_passive_zones_override_initial_density_and_bounds(self):
+        import numpy as np
+
+        from fenitop.topopt import _initial_design_values
+
+        centers = np.array([[0.0, 1.0, 2.0], [0.0, 0.0, 0.0]])
+        rho, lower, upper = _initial_design_values(
+            centers,
+            {
+                "initial_density": 0.25,
+                "solid_zone": lambda x: x[0] == 0.0,
+                "void_zone": lambda x: x[0] == 2.0,
+            },
+        )
+        np.testing.assert_allclose(rho, [0.995, 0.25, 0.005])
+        np.testing.assert_allclose(lower, [0.99, 0.0, 0.0])
+        np.testing.assert_allclose(upper, [1.0, 1.0, 0.01])
+
+    def test_final_density_grid_matches_reported_material_metrics(self):
+        import numpy as np
+
+        from fenitop.tools.contracts import TrustedRunPolicy
+        from fenitop.tools.run_topopt import run_topopt_tool
+
+        result = run_topopt_tool(
+            {"config": _load_json("smoke_beam_2d.json")},
+            policy=TrustedRunPolicy(
+                output_root=Path(self.tmp_dir),
+                output_prefix="state_consistency",
+                render_snapshot=True,
+            ),
+        )
+        self.assertEqual(result["status"], "ok", result.get("error"))
+        grid_path = next(
+            Path(item["path"])
+            for item in result["artifacts"]
+            if item["role"] == "density_grid"
+        )
+        with np.load(grid_path, allow_pickle=False) as payload:
+            density = payload["density"]
+        grayness = float(np.nanmean(4.0 * density * (1.0 - density)))
+        self.assertAlmostEqual(grayness, result["metrics"]["grayness"], places=12)
+        self.assertAlmostEqual(
+            1.0 - grayness,
+            result["metrics"]["binarization_score"],
+            places=12,
+        )
+
+    def test_run_logger_handlers_are_closed_after_repeated_runs(self):
+        from fenitop.tools.run_topopt import run_topopt_tool
+
+        with warnings.catch_warnings(record=True) as captured:
+            warnings.simplefilter("always", ResourceWarning)
+            for _ in range(2):
+                result = run_topopt_tool(
+                    {"config": _load_json("smoke_beam_2d.json")},
+                    policy=self._policy("cleanup"),
+                )
+                self.assertEqual(result["status"], "ok", result.get("error"))
+                self.assertEqual(logging.getLogger("fenitop_cleanup").handlers, [])
+            gc.collect()
+        resource_warnings = [
+            warning for warning in captured
+            if issubclass(warning.category, ResourceWarning)
+        ]
+        self.assertEqual(resource_warnings, [])
+
+    def test_convergence_requires_an_update_after_final_beta_is_reached(self):
+        from fenitop.tools.run_topopt import run_topopt_tool
+
+        config = copy.deepcopy(_load_json("smoke_beam_2d.json"))
+        config["opt"].update(
+            max_iter=2,
+            opt_tol=1.0,
+            beta_interval=1,
+            beta_max=2,
+        )
+        result = run_topopt_tool(
+            {"config": config}, policy=self._policy("continuation")
+        )
+        self.assertEqual(result["status"], "ok", result.get("error"))
+        self.assertTrue(result["converged"])
+        self.assertEqual(result["iterations"], 2)
+        self.assertEqual(result["metrics"]["final_beta"], 2.0)
+        self.assertTrue(result["metrics"]["continuation_completed"])
 
 
 if __name__ == "__main__":

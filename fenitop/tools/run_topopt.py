@@ -14,6 +14,7 @@ Needs the full dolfinx/PETSc/MPI stack; only runs inside the docker image.
 """
 from __future__ import annotations
 
+import math
 import time
 import traceback
 import uuid
@@ -276,9 +277,51 @@ def run_topopt_tool(
     run_log_path = output_dir / f"{output_prefix}_run.log"
     logger.info("run_topopt: run_id=%s output_dir=%s max_iter=%s", run_id, output_dir, opt["max_iter"])
 
+    from fenitop.numerics import NumericalError
+
     start = time.perf_counter()
     try:
         result = topopt(fem, opt)
+    except NumericalError as exc:
+        failure = exc.failure
+        residual_norm = (
+            failure.residual_norm
+            if failure.residual_norm is not None
+            and math.isfinite(failure.residual_norm)
+            else None
+        )
+        logger.error(
+            "run_topopt: numerical failure run_id=%s code=%s component=%s "
+            "iteration=%s reason=%s residual=%s",
+            run_id, failure.code, failure.component, failure.iteration,
+            failure.reason, residual_norm,
+        )
+        last_known_good = read_history(run_log_path)[-1:]
+        return _response(error_envelope(
+            "run_topopt",
+            [FieldError(
+                f"solver.{failure.component}",
+                failure.code,
+                failure.message,
+                severity="error",
+                retryable=False,
+            )],
+            stage="numerical", run_id=run_id, validation=check,
+            error={
+                "exception_type": type(exc).__name__,
+                "message": failure.message,
+                "traceback": _truncated_traceback(exc),
+                "code": failure.code,
+                "component": failure.component,
+                "iteration": failure.iteration,
+                "reason": failure.reason,
+                "residual_norm": residual_norm,
+            },
+            last_known_good_metrics=(
+                last_known_good[0] if last_known_good else None
+            ),
+            artifacts=_list_partial_artifacts(output_dir),
+        ))
     except Exception as exc:  # noqa: BLE001 - never let a solver failure cross as a bare traceback
         logger.exception("run_topopt: solver raised during run_id=%s", run_id)
         last_known_good = read_history(run_log_path)[-1:]
@@ -296,8 +339,8 @@ def run_topopt_tool(
             note="Non-root MPI rank; the full result envelope is produced by rank 0."))
 
     converged_raw = result["converged_raw"]
-    converged = converged_raw["opt_iter"] < opt["max_iter"] or converged_raw["change"] <= opt["opt_tol"]
-    stop_reason = "tolerance_met" if converged else "max_iterations_reached"
+    converged = converged_raw["converged"]
+    stop_reason = converged_raw["stop_reason"]
     mma_warnings = count_warnings(run_log_path, _MMA_WARNING_MARKER)
     logger.info("run_topopt: solve finished in %.2fs, iterations=%d, converged=%s, stop_reason=%s",
                 wall_time, converged_raw["opt_iter"], converged, stop_reason)
@@ -339,9 +382,13 @@ def run_topopt_tool(
             "final_volume": summary.get("final_volume"),
             "final_objective": summary.get("final_objective"),
             "grayness": summary.get("grayness"),
+            "binarization_score": summary.get("binarization_score"),
             "final_change": converged_raw["change"],
             "opt_tol": opt["opt_tol"],
+            "final_beta": converged_raw["final_beta"],
+            "continuation_completed": converged_raw["continuation_completed"],
         },
+        optimizer_status=converged_raw["optimizer_status"],
         mma_inner_iteration_warnings=mma_warnings, wall_time_seconds=wall_time,
         artifacts=artifacts, validation=check, error=None))
 

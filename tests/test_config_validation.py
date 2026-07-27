@@ -405,6 +405,11 @@ class SafetyEstimateTests(unittest.TestCase):
         self.assertEqual(mechanism_cost["solver_profile"], "direct")
         self.assertEqual(beam_cost["linear_solves_per_iteration"], 3)
         self.assertEqual(mechanism_cost["linear_solves_per_iteration"], 4)
+        self.assertEqual(beam_cost["evaluated_states"], beam["opt"]["max_iter"] + 1)
+        self.assertEqual(
+            mechanism_cost["evaluated_states"],
+            mechanism["opt"]["max_iter"] + 1,
+        )
         for field in (
             "work_units",
             "estimated_peak_memory_mb",
@@ -653,14 +658,14 @@ class NarrativeTests(unittest.TestCase):
                 "fraction_iterations_at_move_limit": 0.998,
                 "move_limit": 0.02,
             },
-            {"grayness": 0.47, "low_grayness_warning": False},
+            {"grayness": 0.47, "high_grayness_warning": False},
             {"final_compliance": 0.7},
             "minimize_compliance",
         )
         self.assertIn("did NOT converge", failed)
         passed = build_narrative(
             {"converged": True, "iterations": 3, "final_change": 1e-6},
-            {"grayness": 0.49, "low_grayness_warning": False},
+            {"grayness": 0.49, "high_grayness_warning": False},
             {},
             "minimize_compliance",
         )

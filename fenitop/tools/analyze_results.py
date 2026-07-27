@@ -303,15 +303,23 @@ def analyze_results_tool(
         convergence["converged"] = prior_converged
         convergence["stop_reason"] = prior_stop_reason
         convergence["iterations"] = prior_iterations
+    run_metrics = envelope.get("metrics") or {}
+    convergence["final_beta"] = run_metrics.get("final_beta")
+    convergence["continuation_completed"] = run_metrics.get("continuation_completed")
 
     warnings: List[str] = []
 
-    grayness = summary.get("grayness")
+    grayness = summary.get("grayness", run_metrics.get("grayness"))
+    binarization_score = summary.get(
+        "binarization_score", run_metrics.get("binarization_score")
+    )
     quality_flags: Dict[str, Any] = {
         "grayness": grayness,
-        "binarization_score": grayness,
+        "binarization_score": binarization_score,
         "grayness_threshold": grayness_threshold,
-        "low_grayness_warning": bool(grayness is not None and grayness < grayness_threshold),
+        "high_grayness_warning": bool(
+            grayness is not None and grayness > grayness_threshold
+        ),
         "checkerboard_detected": None,
         "checkerboard_score": None,
         "num_components": None,
