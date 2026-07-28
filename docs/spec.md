@@ -24,6 +24,9 @@ Last updated: 2026-07-27
   explanation, and projection-transition defects. All were repaired with local
   regressions. The exact former numerical failure completed 60 iterations across
   its beta transition.
+- **History maintenance:** the linear `master` history was restamped across
+  2026-07-09 through 2026-07-27 for repository presentation, with content and
+  commit order preserved.
 - **Presentation:** selected real plots are tracked under `docs/assets/`; raw
   results, `.env`, and user-owned acceptance PDFs remain ignored.
 - **Scope:** learning/portfolio software, not certified engineering software or a
